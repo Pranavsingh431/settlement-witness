@@ -3,7 +3,7 @@
 # The build installs only the locked runtime dependencies, then runs the
 # service as an unprivileged user.
 
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
 
