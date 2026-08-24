@@ -1,0 +1,35 @@
+name: settlement-witness
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: settlement-witness-backend:local
+    environment:
+      SW_APP_ENV: production
+      SW_LOG_LEVEL: INFO
+      SW_API_HOST: 0.0.0.0
+      SW_API_PORT: 8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+    image: settlement-witness-frontend:local
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy

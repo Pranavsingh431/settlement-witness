@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install the locked dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check lint rules
+        run: uv run ruff check --output-format=github .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Run tests
+        run: uv run pytest
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install the locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Check lint rules
+        run: pnpm run lint
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Build the production bundle
+        run: pnpm run build
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Scan the repository with gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Audit the backend dependencies
+        working-directory: backend
+        run: |
+          uv sync --all-groups --frozen
+          uv run --with pip-audit pip-audit
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Audit the frontend dependencies
+        working-directory: frontend
+        run: pnpm audit --audit-level moderate
+
+  containers:
+    name: Container images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          push: false
+          load: true
+          tags: settlement-witness-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          target: runtime
+          push: false
+          load: true
+          tags: settlement-witness-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check that the backend container answers the health endpoint
+        run: |
+          docker run --detach --name backend-check --publish 8000:8000 settlement-witness-backend:ci
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/health; then
+              echo
+              echo "Backend answered on attempt ${attempt}."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend never answered the health endpoint."
+          docker logs backend-check
+          exit 1
+
+      - name: Stop the container
+        if: always()
+        run: docker rm --force backend-check || true
