@@ -1,3 +1,10 @@
+# Weekly dependency updates.
+#
+# Some versions in this repository are pinned to match each other, so an update
+# to one of them alone would break the build rather than improve it. Those are
+# ignored here, with the reason next to each one. Everything else is free to
+# move, and the pipeline decides whether it may.
+
 version: 2
 
 updates:
@@ -16,6 +23,12 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(frontend deps)"
+    ignore:
+      # The Node type definitions have to match the Node version the project
+      # runs, which is pinned in frontend/.nvmrc. A major bump on its own would
+      # describe APIs that are not there.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -26,11 +39,29 @@ updates:
       prefix: "chore(actions)"
 
   - package-ecosystem: docker
-    directories:
-      - /backend
-      - /frontend
+    directory: /backend
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(docker)"
+    ignore:
+      # The image has to match backend/.python-version and the requires-python
+      # range in backend/pyproject.toml. Moving the Python line is a decision
+      # that needs those files changed together, not an automated bump.
+      - dependency-name: "python"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"
+    ignore:
+      # The build image has to match frontend/.nvmrc, so that the bundle is
+      # built on the Node version the project supports.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]

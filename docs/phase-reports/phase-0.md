@@ -1,8 +1,7 @@
 # Phase 0: Repository foundation
 
 - Date: 2026-08-24
-- Exit gate: passed locally. See "Exit gate status" for the exact wording and the one item that
-  could only be verified after the first push.
+- Exit gate: passed, locally and on the pipeline. See "Exit gate status".
 
 ## Objective
 
@@ -55,7 +54,7 @@ directly rather than assumed. See "Commands run and observed results".
 
 - Node range `^20.19.0 || ^22.13.0 || >=24`, pinned in `frontend/.nvmrc` and declared in
   `engines`.
-- Vite 8, React 19, TypeScript 5.9 in strict mode with `noUncheckedIndexedAccess` and
+- Vite 8, React 19, TypeScript 6 in strict mode with `noUncheckedIndexedAccess` and
   `exactOptionalPropertyTypes`.
 - ESLint 10 flat config with the type aware strict and stylistic rule sets, the React hooks rules
   and the React refresh rule. `--max-warnings 0`, so a warning fails the build.
@@ -63,8 +62,10 @@ directly rather than assumed. See "Commands run and observed results".
 - Vitest 4 with jsdom, React Testing Library and a 90 percent coverage gate.
 - `frontend/pnpm-lock.yaml` is committed and every install uses `--frozen-lockfile`.
 
-TypeScript is held at the 5.9 line on purpose. `typescript-eslint` 8.67 declares a peer range of
-`>=4.8.4 <6.1.0`, so the TypeScript 7 line cannot be used yet without losing type aware linting.
+TypeScript is held below the 7 line on purpose. `typescript-eslint` 8.67 declares a peer range of
+`>=4.8.4 <6.1.0`, so TypeScript 7 cannot be used yet without giving up type aware linting. 6.0.3
+is the newest version inside that range, and it was checked against format, lint, typecheck, test
+and build before being adopted.
 
 ### Make targets
 
@@ -85,8 +86,23 @@ so it works on the GNU Make 3.81 that ships with macOS.
 4. Dependency audit with pip-audit and `pnpm audit`.
 5. Container build for both images, then a live health check against the running backend image.
 
+Every action is pinned to an exact version rather than a floating major tag. A floating tag can
+move underneath the pipeline, which makes a run non-reproducible, and not every action publishes
+one. `astral-sh/setup-uv` has no `v10` tag at all, which is how the first pipeline run failed.
+
 `.github/dependabot.yml` opens weekly update pull requests for uv, npm, GitHub Actions and the
-container base images.
+container base images. Three version pins are excluded, because they have to match a version that
+is pinned elsewhere, and bumping one alone would break the build rather than improve it:
+
+| Excluded | Reason |
+| --- | --- |
+| `python` image, major and minor | Has to match `backend/.python-version` and the `requires-python` range |
+| `node` image, major | Has to match `frontend/.nvmrc`, so the bundle is built on a supported Node |
+| `@types/node`, major | Has to match the Node version the project runs |
+
+This was not written from theory. Dependabot's first run opened pull requests to move the Python
+image to 3.14, the Node image to 26 and `@types/node` to 26, each of which contradicts a pin. The
+ignore rules were added in response.
 
 ### Containers
 
@@ -152,12 +168,23 @@ no `.env`, to reproduce what a reviewer gets from `git clone`.
 | `pnpm run test` | 0 | `Tests 2 passed (2)`, coverage 100 percent against the 90 percent gate |
 | `pnpm run build` | 0 | Bundle produced. `index.js` 190.93 kB, 60.23 kB gzipped |
 
+### Pipeline runs
+
+| Run | Result | Detail |
+| --- | --- | --- |
+| First push of the phase 0 commit | Failed | `Backend checks` and `Dependency audit` could not resolve `astral-sh/setup-uv@v10`. The action publishes no floating major tag. |
+| After pinning all seven actions to exact versions | Passed | All five jobs green: backend checks, frontend checks, secret scan, dependency audit, container images |
+
+The container job builds both images on `ubuntu-latest`, starts the backend image and polls
+`/health` until it answers, so the image is verified running rather than only building.
+
 ### Other checks
 
 | Command | Exit | Observed |
 | --- | --- | --- |
 | `make audit` | 0 | `No known vulnerabilities found` from pip-audit and from `pnpm audit` |
 | `docker compose build` | 0 | Both images built |
+| `docker compose build` after the nginx bump to 1.31-alpine | 0 | Rebuilt, then verified running |
 | `docker compose up -d` | 0 | Backend reported `healthy`, then frontend reported `healthy` |
 | `curl http://127.0.0.1:8000/health` | 0 | `{"status":"ok","version":"0.0.0","environment":"local"}` |
 | `curl http://127.0.0.1:5173/` | 0 | HTTP 200, the built `index.html` |
@@ -215,8 +242,8 @@ described as finished is worse than an empty directory.
 8. **The backend exposes only `/health`.** Same reason.
 9. **Coverage gates are set at 90 percent against a tiny codebase.** They are currently easy to
    satisfy. Their value is that they are in place before the code grows.
-10. **Verified on macOS arm64 only, locally.** The pipeline runs on `ubuntu-latest`, so the Linux
-    result comes from the pipeline rather than from this machine.
+10. **Local verification is macOS arm64 only.** The Linux result comes from the pipeline, which is
+    green, rather than from this machine.
 
 ## Known friction for contributors
 
@@ -241,17 +268,18 @@ supported range, and if a supported Node is already installed under Homebrew it 
 | `make ci` passes | Passed | Exit 0 from that same clean copy, all nine checks green |
 | No application functionality required | Met | Only `/health` and a shell page, both present to exercise the toolchain |
 
-The pipeline was pushed with this phase. The gate above is about the local clean clone, which is
-what the gate asks for, and that part is verified. The first pipeline run on `ubuntu-latest` is
-recorded in `docs/phase-reports/phase-0-ci.md` once it completes.
+The gate asks about a clean clone, and that is verified above. The pipeline was also pushed with
+this phase and is green on `main` across all five jobs, so the same checks are confirmed on
+`ubuntu-latest` and not only on macOS.
 
 ## Unresolved decisions
 
 None block phase 1. Two are worth flagging early:
 
-1. **TypeScript 7 is blocked by `typescript-eslint`.** The 8.x line caps TypeScript below 6.1.
-   Revisit when `typescript-eslint` supports it. Keeping type aware linting is worth more than
-   being on the newest compiler.
+1. **TypeScript 7 is blocked by `typescript-eslint`.** The 8.x line caps TypeScript below 6.1,
+   so the project sits at 6.0.3, the newest version inside that range. Revisit when
+   `typescript-eslint` supports the 7 line. Keeping type aware linting is worth more than being on
+   the newest compiler.
 2. **`pnpm audit` and `pip-audit` can fail the pipeline for a reason unrelated to a change.** That
    is the correct behaviour for a security check, but it means a red pipeline is sometimes not the
    contributor's fault. Both were clean at the time of writing. If this becomes noisy, the fix is
