@@ -1,5 +1,11 @@
 name: CI
 
+# Actions are pinned to an exact version rather than a floating major tag.
+# Two reasons. A floating tag can move under the pipeline, which makes a run
+# non-reproducible. And not every action publishes one: astral-sh/setup-uv has
+# no v10 tag at all. Dependabot opens a weekly pull request to move these
+# forward.
+
 on:
   push:
     branches: [main]
@@ -22,10 +28,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -53,15 +59,15 @@ jobs:
         working-directory: frontend
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           package_json_file: frontend/package.json
 
       - name: Install Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.0.0
         with:
           node-version-file: frontend/.nvmrc
           cache: pnpm
@@ -90,12 +96,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the full history
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
       - name: Scan the repository with gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -104,10 +110,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -119,12 +125,12 @@ jobs:
           uv run --with pip-audit pip-audit
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           package_json_file: frontend/package.json
 
       - name: Install Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.0.0
         with:
           node-version-file: frontend/.nvmrc
 
@@ -137,13 +143,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.3.0
 
       - name: Build the backend image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ./backend
           push: false
@@ -153,7 +159,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build the frontend image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ./frontend
           target: runtime
