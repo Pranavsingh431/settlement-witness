@@ -440,7 +440,7 @@ Action SHA pins, each resolved from its tag and then confirmed with `git ls-remo
 
 ### Files changed
 
-13 files changed, 1 added.
+12 files modified and 1 added, 13 in total.
 
 | File | Change |
 | --- | --- |
