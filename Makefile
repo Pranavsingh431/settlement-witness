@@ -2,6 +2,10 @@
 #
 # Run `make` or `make help` to list every target.
 # `make setup` is the only command a fresh clone needs before `make ci`.
+#
+# `make ci` runs the core checks and needs neither Docker nor network access.
+# `make verify` runs those plus the checks that do, which are the dependency
+# audit and the container verification.
 
 .DEFAULT_GOAL := help
 
@@ -15,7 +19,8 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build audit ci clean docker-build docker-up docker-down
+        build audit ci verify verify-containers clean \
+        docker-build docker-up docker-down
 
 help: ## List the available targets
 	@echo "Settlement Witness"
@@ -74,11 +79,16 @@ typecheck-frontend: ## Type check the frontend with the TypeScript compiler
 build: ## Produce the frontend production bundle
 	cd $(FRONTEND) && $(PNPM) run build
 
-audit: ## Report known vulnerabilities in the locked dependencies
+audit: ## Report known vulnerabilities in the locked dependencies (needs network)
 	cd $(BACKEND) && $(UV) run --with pip-audit pip-audit
 	cd $(FRONTEND) && $(PNPM) audit --audit-level moderate
 
-ci: lint typecheck test build ## Run the same checks the pipeline runs
+ci: lint typecheck test build ## Run the core local checks that CI mirrors
+
+verify: ci audit verify-containers ## Run the core checks plus the audit and the container checks
+
+verify-containers: ## Build the images, start them, and check they serve and run as non-root (needs Docker)
+	@bash scripts/verify-containers.sh
 
 clean: ## Remove build output, caches and coverage reports
 	rm -rf $(FRONTEND)/dist $(FRONTEND)/coverage $(FRONTEND)/node_modules/.tmp

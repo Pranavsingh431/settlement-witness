@@ -22,17 +22,22 @@ verified.
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Git | any recent version | |
-| Node.js | `^20.19.0 \|\| ^22.13.0 \|\| >=24` | The pinned version is in `frontend/.nvmrc`. |
+| Node.js | `>=24 <25` | The Node 24 LTS line only. The version is named in `frontend/.nvmrc`. |
 | uv | 0.12 or newer | `make setup` installs it with Homebrew or pipx if it is missing. |
 | pnpm | 10 or newer | `make setup` enables it through corepack if it is missing. |
-| Docker | optional | Only needed for `make docker-up`. |
+| Docker | optional | Needed for `make verify` and `make docker-up`, not for `make ci`. |
 
 Python itself is not a prerequisite. uv downloads and manages the Python version named in
 `backend/.python-version`.
 
-The Node range is not a preference. Some locked frontend dependencies declare it in their own
-`engines` field, and pnpm stops the install rather than producing a broken tree. If your default
-Node is outside the range, `make setup` says so and prints the fix.
+The project supports the Node 24 LTS line and nothing else. Node 26 and any other line are
+rejected on purpose. One supported line means the version you run, the version the container
+builds on and the version CI uses are always the same, so a problem cannot appear on one of them
+and hide on the others. The same range is written in `frontend/.nvmrc`, in the `engines` field of
+`frontend/package.json`, and in the check inside `scripts/setup.sh`.
+
+If your Node is outside that line, `make setup` stops, names the supported range, and prints the
+exact fix.
 
 ## Quick start
 
@@ -69,8 +74,10 @@ Run `make help` to see this list in your terminal.
 | `make format` | Rewrite files into the project style |
 | `make typecheck` | Type check the backend and the frontend |
 | `make build` | Produce the frontend production bundle |
-| `make ci` | Run the same checks the pipeline runs |
-| `make audit` | Report known vulnerabilities in the locked dependencies |
+| `make ci` | Run the core local checks that CI mirrors. No Docker, no network. |
+| `make verify` | Run the core checks plus the dependency audit and the container checks |
+| `make audit` | Report known vulnerabilities in the locked dependencies. Needs network. |
+| `make verify-containers` | Build the images, start them, and check they serve and run as non-root. Needs Docker. |
 | `make clean` | Remove build output, caches and coverage reports |
 | `make docker-up` | Build and start both services in containers |
 | `make docker-down` | Stop the containers and remove their volumes |
@@ -118,7 +125,20 @@ make docker-up
 ```
 
 This builds both images and starts them. The backend listens on port 8000 and the frontend is
-served by nginx on port 5173. Both images run as an unprivileged user and carry a health check.
+reachable on port 5173, the same addresses `make dev` uses.
+
+Neither container runs as root. The backend runs as UID 999, from a system user created in its
+Dockerfile. The frontend runs as UID 101, using the unprivileged nginx image rather than the
+standard one. That distinction matters: the standard nginx image starts its master process as
+root and drops only the workers, so a root process stays in the container. The unprivileged image
+runs everything as UID 101, and because a process without root cannot bind a port below 1024, the
+server listens on 8080 inside the container. Compose maps host port 5173 onto it, so nothing
+changes for you.
+
+`make verify-containers` checks all of this rather than assuming it. It builds the images, starts
+them, confirms both answer on their published ports, confirms the single page fallback works, and
+reads the UID inside each container to confirm it is not 0.
+
 The container images are production style, so they do not reload on file changes. Use `make dev`
 for that.
 
@@ -133,8 +153,19 @@ Every push to `main` and every pull request runs five jobs:
 4. Dependency audit for both the backend and the frontend lockfiles.
 5. Container build for both images, followed by a live health check against the backend image.
 
-`make ci` runs jobs 1 and 2 locally. Jobs 3, 4 and 5 need network access or Docker, so they are
-kept out of the default local target. Run `make audit` and `make docker-up` when you want them.
+`make ci` runs the core checks from jobs 1 and 2. It needs neither Docker nor network access,
+which is what keeps it usable as the ordinary command you run before pushing.
+
+`make verify` is the wider local pass. It runs `make ci`, then the dependency audit from job 4,
+then the container build and health checks from job 5. Job 3, the secret scan, has no local
+equivalent, because it scans the pushed history.
+
+Every action in the workflow is pinned to a full commit SHA, with the release named in a trailing
+comment. A git tag is a mutable reference. Whoever controls an action repository can move it to
+point at different code, and the pipeline would pick that up with nothing in this repository
+changing. A commit SHA names the exact tree that was reviewed. Dependabot reads the trailing
+comment, bumps the SHA and the comment together, and opens a weekly pull request, so the pins stay
+current.
 
 ## Money and correctness conventions
 

@@ -11,24 +11,25 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-# The supported range matches the "engines.node" field in frontend/package.json.
-# It is not a preference. Some locked dependencies refuse to install on other
-# versions, so pnpm stops the install rather than producing a broken tree.
-readonly SUPPORTED_NODE="^20.19.0 || ^22.13.0 || >=24"
+# The supported range matches the "engines.node" field in frontend/package.json
+# and the line named in frontend/.nvmrc. The project standardises on the Node 24
+# LTS line and supports nothing else, so that the version a contributor runs, the
+# version the container builds on and the version CI uses are always the same.
+# Newer lines such as Node 26 are rejected on purpose, not by oversight.
+readonly SUPPORTED_NODE=">=24 <25"
 
 info() { printf '\033[0;34m==>\033[0m %s\n' "$1"; }
 fail() { printf '\033[0;31merror:\033[0m %s\n' "$1" >&2; exit 1; }
 
 suggest_supported_node() {
   local candidate
-  for candidate in /opt/homebrew/opt/node@24/bin /usr/local/opt/node@24/bin \
-                   /opt/homebrew/opt/node@22/bin /usr/local/opt/node@22/bin; do
+  for candidate in /opt/homebrew/opt/node@24/bin /usr/local/opt/node@24/bin; do
     if [ -x "${candidate}/node" ]; then
       printf '  A supported Node is already installed here:\n    export PATH="%s:$PATH"\n' "${candidate}" >&2
       return
     fi
   done
-  printf '  Install one, for example with "brew install node@24", or use a version manager such as nvm or fnm with frontend/.nvmrc.\n' >&2
+  printf '  Install the Node 24 LTS line, for example with "brew install node@24", or use a version manager such as nvm or fnm with frontend/.nvmrc.\n' >&2
 }
 
 require_node() {
@@ -38,7 +39,7 @@ require_node() {
     exit 1
   fi
 
-  if ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 13) || a >= 24 ? 0 : 1);'; then
+  if ! node -e 'const major = Number(process.versions.node.split(".")[0]); process.exit(major === 24 ? 0 : 1);'; then
     printf '\033[0;31merror:\033[0m Node %s is not supported. This repository needs Node %s.\n' "$(node --version)" "${SUPPORTED_NODE}" >&2
     suggest_supported_node
     exit 1

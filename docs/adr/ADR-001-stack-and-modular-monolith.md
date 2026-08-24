@@ -96,6 +96,12 @@ dependencies instead of hiding them.
 Both lockfiles are committed and every install uses the frozen lockfile, including in continuous
 integration and in the container builds. Reproducibility is the point.
 
+GitHub Actions are pinned the same way, to a full commit SHA with the release named in a trailing
+comment. A tag is a mutable reference: whoever controls the action repository can move it to point
+at different code, and the pipeline would run that code with nothing in this repository changing.
+A commit SHA names the exact tree that was reviewed. Dependabot reads the trailing comment and
+bumps the SHA and the comment together, so the pins do not go stale.
+
 ### AI: a provider-neutral interface with a deterministic fake for tests
 
 Model calls go through one internal interface. One real provider is configured. A deterministic
@@ -110,9 +116,26 @@ until an evaluation shows a task where routing between providers pays for itself
 
 ### Local execution: a Makefile plus Docker
 
-The Makefile is the one place that records how to run anything, so `make help` is the entry point
-and `make ci` reproduces the pipeline. Docker gives a runnable image and proves the service starts
-outside a developer machine. Docker is not required for daily work.
+The Makefile is the one place that records how to run anything, so `make help` is the entry point.
+
+Local checking is split in two, because one command cannot be both the habitual check and the
+complete one. `make ci` runs the core checks: format, lint, types, tests and the frontend build.
+It needs neither Docker nor network access, so there is no reason not to run it before every push.
+`make verify` runs those, then the dependency audit, then the container build and health checks.
+It needs Docker and network access, so it is the command for a change that touches a Dockerfile, a
+dependency or the compose file. Neither one claims to run the whole pipeline: the secret scan has
+no local equivalent, because it scans the pushed history.
+
+Docker gives a runnable image and proves the service starts outside a developer machine. Docker is
+not required for daily work.
+
+Both images run as a non-root user, and that is checked rather than asserted. The backend creates
+a system user in its Dockerfile. The frontend uses the unprivileged nginx image rather than the
+standard one, because the standard image starts its master process as root and drops only the
+worker processes, which leaves a root process inside the container. The unprivileged image runs
+everything as UID 101 and therefore listens on 8080, since a process without root cannot bind a
+port below 1024. Compose maps the host port onto it, so the published address is unchanged.
+`make verify-containers` reads the UID inside each running container and fails if it is 0.
 
 ### Money is always an integer in minor units
 
@@ -142,9 +165,12 @@ Costs and risks:
   steps.
 - SQLite will not survive a genuinely concurrent multi-writer workload. That workload is not in
   scope. If it ever is, it needs a new ADR.
-- The frozen Node range is narrower than the latest release line, because locked dependencies
-  declare their own supported versions. Contributors on an unsupported Node get a clear failure
-  from `make setup`.
+- The project supports one Node line, the 24 LTS line, and rejects everything else including
+  newer lines such as 26. That is narrower than it has to be. It is chosen so that the version a
+  contributor runs, the version the frontend image builds on and the version CI uses cannot drift
+  apart. Contributors on any other line get a clear failure from `make setup` naming the range and
+  the fix. Moving the line later means changing `frontend/.nvmrc`, the `engines` field, the check
+  in `scripts/setup.sh` and the Dockerfile build stage together.
 
 ## Alternatives considered
 

@@ -15,8 +15,22 @@ time.
 make ci
 ```
 
-This runs the same formatting, lint, type and test checks that the pipeline runs. Fix anything it
-reports. `make format` rewrites files into the project style and applies the safe lint fixes.
+This runs the core checks: formatting, lint rules, types, tests and the frontend build. CI mirrors
+all of them. It needs neither Docker nor network access, so it is the command to run habitually.
+`make format` rewrites files into the project style and applies the safe lint fixes.
+
+When you have touched a Dockerfile, a dependency or the compose file, run the wider pass:
+
+```bash
+make verify
+```
+
+That runs `make ci`, then the dependency audit, then the container checks. The container step
+builds both images, starts them, confirms each answers on its published port, and reads the UID
+inside each one to confirm neither runs as root. It needs Docker running and network access.
+
+The one pipeline job with no local equivalent is the secret scan, because it scans the pushed
+history.
 
 ## How the work is organised
 
@@ -79,6 +93,16 @@ not use.
 
 Both lockfiles are committed and installs use the frozen lockfile. If you change a dependency,
 commit the updated lockfile in the same change.
+
+GitHub Actions are pinned the same way, to a full commit SHA with the release in a trailing
+comment. Do not replace a SHA with a tag. A tag can be moved to point at different code, and the
+pipeline would run that code with nothing here changing. Dependabot updates the SHA and the
+comment together.
+
+The project supports the Node 24 LTS line only. That range is written in `frontend/.nvmrc`, in the
+`engines` field of `frontend/package.json`, and in the check inside `scripts/setup.sh`. Changing
+it means changing all three, plus the build stage of `frontend/Dockerfile`, and recording the
+reason in an ADR.
 
 ## Commits
 

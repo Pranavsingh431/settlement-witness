@@ -30,6 +30,10 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
+  # Actions in the workflow are pinned to a full commit SHA with the release in
+  # a trailing comment. Dependabot understands that form: it bumps the SHA and
+  # rewrites the comment together, so the pins stay current without being
+  # downgraded to a mutable tag.
   - package-ecosystem: github-actions
     directory: /
     schedule:

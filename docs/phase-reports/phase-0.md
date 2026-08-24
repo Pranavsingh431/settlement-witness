@@ -1,7 +1,12 @@
 # Phase 0: Repository foundation
 
 - Date: 2026-08-24
+- Last corrected: 2026-08-24, by the phase 0.1 correction pass
 - Exit gate: passed, locally and on the pipeline. See "Exit gate status".
+
+Phase 0.1 was a correction pass over this foundation. It changed no product behaviour. The body of
+this report describes the state after that pass, and the "Phase 0.1 correction pass" section near
+the end records exactly what was wrong and what was done about it.
 
 ## Objective
 
@@ -52,8 +57,10 @@ directly rather than assumed. See "Commands run and observed results".
 
 ### Frontend toolchain
 
-- Node range `^20.19.0 || ^22.13.0 || >=24`, pinned in `frontend/.nvmrc` and declared in
-  `engines`.
+- Node 24 LTS line only, `>=24 <25`. Written in three places that have to agree:
+  `frontend/.nvmrc`, the `engines` field of `frontend/package.json`, and the check in
+  `scripts/setup.sh`. The frontend image builds on `node:24-bookworm-slim` and CI reads
+  `.nvmrc`, so all four agree.
 - Vite 8, React 19, TypeScript 6 in strict mode with `noUncheckedIndexedAccess` and
   `exactOptionalPropertyTypes`.
 - ESLint 10 flat config with the type aware strict and stylistic rule sets, the React hooks rules
@@ -73,8 +80,17 @@ and build before being adopted.
 added: `help`, `build`, `audit`, `clean`, `docker-build`, `docker-up`, `docker-down`, and a
 `-backend` and `-frontend` variant of each check target.
 
-`make ci` runs lint, typecheck, test and build. The Makefile avoids `.SHELLFLAGS` and `.ONESHELL`,
-so it works on the GNU Make 3.81 that ships with macOS.
+Local checking is split in two. `make ci` runs the core checks, which are lint, typecheck, test
+and build. It needs neither Docker nor network access. `make verify` runs those, then the
+dependency audit, then `make verify-containers`, which builds both images, starts them, checks
+they answer on their published ports, and reads the UID inside each container to confirm neither
+runs as root.
+
+Neither target claims to run the whole pipeline. The secret scan has no local equivalent, because
+it scans the pushed history.
+
+The Makefile avoids `.SHELLFLAGS` and `.ONESHELL`, so it works on the GNU Make 3.81 that ships
+with macOS.
 
 ### Continuous integration
 
@@ -86,9 +102,18 @@ so it works on the GNU Make 3.81 that ships with macOS.
 4. Dependency audit with pip-audit and `pnpm audit`.
 5. Container build for both images, then a live health check against the running backend image.
 
-Every action is pinned to an exact version rather than a floating major tag. A floating tag can
-move underneath the pipeline, which makes a run non-reproducible, and not every action publishes
-one. `astral-sh/setup-uv` has no `v10` tag at all, which is how the first pipeline run failed.
+Every action is pinned to a full 40 character commit SHA, with the release it corresponds to in a
+trailing comment.
+
+A git tag is a mutable reference. Whoever controls the action repository can move it to point at
+different code, and the pipeline would run that code with nothing in this repository changing. A
+commit SHA names the exact tree that was reviewed. Floating major tags have the same problem and
+are also not always published: `astral-sh/setup-uv` has no `v10` tag at all, which is how the
+first pipeline run failed.
+
+Each SHA was resolved from its release tag and then verified a second time with `git ls-remote`
+against the action repository, so the pin is confirmed against the source rather than against one
+API call. Dependabot reads the trailing comment and bumps the SHA and the comment together.
 
 `.github/dependabot.yml` opens weekly update pull requests for uv, npm, GitHub Actions and the
 container base images. Three version pins are excluded, because they have to match a version that
@@ -110,7 +135,9 @@ ignore rules were added in response.
   user, carries a health check, and starts through the same `python -m app` entry point the
   developer commands use.
 - `frontend/Dockerfile`: two stages. The build stage produces the bundle. The runtime stage is
-  nginx with only the static files, so no build tooling reaches the running container.
+  the unprivileged nginx image with only the static files, so no build tooling reaches the
+  running container. It runs as UID 101 and listens on 8080, because a process without root
+  cannot bind a port below 1024. Compose maps host port 5173 onto it.
 - `docker-compose.yml` wires the two together, with the frontend waiting for the backend to report
   healthy.
 
@@ -127,7 +154,7 @@ ignore rules were added in response.
 
 ## Files added
 
-57 tracked files.
+58 tracked files, after the phase 0.1 pass added one script.
 
 | Area | Files |
 | --- | --- |
@@ -135,7 +162,7 @@ ignore rules were added in response.
 | Backend | `.dockerignore`, `.python-version`, `Dockerfile`, `pyproject.toml`, `uv.lock`, `app/__init__.py`, `app/__main__.py`, `app/config.py`, `app/main.py`, `tests/__init__.py`, `tests/conftest.py`, `tests/test_config.py`, `tests/test_entrypoint.py`, `tests/test_health.py` |
 | Frontend | `.dockerignore`, `.npmrc`, `.nvmrc`, `.prettierignore`, `.prettierrc.json`, `Dockerfile`, `eslint.config.js`, `index.html`, `nginx.conf`, `package.json`, `pnpm-lock.yaml`, `vite.config.ts`, `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`, `src/App.css`, `src/App.test.tsx`, `src/App.tsx`, `src/main.tsx`, `src/setupTests.ts`, `src/vite-env.d.ts` |
 | CI | `.github/workflows/ci.yml`, `.github/dependabot.yml` |
-| Scripts | `scripts/setup.sh`, `scripts/dev.sh` |
+| Scripts | `scripts/setup.sh`, `scripts/dev.sh`, `scripts/verify-containers.sh` |
 | Docs and data | `docs/adr/README.md`, `docs/adr/ADR-001-stack-and-modular-monolith.md`, `docs/phase-reports/README.md`, `docs/phase-reports/phase-0.md`, `benchmark/README.md`, `data/README.md`, `data/fixtures/.gitkeep`, `data/generated/.gitkeep` |
 
 No files were changed or deleted. This is the first phase.
@@ -248,10 +275,11 @@ described as finished is worse than an empty directory.
 
 ## Known friction for contributors
 
-`make setup` fails on a Node version outside `^20.19.0 || ^22.13.0 || >=24`. This is not a
-preference. Locked frontend dependencies declare that range in their own `engines` field, and
-`engine-strict` is on, so pnpm stops rather than producing a broken tree. This was hit during
-phase 0 on Node 23.10.0.
+`make setup` fails on any Node outside the 24 LTS line. Part of that is forced: locked frontend
+dependencies declare their own supported range and `engine-strict` is on, so pnpm stops rather
+than producing a broken tree. This was hit during phase 0 on Node 23.10.0. Narrowing it further to
+`>=24 <25` is a deliberate choice, so that the version a contributor runs, the version the image
+builds on and the version CI uses cannot drift apart.
 
 The failure was made explicit rather than left as a confusing pnpm error. `make setup` names the
 supported range, and if a supported Node is already installed under Homebrew it prints the exact
@@ -285,6 +313,163 @@ None block phase 1. Two are worth flagging early:
    is the correct behaviour for a security check, but it means a red pipeline is sometimes not the
    contributor's fault. Both were clean at the time of writing. If this becomes noisy, the fix is
    to move the audit to a scheduled run, and that will need an ADR.
+3. **Three Dependabot pull requests are open and should not be merged.** They are expected to
+   close on their own. See "Dependabot pull requests" for the numbers and the reasoning.
+
+## Phase 0.1 correction pass
+
+A review of the phase 0 foundation found five things that were either internally inconsistent or
+stated more confidently than the evidence supported. None of them were product behaviour. All five
+were corrected before phase 1 started, because a foundation that contradicts itself is worse than
+one that is merely incomplete.
+
+### 1. The Node contract disagreed with itself
+
+`frontend/package.json` declared `^20.19.0 || ^22.13.0 || >=24`, `frontend/.nvmrc` named 24, the
+frontend image built on `node:24-bookworm-slim`, and `scripts/setup.sh` accepted anything from
+20.19 upward. So Node 26 was accepted by the setup check and by `engines`, was never used by the
+image or by CI, and was never tested. Node 20 and 22 were the same: allowed on paper, exercised
+nowhere.
+
+Fixed by supporting the Node 24 LTS line only, `>=24 <25`, in all four places. Node 26 is now
+rejected explicitly rather than tolerated silently. The setup failure is still explicit: it names
+the range and prints the exact fix.
+
+### 2. Actions were pinned to tags, not commit SHAs
+
+Phase 0 pinned each action to an exact release tag and described that as making a run
+reproducible. That claim was wrong. A tag is a mutable reference, and whoever controls the action
+repository can move it to point at different code, which the pipeline would then run with nothing
+in this repository changing.
+
+Fixed by pinning all seven actions to a full 40 character commit SHA with the release named in a
+trailing comment. Every SHA was resolved from its tag and then verified again with `git ls-remote`
+against the action repository. The wording in the workflow, the README, `CONTRIBUTING.md` and
+ADR-001 no longer claims that a tag is immutable. Dependabot still updates these, because it
+understands the SHA plus trailing comment form and rewrites both together.
+
+### 3. `make ci` was described as running the whole pipeline
+
+It ran lint, typecheck, test and build, which is four of the five pipeline jobs partially and none
+of the secret scan, the dependency audit or the container checks. The description oversold it.
+
+Fixed by describing `make ci` as the core local checks that CI mirrors, and adding `make verify`
+for the wider pass: core checks, then the dependency audit, then `make verify-containers`.
+`make ci` still requires neither Docker nor network access, which was checked by running it with
+`docker` removed from `PATH`. The secret scan is stated as having no local equivalent, because it
+scans the pushed history.
+
+### 4. The frontend container was not actually non-root
+
+The README claimed both images ran as an unprivileged user. That was true of the backend and false
+of the frontend. The standard `nginx` image starts its master process as root and drops only the
+worker processes, so a root process stayed in the container. Measured before the fix:
+
+```text
+$ docker compose exec frontend id
+uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon),...
+
+$ docker compose exec frontend ps -o user,pid,comm
+USER     PID   COMMAND
+root         1 nginx
+nginx       29 nginx
+```
+
+Fixed by switching the runtime stage to `nginxinc/nginx-unprivileged:1.31-alpine`, which runs
+everything as UID 101. Because a process without root cannot bind a port below 1024, the server
+listens on 8080 inside the container, `EXPOSE` and the health check follow, and compose maps host
+port 5173 onto it. The published address is unchanged.
+
+The claim is now tested rather than asserted. `make verify-containers` reads the UID inside each
+running container and fails if it is 0.
+
+### 5. Stale Dependabot pull requests
+
+Reported rather than closed, because closing them is a change on GitHub rather than in this
+repository. See "Dependabot pull requests" below.
+
+### Verification of the correction pass
+
+Host: macOS on arm64, GNU Make 3.81, uv 0.12.5, Node 24.19.0, pnpm 10.15.0, Docker 28.0.4.
+
+| Command | Exit | Observed |
+| --- | --- | --- |
+| `git diff --check` | 0 | No whitespace errors |
+| `make ci` | 0 | All nine core checks passed |
+| `make ci` with `docker` removed from `PATH` | 0 | Confirms the core target does not need Docker |
+| `make verify` | 0 | Core checks, then both audits clean, then every container check passed |
+| `bash scripts/setup.sh` on Node 24.19.0 | 0 | Accepted |
+| `bash scripts/setup.sh` on Node 23.10.0 | 1 | Rejected, naming `>=24 <25` and printing the exact `export PATH` fix |
+| `pnpm install --frozen-lockfile` under the new `engines` | 0 | Lockfile still resolves |
+
+Container checks, measured after the fix:
+
+| Check | Observed |
+| --- | --- |
+| `docker exec settlement-witness-frontend-1 id` | `uid=101(nginx) gid=101(nginx) groups=101(nginx)` |
+| Frontend PID 1 owner | `nginx`, not root |
+| `docker exec settlement-witness-backend-1 id` | `uid=999(app) gid=999(app) groups=999(app)` |
+| Published ports | `backend 0.0.0.0:8000->8000/tcp`, `frontend 0.0.0.0:5173->8080/tcp` |
+| `curl http://127.0.0.1:8000/health` | HTTP 200, `{"status":"ok","version":"0.0.0","environment":"production"}` |
+| `curl http://127.0.0.1:5173/` | HTTP 200 |
+| `curl http://127.0.0.1:5173/an/unknown/client/route` | HTTP 200, so the single page fallback still works |
+
+Action SHA pins, each resolved from its tag and then confirmed with `git ls-remote`:
+
+| Action | Release | Commit SHA |
+| --- | --- | --- |
+| `actions/checkout` | v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `astral-sh/setup-uv` | v10.0.1 | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` |
+| `pnpm/action-setup` | v6.0.10 | `0977fd99725f1db4007ccb2928dbb4e90d06cc86` |
+| `actions/setup-node` | v7.0.0 | `820762786026740c76f36085b0efc47a31fe5020` |
+| `gitleaks/gitleaks-action` | v3.0.0 | `e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e` |
+| `docker/setup-buildx-action` | v4.3.0 | `37fe631027851001ddb9b187196cc803df7f5f0e` |
+| `docker/build-push-action` | v7.3.0 | `53b7df96c91f9c12dcc8a07bcb9ccacbed38856a` |
+
+### Files changed
+
+13 files changed, 1 added.
+
+| File | Change |
+| --- | --- |
+| `frontend/package.json` | `engines.node` narrowed to `>=24 <25` |
+| `scripts/setup.sh` | Node check accepts major 24 only, message and hints updated |
+| `frontend/Dockerfile` | Runtime stage switched to the unprivileged nginx image, `USER 101`, `EXPOSE 8080`, health check on 8080 |
+| `frontend/nginx.conf` | Listens on 8080 |
+| `docker-compose.yml` | Frontend port mapping is now `5173:8080` |
+| `.github/workflows/ci.yml` | All seven actions pinned to commit SHAs, header rewritten |
+| `.github/dependabot.yml` | Comment recording that the GitHub Actions updates keep the SHA pins current |
+| `Makefile` | `ci` redescribed, `verify` and `verify-containers` added |
+| `scripts/verify-containers.sh` | Added. Builds, starts and checks both containers, including the UID check |
+| `README.md` | Node contract, command table, container section and pipeline section corrected |
+| `CONTRIBUTING.md` | `make ci` against `make verify`, action pin policy, Node line policy |
+| `docs/adr/ADR-001-stack-and-modular-monolith.md` | Node consequence corrected, local check split and container non-root decision recorded, action pin policy recorded |
+| `docs/phase-reports/phase-0.md` | This section, plus inline corrections to statements that the pass made untrue |
+
+`frontend/.nvmrc` was already `24` and did not need to change.
+
+## Dependabot pull requests
+
+Dependabot ran as soon as its config was added and opened five pull requests. Two were resolved in
+phase 0 and Dependabot closed them itself. Three are still open and are listed here rather than
+closed, because closing a pull request is a change on GitHub rather than a change in this
+repository.
+
+| PR | Title | State | Assessment |
+| --- | --- | --- | --- |
+| #1 | Bump python from 3.12-slim-bookworm to 3.14-slim-bookworm in /backend | Open | Do not merge. It contradicts `backend/.python-version` and the `requires-python` range in `backend/pyproject.toml`. Now covered by a docker ignore rule for the `python` image. |
+| #2 | Bump node from 24-bookworm-slim to 26-bookworm-slim in /frontend | Open | Do not merge. It contradicts `frontend/.nvmrc` and the `>=24 <25` range. Now covered by a docker ignore rule for the `node` image. |
+| #3 | Bump nginx from 1.27-alpine to 1.31-alpine in /frontend | Open | Obsolete. The runtime image is no longer `nginx` at all. It is `nginxinc/nginx-unprivileged:1.31-alpine`, so the dependency this pull request targets is not in the repository any more. |
+| #4 | Bump @types/node from 24.13.3 to 26.2.0 in /frontend | Closed by Dependabot | Correctly closed once the npm ignore rule for `@types/node` majors landed. |
+| #5 | Bump typescript from 5.9.3 to 6.0.3 in /frontend | Closed by Dependabot | Correctly closed once 6.0.3 was adopted directly. |
+
+#4 closing on its own shows the ignore rules take effect. #1 and #2 are expected to close the same
+way on the next docker ecosystem run. #3 will close once Dependabot notices the base image
+changed. If any of them is still open after the next weekly run, close it by hand. None of them
+should be merged.
+
+No dependency was upgraded during this pass. The only version change was the frontend runtime base
+image, and that was a consequence of the non-root fix rather than an upgrade for its own sake.
 
 ## Next phase
 
