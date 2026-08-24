@@ -3,7 +3,7 @@
 # The first stage builds the production bundle. The second stage serves the
 # static files with nginx, so no build tooling reaches the running container.
 
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 ENV PNPM_HOME=/pnpm \
     PATH="/pnpm:${PATH}" \
