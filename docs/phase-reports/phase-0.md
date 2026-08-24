@@ -204,6 +204,7 @@ is exactly what a reviewer gets.
 | First push of the phase 0 commit | Failed | `Backend checks` and `Dependency audit` could not resolve `astral-sh/setup-uv@v10`. The action publishes no floating major tag. |
 | After pinning all seven actions to exact versions | Passed | All five jobs green: backend checks, frontend checks, secret scan, dependency audit, container images |
 | After the phase 0.1 pass repinned all seven actions to commit SHAs | Passed | All five jobs green again, so the SHA pins resolve and run |
+| After the phase 0.2 pass extended the container job to both images | Passed | All five jobs green. The container job now reports five explicit checks instead of one. |
 
 The container job builds both images on `ubuntu-latest`, then starts both and checks them, so an
 image is verified running rather than only building. Phase 0.2 extended this to the frontend. See
@@ -555,6 +556,30 @@ step was run again:
 | Message | `failed: frontend index never returned 200 from http://127.0.0.1:8080/. Last status was '000'.` |
 | Logs | Last 50 lines of `frontend-check` printed |
 | Wall time | 1 minute 1 second, matching the 30 attempt budget at 2 second intervals |
+
+Then confirmed on the real pipeline, on `ubuntu-latest`:
+
+```text
+NAMES            STATUS                                     PORTS
+frontend-check   Up Less than a second (health: starting)   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+backend-check    Up Less than a second (health: starting)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+
+ok: backend health returned 200 from http://127.0.0.1:8000/health on attempt 2
+ok: frontend index returned 200 from http://127.0.0.1:8080/ on attempt 1
+ok: frontend single page fallback returned 200 from http://127.0.0.1:8080/an/unknown/client/route on attempt 1
+ok: backend-check runs as UID 999, which is not root
+ok: frontend-check runs as UID 101, which is not root
+Both container images start, serve and run unprivileged.
+```
+
+Step outcomes for that job, which show the conditional steps behaved:
+
+| Step | Outcome |
+| --- | --- |
+| Start both containers | success |
+| Check that both containers serve and run unprivileged | success |
+| Collect container diagnostics | skipped, correct because it is `if: failure()` |
+| Remove both containers | success |
 
 Cleanup, checked in three states:
 
