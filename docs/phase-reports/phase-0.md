@@ -127,7 +127,7 @@ ignore rules were added in response.
 
 ## Files added
 
-56 tracked files.
+57 tracked files.
 
 | Area | Files |
 | --- | --- |
@@ -144,10 +144,11 @@ No files were changed or deleted. This is the first phase.
 
 Host: macOS on arm64, GNU Make 3.81, uv 0.12.5, Node 24.19.0, pnpm 10.15.0, Docker 28.0.4.
 
-### Clean copy rehearsal
+### Clean clone verification
 
-The 56 tracked files were copied into an empty directory, with no `.venv`, no `node_modules` and
-no `.env`, to reproduce what a reviewer gets from `git clone`.
+Run against a real `git clone` of the pushed repository into an empty directory, not against the
+working tree. The clone had 57 tracked files, no `.venv`, no `node_modules` and no `.env`, which
+is exactly what a reviewer gets.
 
 | Command | Exit | Observed |
 | --- | --- | --- |
@@ -264,8 +265,8 @@ supported range, and if a supported Node is already installed under Homebrew it 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
 | One documented setup command | Passed | `make setup`, documented in the README quick start |
-| Succeeds from a clean clone | Passed | Rehearsed on a copy of the 56 tracked files with no `.venv`, no `node_modules` and no `.env`. Exit 0. |
-| `make ci` passes | Passed | Exit 0 from that same clean copy, all nine checks green |
+| Succeeds from a clean clone | Passed | Run against a real `git clone` of the pushed repository, with no `.venv`, no `node_modules` and no `.env`. Exit 0. |
+| `make ci` passes | Passed | Exit 0 from that same clone, all nine checks green. The pipeline is also green on `main`. |
 | No application functionality required | Met | Only `/health` and a shell page, both present to exercise the toolchain |
 
 The gate asks about a clean clone, and that is verified above. The pipeline was also pushed with
