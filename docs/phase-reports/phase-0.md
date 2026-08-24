@@ -100,7 +100,8 @@ with macOS.
 2. Frontend checks: format, lint, typecheck, test, build.
 3. Secret scan with gitleaks over the full history.
 4. Dependency audit with pip-audit and `pnpm audit`.
-5. Container build for both images, then a live health check against the running backend image.
+5. Container checks: both images built, then both started and checked for behaviour and for the
+   user they run as.
 
 Every action is pinned to a full 40 character commit SHA, with the release it corresponds to in a
 trailing comment.
@@ -204,8 +205,9 @@ is exactly what a reviewer gets.
 | After pinning all seven actions to exact versions | Passed | All five jobs green: backend checks, frontend checks, secret scan, dependency audit, container images |
 | After the phase 0.1 pass repinned all seven actions to commit SHAs | Passed | All five jobs green again, so the SHA pins resolve and run |
 
-The container job builds both images on `ubuntu-latest`, starts the backend image and polls
-`/health` until it answers, so the image is verified running rather than only building.
+The container job builds both images on `ubuntu-latest`, then starts both and checks them, so an
+image is verified running rather than only building. Phase 0.2 extended this to the frontend. See
+"Phase 0.2: closing the CI frontend runtime gap".
 
 ### Other checks
 
@@ -482,6 +484,93 @@ should be merged.
 
 No dependency was upgraded during this pass. The only version change was the frontend runtime base
 image, and that was a consequence of the non-root fix rather than an upgrade for its own sake.
+
+## Phase 0.2: closing the CI frontend runtime gap
+
+### The gap
+
+Phase 0.1 changed the frontend runtime to a non-root nginx image listening on 8080. The container
+job in `.github/workflows/ci.yml` built `settlement-witness-frontend:ci` but never started it. It
+started only the backend and polled `/health`.
+
+So the part of the system that phase 0.1 changed was the part CI did not run. A frontend image
+that built but failed to start, failed to serve, or quietly reverted to root would have passed the
+pipeline. The non-root claim was checked locally by `make verify-containers` and nowhere else.
+
+### The fix
+
+Only the container job changed. No application code, no dependency, no Node or Python contract, no
+image choice, no port, and no action pin.
+
+The job now starts both images it just built, from the same `:ci` tags, and checks five things:
+
+| Check | Expected |
+| --- | --- |
+| `GET http://127.0.0.1:8000/health` | HTTP 200 |
+| `GET http://127.0.0.1:8080/` | HTTP 200 |
+| `GET http://127.0.0.1:8080/an/unknown/client/route` | HTTP 200, proving the single page fallback |
+| `id -u` inside `backend-check` | Not 0 |
+| `id -u` inside `frontend-check` | Not 0 |
+
+The frontend is published on host port 8080 rather than 5173, because in CI there is no reason to
+remap it and the container listens on 8080. The 5173 mapping belongs to `docker-compose.yml`,
+which is a developer convenience and is unchanged.
+
+Each HTTP check retries up to 30 times at 2 second intervals, so a slow start is tolerated but a
+broken container fails within about a minute rather than hanging. On failure the check prints
+which check failed, the last status code it saw, and the last 50 lines of that container's logs. A
+separate `if: failure()` step prints the container table and the last 100 lines from both. A final
+`if: always()` step removes both containers, each independently, so one missing container cannot
+leave the other behind.
+
+`docker compose` is deliberately not used here. The job validates the exact tagged images it
+built, which is what the release artefact would be.
+
+### Verification
+
+The workflow was not trusted on inspection. Every `run:` block in the file was extracted and
+checked with `bash -n`, and the container job's blocks were then extracted and executed verbatim
+on a local Docker, against images built with the same tags the job builds.
+
+Happy path, running the literal CI shell:
+
+```text
+NAMES            STATUS                     PORTS
+frontend-check   Up (health: starting)      0.0.0.0:8080->8080/tcp
+backend-check    Up (health: starting)      0.0.0.0:8000->8000/tcp
+
+ok: backend health returned 200 from http://127.0.0.1:8000/health on attempt 2
+ok: frontend index returned 200 from http://127.0.0.1:8080/ on attempt 1
+ok: frontend single page fallback returned 200 from http://127.0.0.1:8080/an/unknown/client/route on attempt 1
+ok: backend-check runs as UID 999, which is not root
+ok: frontend-check runs as UID 101, which is not root
+```
+
+Failure path, checked rather than assumed. The frontend container was stopped and the same check
+step was run again:
+
+| Observed | Result |
+| --- | --- |
+| Exit status | 1 |
+| Message | `failed: frontend index never returned 200 from http://127.0.0.1:8080/. Last status was '000'.` |
+| Logs | Last 50 lines of `frontend-check` printed |
+| Wall time | 1 minute 1 second, matching the 30 attempt budget at 2 second intervals |
+
+Cleanup, checked in three states:
+
+| State | Exit | Result |
+| --- | --- | --- |
+| One container running, one exited | 0 | Both removed |
+| Neither container present | 0 | No error |
+| Diagnostics step with neither container present | 0 | Prints the missing container errors and still succeeds, so it cannot fail the job by itself |
+
+### Files changed
+
+| File | Change |
+| --- | --- |
+| `.github/workflows/ci.yml` | Container job starts and checks both images, adds a failure diagnostics step, and always removes both containers |
+| `README.md` | Pipeline job 5 described accurately |
+| `docs/phase-reports/phase-0.md` | This section, plus the two earlier lines that described job 5 as a backend only check |
 
 ## Next phase
 

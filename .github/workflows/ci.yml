@@ -177,21 +177,86 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Check that the backend container answers the health endpoint
+      # Building an image does not prove it runs. Both images are started from
+      # the exact tags built above, then checked for behaviour and for the user
+      # they run as. The frontend is published on 8080 because its container
+      # listens on 8080, which is what the unprivileged nginx image requires.
+      - name: Start both containers
         run: |
-          docker run --detach --name backend-check --publish 8000:8000 settlement-witness-backend:ci
-          for attempt in $(seq 1 30); do
-            if curl --silent --fail http://127.0.0.1:8000/health; then
-              echo
-              echo "Backend answered on attempt ${attempt}."
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Backend never answered the health endpoint."
-          docker logs backend-check
-          exit 1
+          set -euo pipefail
+          docker run --detach --name backend-check \
+            --publish 8000:8000 \
+            settlement-witness-backend:ci
+          docker run --detach --name frontend-check \
+            --publish 8080:8080 \
+            settlement-witness-frontend:ci
+          docker ps --all --filter name=-check \
+            --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-      - name: Stop the container
+      - name: Check that both containers serve and run unprivileged
+        run: |
+          set -euo pipefail
+
+          readonly ATTEMPTS=30
+
+          check_http() {
+            local name="$1" url="$2" container="$3" attempt status
+            status=""
+            for attempt in $(seq 1 "${ATTEMPTS}"); do
+              status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${url}" || true)"
+              if [ "${status}" = "200" ]; then
+                echo "ok: ${name} returned 200 from ${url} on attempt ${attempt}"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "failed: ${name} never returned 200 from ${url}. Last status was '${status}'."
+            echo "--- ${container} logs ---"
+            docker logs "${container}" 2>&1 | tail -50
+            return 1
+          }
+
+          check_non_root() {
+            local container="$1" uid
+            uid="$(docker exec "${container}" id -u 2>/dev/null | tr -d '[:space:]')"
+            if [ -z "${uid}" ]; then
+              echo "failed: could not read the UID inside ${container}."
+              echo "--- ${container} logs ---"
+              docker logs "${container}" 2>&1 | tail -50
+              return 1
+            fi
+            if [ "${uid}" = "0" ]; then
+              echo "failed: ${container} runs as root. UID is ${uid}, which must not be 0."
+              return 1
+            fi
+            echo "ok: ${container} runs as UID ${uid}, which is not root"
+          }
+
+          check_http "backend health" \
+            "http://127.0.0.1:8000/health" backend-check
+          check_http "frontend index" \
+            "http://127.0.0.1:8080/" frontend-check
+          check_http "frontend single page fallback" \
+            "http://127.0.0.1:8080/an/unknown/client/route" frontend-check
+
+          check_non_root backend-check
+          check_non_root frontend-check
+
+          echo "Both container images start, serve and run unprivileged."
+
+      - name: Collect container diagnostics
+        if: failure()
+        run: |
+          docker ps --all --filter name=-check \
+            --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+          for container in backend-check frontend-check; do
+            echo "--- ${container} logs ---"
+            docker logs "${container}" 2>&1 | tail -100 || true
+          done
+
+      - name: Remove both containers
         if: always()
-        run: docker rm --force backend-check || true
+        run: |
+          for container in backend-check frontend-check; do
+            docker rm --force "${container}" >/dev/null 2>&1 || true
+          done

@@ -151,7 +151,9 @@ Every push to `main` and every pull request runs five jobs:
    production build.
 3. Secret scan across the full history.
 4. Dependency audit for both the backend and the frontend lockfiles.
-5. Container build for both images, followed by a live health check against the backend image.
+5. Container checks: both images are built, then both are started and checked. The backend must
+   answer `/health`, the frontend must serve its index and an unknown client route, and neither
+   container may run as UID 0.
 
 `make ci` runs the core checks from jobs 1 and 2. It needs neither Docker nor network access,
 which is what keeps it usable as the ordinary command you run before pushing.
