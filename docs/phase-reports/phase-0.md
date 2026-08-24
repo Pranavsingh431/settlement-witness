@@ -202,6 +202,7 @@ is exactly what a reviewer gets.
 | --- | --- | --- |
 | First push of the phase 0 commit | Failed | `Backend checks` and `Dependency audit` could not resolve `astral-sh/setup-uv@v10`. The action publishes no floating major tag. |
 | After pinning all seven actions to exact versions | Passed | All five jobs green: backend checks, frontend checks, secret scan, dependency audit, container images |
+| After the phase 0.1 pass repinned all seven actions to commit SHAs | Passed | All five jobs green again, so the SHA pins resolve and run |
 
 The container job builds both images on `ubuntu-latest`, starts the backend image and polls
 `/health` until it answers, so the image is verified running rather than only building.
@@ -401,6 +402,17 @@ Host: macOS on arm64, GNU Make 3.81, uv 0.12.5, Node 24.19.0, pnpm 10.15.0, Dock
 | `bash scripts/setup.sh` on Node 24.19.0 | 0 | Accepted |
 | `bash scripts/setup.sh` on Node 23.10.0 | 1 | Rejected, naming `>=24 <25` and printing the exact `export PATH` fix |
 | `pnpm install --frozen-lockfile` under the new `engines` | 0 | Lockfile still resolves |
+
+Repeated against a fresh `git clone` of the pushed repository, with no `.venv`, no `node_modules`
+and no `.env`:
+
+| Command | Exit | Observed |
+| --- | --- | --- |
+| `make setup` | 0 | Toolchain checked, both locked dependency sets installed, `.env` created |
+| `make ci` | 0 | All nine core checks passed |
+| `make verify` | 0 | Core checks, both audits clean, every container check passed including both UID checks |
+
+The pipeline is green on `main` for the same commit, across all five jobs.
 
 Container checks, measured after the fix:
 
