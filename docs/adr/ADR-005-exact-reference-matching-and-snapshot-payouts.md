@@ -75,7 +75,8 @@ describe a decision as having been reached for reasons that had nothing to do
 with it, and nothing in the record would contradict it.
 
 This is a breaking contract change, so the domain version goes to 3.0.0 and the
-schema to `docs/schema/v3/`.
+schema directory follows it. ADR-006 later took the contract to 4.0.0, and the
+published schema now lives at `docs/schema/v4/`.
 
 ### 4. A decision's created-at is the snapshot time
 

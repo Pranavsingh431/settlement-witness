@@ -9,36 +9,14 @@
       "pattern": "^\\S(.*\\S)?$",
       "type": "string"
     },
-    "DecisionStatus": {
-      "description": "The four states a decision may end in. There is no fifth.",
-      "enum": [
-        "RESOLVED",
-        "EXCEPTION",
-        "PENDING",
-        "INSUFFICIENT_EVIDENCE"
-      ],
-      "title": "DecisionStatus",
-      "type": "string"
-    },
     "DomainSchemaVersion": {
-      "const": "3.0.0",
+      "const": "4.0.0",
       "type": "string"
     },
     "EventId": {
       "maxLength": 200,
       "minLength": 1,
       "pattern": "^\\S(.*\\S)?$",
-      "type": "string"
-    },
-    "EvidenceOutcome": {
-      "description": "The result of resolving one citation against the available facts.",
-      "enum": [
-        "VERIFIED",
-        "FACT_NOT_FOUND",
-        "SOURCE_SYSTEM_MISMATCH",
-        "PAYLOAD_HASH_MISMATCH"
-      ],
-      "title": "EvidenceOutcome",
       "type": "string"
     },
     "EvidenceRef": {
@@ -61,35 +39,6 @@
         "payload_hash"
       ],
       "title": "EvidenceRef",
-      "type": "object"
-    },
-    "EvidenceVerification": {
-      "additionalProperties": false,
-      "description": "The recorded result of resolving one citation.\n\nA decision carries one of these per evidence reference. Together they are the\ncertificate that the citations were checked, rather than an assurance that\nthey were.",
-      "properties": {
-        "outcome": {
-          "$ref": "#/$defs/EvidenceOutcome"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ReasonCode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_record_id": {
-          "$ref": "#/$defs/SourceRecordId"
-        }
-      },
-      "required": [
-        "source_record_id",
-        "outcome"
-      ],
-      "title": "EvidenceVerification",
       "type": "object"
     },
     "ExceptionCode": {
@@ -122,7 +71,8 @@
         "INV-005",
         "INV-006",
         "INV-007",
-        "INV-008"
+        "INV-008",
+        "INV-009"
       ],
       "title": "InvariantId",
       "type": "string"
@@ -200,6 +150,7 @@
         "NET_FORMULA_MISMATCH",
         "PAYOUT_TOTAL_MISMATCH",
         "RETURNS_EXCEED_CAPTURE",
+        "SETTLEMENT_GROSS_DOES_NOT_MATCH_CAPTURE",
         "CURRENCY_NOT_UNIFORM",
         "PAYLOAD_HASH_CONFLICT",
         "SOURCE_FACT_REWRITE_ATTEMPTED",
@@ -249,7 +200,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "One verified decision about one settlement line.\n\nThe subject is a single settlement line. The evidence and linked events may\nbe many, because a line's correctness can depend on a capture, later refunds,\nthe payout it belongs to and a bank credit, all at once.\n\n``status`` is not a field a caller chooses. It must equal what\n:func:`derive_status` returns for this decision's own backing, and\nconstruction fails otherwise.\n\n``evidence_verification`` is the certificate that the citations were resolved\nagainst real facts. Building this model does not produce it. Only\n:func:`verify_decision` does, because only it is given the facts.",
+  "description": "A decision before its citations have been checked and its status decided.\n\nA candidate is what a caller builds. It is structurally validated, so it\ncannot be incoherent, but it carries neither a status nor reason codes:\nneither is a caller's to supply. Pass it to :func:`verify_decision` with the\navailable facts to get a :class:`ReconciliationDecision`.\n\nException codes are different and are carried across. They are findings a\ncaller made while examining the case, such as noticing a refund dated before\nits capture, and the verifier has no way to rediscover them. Reason codes\nare the verifier's own account of which rule fired, so it derives them.",
   "properties": {
     "created_at": {
       "$ref": "#/$defs/UtcTimestamp"
@@ -263,14 +214,6 @@
         "$ref": "#/$defs/EvidenceRef"
       },
       "title": "Evidence",
-      "type": "array"
-    },
-    "evidence_verification": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/EvidenceVerification"
-      },
-      "title": "Evidence Verification",
       "type": "array"
     },
     "exception_codes": {
@@ -305,19 +248,9 @@
       "title": "Linked Source Record Ids",
       "type": "array"
     },
-    "reason_codes": {
-      "items": {
-        "$ref": "#/$defs/ReasonCode"
-      },
-      "title": "Reason Codes",
-      "type": "array"
-    },
     "schema_version": {
       "$ref": "#/$defs/DomainSchemaVersion",
-      "default": "3.0.0"
-    },
-    "status": {
-      "$ref": "#/$defs/DecisionStatus"
+      "default": "4.0.0"
     },
     "subject_settlement_line_id": {
       "$ref": "#/$defs/SettlementLineId"
@@ -325,12 +258,10 @@
   },
   "required": [
     "decision_id",
-    "status",
     "subject_settlement_line_id",
-    "reason_codes",
     "created_at"
   ],
-  "title": "ReconciliationDecision",
+  "title": "DecisionCandidate",
   "type": "object",
-  "x-domain-contract-version": "3.0.0"
+  "x-domain-contract-version": "4.0.0"
 }

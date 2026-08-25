@@ -10,7 +10,8 @@
         "INV-005",
         "INV-006",
         "INV-007",
-        "INV-008"
+        "INV-008",
+        "INV-009"
       ],
       "title": "InvariantId",
       "type": "string"
@@ -53,5 +54,5 @@
   ],
   "title": "InvariantSpec",
   "type": "object",
-  "x-domain-contract-version": "3.0.0"
+  "x-domain-contract-version": "4.0.0"
 }

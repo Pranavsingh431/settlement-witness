@@ -17,6 +17,7 @@ from app.domain.decisions import (
     verify_decision,
 )
 from app.domain.invariants import InvariantOutcome
+from app.domain.version import DOMAIN_SCHEMA_VERSION
 from app.reconcile_cli import render
 from app.reconciliation.baseline import reconcile_line
 from app.reconciliation.batch import reconcile
@@ -305,7 +306,7 @@ class TestSummaryCounts:
         batch = reconcile(complete_case())
 
         assert batch.baseline_version == "1.0.0"
-        assert batch.domain_schema_version == "3.0.0"
+        assert batch.domain_schema_version == DOMAIN_SCHEMA_VERSION
 
     def test_resolved_count_is_exposed(self) -> None:
         """The number a reader looks for first."""

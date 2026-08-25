@@ -63,6 +63,7 @@ from app.domain.invariants import (
     check_money_compatibility,
     check_payout_total,
     check_returns_within_capture,
+    check_settlement_gross_matches_capture,
     check_settlement_line_net,
 )
 from app.domain.lifecycle import (
@@ -126,6 +127,7 @@ __all__ = [
     "check_money_compatibility",
     "check_payout_total",
     "check_returns_within_capture",
+    "check_settlement_gross_matches_capture",
     "check_settlement_line_net",
     "classify_ingestion",
     "compute_net_minor",

@@ -22,6 +22,7 @@ from app.domain.invariants import (
     check_money_compatibility,
     check_payout_total,
     check_returns_within_capture,
+    check_settlement_gross_matches_capture,
     check_settlement_line_net,
 )
 from app.domain.lifecycle import PaymentEventType
@@ -38,10 +39,10 @@ from tests.domain.conftest import (
 class TestCatalogue:
     """The catalogue is data, so it can be checked like data."""
 
-    def test_all_eight_invariants_are_registered(self) -> None:
-        """INV-001 through INV-008 all exist."""
+    def test_all_nine_invariants_are_registered(self) -> None:
+        """INV-001 through INV-009 all exist."""
         assert {invariant_id.value for invariant_id in INVARIANT_CATALOGUE} == {
-            f"INV-00{number}" for number in range(1, 9)
+            f"INV-00{number}" for number in range(1, 10)
         }
 
     def test_every_entry_is_keyed_by_its_own_id(self) -> None:
@@ -344,3 +345,129 @@ class TestInv008AppendOnly:
         """This invariant only speaks about one record ID at a time."""
         result = check_append_only(make_fact(), make_fact(source_record_id="rec-2"))
         assert result.outcome is InvariantOutcome.NOT_APPLICABLE
+
+
+class TestInv009SettlementGrossMatchesCapture:
+    """INV-009: a settled gross equals the capture it settles.
+
+    Without this an unexplained monetary difference could resolve. INV-002 only
+    checks that a line is internally consistent and INV-003 only checks that a
+    batch adds up, so a line settling 80000 against a capture of 100000 passes
+    both and the 20000 difference appears nowhere.
+    """
+
+    def test_equal_amounts_in_one_currency_pass(self) -> None:
+        """The supported shape, agreeing."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(), [make_event(amount=make_money(10_000))]
+        )
+        assert result.outcome is InvariantOutcome.PASSED
+
+    def test_a_different_amount_fails(self) -> None:
+        """The defect this invariant exists to catch."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(breakdown=make_breakdown(gross_minor=8_000)),
+            [make_event(amount=make_money(10_000))],
+        )
+        assert result.outcome is InvariantOutcome.FAILED
+        assert result.reason_code is ReasonCode.SETTLEMENT_GROSS_DOES_NOT_MATCH_CAPTURE
+
+    def test_the_failure_reports_both_amounts(self) -> None:
+        """A person should not have to go and find the capture to see the gap."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(breakdown=make_breakdown(gross_minor=8_000)),
+            [make_event(amount=make_money(10_000))],
+        )
+        assert result.expected_minor == 10_000
+        assert result.observed_minor == 8_000
+
+    def test_a_settled_gross_above_the_capture_also_fails(self) -> None:
+        """The check is equality, not a ceiling."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(breakdown=make_breakdown(gross_minor=12_000)),
+            [make_event(amount=make_money(10_000))],
+        )
+        assert result.outcome is InvariantOutcome.FAILED
+        assert result.expected_minor == 10_000
+        assert result.observed_minor == 12_000
+
+    def test_no_capture_is_insufficient_input(self) -> None:
+        """Nothing to compare against, so nothing can be said."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(),
+            [make_event(event_type=PaymentEventType.REFUND, amount=make_money(1_000))],
+        )
+        assert result.outcome is InvariantOutcome.INSUFFICIENT_INPUT
+
+    def test_no_events_at_all_is_insufficient_input(self) -> None:
+        """Same reason."""
+        result = check_settlement_gross_matches_capture(make_settlement_line(), [])
+        assert result.outcome is InvariantOutcome.INSUFFICIENT_INPUT
+
+    def test_two_captures_are_not_applicable(self) -> None:
+        """The equality stops describing the case once there is a choice to make.
+
+        That shape carries UNSUPPORTED_STATE from the baseline, so nothing slips
+        through by being not applicable here.
+        """
+        events = [
+            make_event(amount=make_money(10_000)),
+            make_event(event_id="evt-2", amount=make_money(10_000)),
+        ]
+        result = check_settlement_gross_matches_capture(make_settlement_line(), events)
+        assert result.outcome is InvariantOutcome.NOT_APPLICABLE
+
+    @pytest.mark.parametrize(
+        "returning",
+        [PaymentEventType.REFUND, PaymentEventType.REVERSAL, PaymentEventType.CHARGEBACK],
+    )
+    def test_any_return_makes_it_not_applicable(self, returning: PaymentEventType) -> None:
+        """Once money has gone back the relationship is no longer a plain equality."""
+        events = [
+            make_event(amount=make_money(10_000)),
+            make_event(event_id="evt-2", event_type=returning, amount=make_money(4_000)),
+        ]
+        result = check_settlement_gross_matches_capture(make_settlement_line(), events)
+        assert result.outcome is InvariantOutcome.NOT_APPLICABLE
+
+    def test_a_full_return_is_also_not_applicable(self) -> None:
+        """Carried by UNSUPPORTED_STATE at the baseline, not by this check."""
+        events = [
+            make_event(amount=make_money(10_000)),
+            make_event(
+                event_id="evt-2",
+                event_type=PaymentEventType.CHARGEBACK,
+                amount=make_money(10_000),
+            ),
+        ]
+        result = check_settlement_gross_matches_capture(make_settlement_line(), events)
+        assert result.outcome is InvariantOutcome.NOT_APPLICABLE
+
+    def test_a_currency_difference_fails_rather_than_converting(self) -> None:
+        """This layer has no exchange rate, and inventing one would turn a real
+        break into a rounding argument."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(breakdown=make_breakdown(currency="USD")),
+            [make_event(amount=make_money(10_000, "INR"))],
+        )
+        assert result.outcome is InvariantOutcome.FAILED
+        assert result.reason_code is ReasonCode.CURRENCY_NOT_UNIFORM
+
+    def test_a_currency_difference_fails_even_when_the_numbers_agree(self) -> None:
+        """10000 paise is not 10000 cents."""
+        result = check_settlement_gross_matches_capture(
+            make_settlement_line(breakdown=make_breakdown(currency="USD", gross_minor=10_000)),
+            [make_event(amount=make_money(10_000, "INR"))],
+        )
+        assert result.outcome is InvariantOutcome.FAILED
+        assert result.reason_code is ReasonCode.CURRENCY_NOT_UNIFORM
+
+    def test_it_is_required_for_resolution(self) -> None:
+        """An unexplained difference must never be resolved."""
+        assert InvariantId.INV_009 in REQUIRED_FOR_RESOLUTION
+        assert INVARIANT_CATALOGUE[InvariantId.INV_009].required_for_resolution
+
+    def test_missing_input_means_insufficient_evidence(self) -> None:
+        """Not a mismatch. Without a capture the comparison cannot be made."""
+        spec = INVARIANT_CATALOGUE[InvariantId.INV_009]
+        assert spec.missing_input_policy is MissingInputPolicy.INSUFFICIENT_EVIDENCE

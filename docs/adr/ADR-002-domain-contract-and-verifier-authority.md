@@ -27,7 +27,8 @@ differently changes the others.
 ### 1. The models are the contract; the documents describe it
 
 `backend/app/domain/` is the executable source of truth. `docs/domain-contract.md`
-explains it and `docs/schema/v2/` is generated from it by `make schema`. Where a
+explains it and the versioned directory under `docs/schema/` is generated from
+it by `make schema`. Where a
 document and the code disagree, the code is right and the document is a bug.
 
 A test regenerates the schema and compares it against the committed files, so a

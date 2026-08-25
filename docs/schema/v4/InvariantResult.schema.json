@@ -1,14 +1,33 @@
 {
   "$defs": {
-    "EvidenceOutcome": {
-      "description": "The result of resolving one citation against the available facts.",
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "InvariantId": {
+      "description": "Stable identifiers for the invariants. These never change meaning.",
       "enum": [
-        "VERIFIED",
-        "FACT_NOT_FOUND",
-        "SOURCE_SYSTEM_MISMATCH",
-        "PAYLOAD_HASH_MISMATCH"
+        "INV-001",
+        "INV-002",
+        "INV-003",
+        "INV-004",
+        "INV-005",
+        "INV-006",
+        "INV-007",
+        "INV-008",
+        "INV-009"
       ],
-      "title": "EvidenceOutcome",
+      "title": "InvariantId",
+      "type": "string"
+    },
+    "InvariantOutcome": {
+      "description": "The four answers a check may give.",
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "NOT_APPLICABLE",
+        "INSUFFICIENT_INPUT"
+      ],
+      "title": "InvariantOutcome",
       "type": "string"
     },
     "ReasonCode": {
@@ -18,6 +37,7 @@
         "NET_FORMULA_MISMATCH",
         "PAYOUT_TOTAL_MISMATCH",
         "RETURNS_EXCEED_CAPTURE",
+        "SETTLEMENT_GROSS_DOES_NOT_MATCH_CAPTURE",
         "CURRENCY_NOT_UNIFORM",
         "PAYLOAD_HASH_CONFLICT",
         "SOURCE_FACT_REWRITE_ATTEMPTED",
@@ -36,20 +56,39 @@
       ],
       "title": "ReasonCode",
       "type": "string"
-    },
-    "SourceRecordId": {
-      "maxLength": 200,
-      "minLength": 1,
-      "pattern": "^\\S(.*\\S)?$",
-      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The recorded result of resolving one citation.\n\nA decision carries one of these per evidence reference. Together they are the\ncertificate that the citations were checked, rather than an assurance that\nthey were.",
+  "description": "The recorded outcome of one check.\n\nA result carries codes and numbers, never prose. Everything on it can be\ncompared exactly by an evaluator.",
   "properties": {
+    "expected_minor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "invariant_id": {
+      "$ref": "#/$defs/InvariantId"
+    },
+    "observed_minor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "outcome": {
-      "$ref": "#/$defs/EvidenceOutcome"
+      "$ref": "#/$defs/InvariantOutcome"
     },
     "reason_code": {
       "anyOf": [
@@ -61,16 +100,13 @@
         }
       ],
       "default": null
-    },
-    "source_record_id": {
-      "$ref": "#/$defs/SourceRecordId"
     }
   },
   "required": [
-    "source_record_id",
+    "invariant_id",
     "outcome"
   ],
-  "title": "EvidenceVerification",
+  "title": "InvariantResult",
   "type": "object",
-  "x-domain-contract-version": "3.0.0"
+  "x-domain-contract-version": "4.0.0"
 }

@@ -1,4 +1,4 @@
-# Evaluation contract, version 2.0.0
+# Evaluation contract, version 4.0.0
 
 This defines how Settlement Witness is graded, and it is written before the
 system that will be graded exists. That order is deliberate. A benchmark
@@ -9,7 +9,7 @@ it, and it must satisfy this document rather than replace it.
 
 ## What is public and what is not
 
-**Public.** The schemas in `docs/schema/v2/`, this contract, the domain contract,
+**Public.** The schemas in `docs/schema/v4/`, this contract, the domain contract,
 and any fixtures in `data/fixtures/`. Public fixtures exist to demonstrate
 format. They are examples of what a record looks like, and they are small enough
 to read. They are not a test set, and a system that scores well on them has

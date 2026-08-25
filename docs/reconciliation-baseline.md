@@ -30,6 +30,7 @@ that the system does not know.
 
 - exactly one capture for the payment;
 - nothing refunded, reversed or charged back;
+- the line's gross equal to that capture, in the same currency;
 - a payout in the snapshot with that exact `payout_id`;
 - every applicable invariant determinate and passing.
 
@@ -48,6 +49,7 @@ Anything else is reported, never guessed at.
 | All of the capture returned | `UNSUPPORTED_STATE` | A returned payment that still settled is a state the contract does not describe |
 | More returned than captured | `AMOUNT_MISMATCH` | INV-004 fails: a real break, not an unsupported shape |
 | Declared net contradicts the formula | `AMOUNT_MISMATCH` | INV-002 fails |
+| Settled gross differs from the capture | `AMOUNT_MISMATCH` | INV-009 fails: an unexplained monetary difference |
 | Line and payment in different currencies | `CURRENCY_MISMATCH` | INV-001 fails |
 | Payout total disagrees with its lines | `AMOUNT_MISMATCH` | INV-003 fails, snapshot relative. See below |
 
@@ -71,9 +73,17 @@ Per settlement line, all four required ones:
 | INV-002 | The line's own breakdown |
 | INV-003 | The payout, against the lines this snapshot has for that exact payout ID |
 | INV-004 | The payment's captures and returns |
+| INV-009 | The line's gross against the single capture it settles |
 
 INV-006 and INV-007 are the verifier's own checks and run through
 `verify_decision`, as they have since Phase 1.1.
+
+INV-009 closes a gap the others leave. A line can be internally consistent
+(INV-002) and belong to a batch that adds up (INV-003) while settling a
+different amount from the one captured, and nothing else would notice. It
+applies only to the shape a direct match supports, one capture and nothing
+returned, and is `NOT_APPLICABLE` otherwise. Those other shapes already carry
+their own non-resolution codes, so nothing passes by being not applicable.
 
 ## Payout grouping is a snapshot, not a completeness claim
 

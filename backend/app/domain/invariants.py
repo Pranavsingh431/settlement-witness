@@ -44,6 +44,7 @@ class InvariantId(StrEnum):
     INV_006 = "INV-006"
     INV_007 = "INV-007"
     INV_008 = "INV-008"
+    INV_009 = "INV-009"
 
 
 class InvariantOutcome(StrEnum):
@@ -141,6 +142,12 @@ _CATALOGUE: dict[InvariantId, InvariantSpec] = {
             title="Source facts are append-only and are never rewritten",
             missing_input_policy=MissingInputPolicy.EXCEPTION,
             required_for_resolution=False,
+        ),
+        InvariantSpec(
+            invariant_id=InvariantId.INV_009,
+            title="Settlement gross equals the capture it settles",
+            missing_input_policy=MissingInputPolicy.INSUFFICIENT_EVIDENCE,
+            required_for_resolution=True,
         ),
     )
 }
@@ -344,3 +351,71 @@ def check_append_only(stored: SourceFact, proposed: SourceFact) -> InvariantResu
             reason_code=ReasonCode.SOURCE_FACT_REWRITE_ATTEMPTED,
         )
     return InvariantResult(invariant_id=InvariantId.INV_008, outcome=InvariantOutcome.PASSED)
+
+
+def check_settlement_gross_matches_capture(
+    line: SettlementLine, events: Sequence[PaymentEvent]
+) -> InvariantResult:
+    """INV-009: a settled gross equals the capture it settles.
+
+    Without this, a line could pass every other check and still settle a
+    different amount from the one taken. INV-002 only checks that a line is
+    internally consistent, and INV-003 only checks that a batch adds up. A line
+    that says it settled 80000 against a capture of 100000 satisfies both, and
+    the 20000 difference is nowhere in the result. That is an unexplained
+    monetary difference, which is the one thing a reconciliation system must
+    never call resolved.
+
+    This applies to the shape the deterministic baseline supports: exactly one
+    capture and nothing returned. Anything else is NOT_APPLICABLE here, because
+    the relationship between a settled gross and a capture stops being a simple
+    equality once money has gone back or once there is more than one capture to
+    settle against. Those shapes already carry their own non-resolution codes,
+    so nothing slips through.
+
+    A currency difference fails rather than converting. This layer has no
+    exchange rate and inventing one would turn a real break into a rounding
+    argument.
+
+    Args:
+        line: The settlement line being checked.
+        events: Every event for the payment the line names.
+
+    Returns:
+        PASSED when the amounts agree, FAILED when they do not,
+        INSUFFICIENT_INPUT when no capture was supplied, and NOT_APPLICABLE for
+        a lifecycle shape this equality does not describe.
+    """
+    captures = [event for event in events if event.event_type is PaymentEventType.CAPTURE]
+    returns = [event for event in events if event.event_type in RETURNING_EVENT_TYPES]
+
+    if not captures:
+        return InvariantResult(
+            invariant_id=InvariantId.INV_009,
+            outcome=InvariantOutcome.INSUFFICIENT_INPUT,
+        )
+
+    if len(captures) > 1 or returns:
+        return InvariantResult(
+            invariant_id=InvariantId.INV_009,
+            outcome=InvariantOutcome.NOT_APPLICABLE,
+        )
+
+    capture = captures[0]
+    if capture.amount.currency != line.breakdown.currency:
+        return InvariantResult(
+            invariant_id=InvariantId.INV_009,
+            outcome=InvariantOutcome.FAILED,
+            reason_code=ReasonCode.CURRENCY_NOT_UNIFORM,
+        )
+
+    if line.breakdown.gross_minor != capture.amount.amount_minor:
+        return InvariantResult(
+            invariant_id=InvariantId.INV_009,
+            outcome=InvariantOutcome.FAILED,
+            reason_code=ReasonCode.SETTLEMENT_GROSS_DOES_NOT_MATCH_CAPTURE,
+            expected_minor=capture.amount.amount_minor,
+            observed_minor=line.breakdown.gross_minor,
+        )
+
+    return InvariantResult(invariant_id=InvariantId.INV_009, outcome=InvariantOutcome.PASSED)

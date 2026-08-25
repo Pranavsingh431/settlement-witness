@@ -28,6 +28,7 @@ from app.domain.invariants import (
     check_money_compatibility,
     check_payout_total,
     check_returns_within_capture,
+    check_settlement_gross_matches_capture,
     check_settlement_line_net,
 )
 from app.domain.lifecycle import (
@@ -51,6 +52,7 @@ EXCEPTION_BY_INVARIANT: dict[InvariantId, ExceptionCode] = {
     InvariantId.INV_002: ExceptionCode.AMOUNT_MISMATCH,
     InvariantId.INV_003: ExceptionCode.AMOUNT_MISMATCH,
     InvariantId.INV_004: ExceptionCode.AMOUNT_MISMATCH,
+    InvariantId.INV_009: ExceptionCode.AMOUNT_MISMATCH,
 }
 
 
@@ -158,8 +160,9 @@ def reconcile_line(line: SettlementLine, snapshot: FactSnapshot) -> DecisionCand
         evidenced = snapshot.lines_for_payout(payout.payout_id)
         results.append(check_payout_total(snapshot_payout(payout, evidenced), evidenced))
 
-    # INV-004 needs the payment's events.
+    # INV-004 and INV-009 need the payment's events.
     results.append(check_returns_within_capture(events))
+    results.append(check_settlement_gross_matches_capture(line, events))
 
     if not events:
         exceptions.append(ExceptionCode.MISSING_PAYMENT)
