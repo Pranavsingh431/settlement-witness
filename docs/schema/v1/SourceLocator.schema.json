@@ -1,0 +1,50 @@
+{
+  "$defs": {
+    "Identifier": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceLocatorKind": {
+      "description": "How to find the observation again in its source.",
+      "enum": [
+        "FILE_ROW",
+        "API_RESOURCE",
+        "WEBHOOK_DELIVERY"
+      ],
+      "title": "SourceLocatorKind",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Where an observation can be found again.\n\nThis exists so that an exception can point a person at the exact row or\nresource that caused it, rather than at a record ID they then have to hunt\nfor.",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/SourceLocatorKind"
+    },
+    "reference": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "row_number": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Row Number"
+    }
+  },
+  "required": [
+    "kind",
+    "reference"
+  ],
+  "title": "SourceLocator",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "PayloadHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceSystem": {
+      "description": "Where an observation came from.",
+      "enum": [
+        "PSP_API",
+        "PSP_WEBHOOK",
+        "BANK_STATEMENT",
+        "MERCHANT_LEDGER"
+      ],
+      "title": "SourceSystem",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A pointer to one source fact that supports a decision.\n\nEvidence is a reference to an observation, never a description of one. This\nmodel has no free text field and forbids extra keys, so a caller cannot\nattach a summary, a justification or model output to a piece of evidence.\nThe payload hash is carried so that a stored decision can be checked against\nthe fact it cited, and a later rewrite of that fact would be detectable.",
+  "properties": {
+    "payload_hash": {
+      "$ref": "#/$defs/PayloadHash"
+    },
+    "source_record_id": {
+      "$ref": "#/$defs/SourceRecordId"
+    },
+    "source_system": {
+      "$ref": "#/$defs/SourceSystem"
+    }
+  },
+  "required": [
+    "source_record_id",
+    "source_system",
+    "payload_hash"
+  ],
+  "title": "EvidenceRef",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

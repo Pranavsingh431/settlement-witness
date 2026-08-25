@@ -8,14 +8,21 @@ decision. Every case ends in one of three states: matched, exception, or insuffi
 
 ## Status
 
-This repository is at phase 0. Phase 0 builds the foundation only. There is no reconciliation
-logic yet. What exists is a working toolchain: dependency locking, formatting, linting, strict
-type checking, tests with coverage gates, container images, and a continuous integration
-pipeline. Later phases add the data model, the reconciliation core, the evaluator, and the user
-interface on top of this base.
+This repository is at phase 1. Two things exist.
 
-See [docs/phase-reports/phase-0.md](docs/phase-reports/phase-0.md) for exactly what was built and
-verified.
+Phase 0 built the foundation: dependency locking, formatting, linting, strict type checking,
+tests with coverage gates, container images, and a continuous integration pipeline.
+
+Phase 1 froze the domain contract. `backend/app/domain/` defines what a fact, an amount, a
+lifecycle event, an invariant, an exception and a decision mean, and enforces those meanings. The
+central rule is enforced there: a decision claiming `RESOLVED` without evidence, or with a failed
+or unevaluated required invariant, cannot be constructed at all.
+
+There is still no ingestion, matching, model call, database or user interface. Those come next,
+and they will be built against the contract rather than alongside it.
+
+See [docs/domain-contract.md](docs/domain-contract.md) for what the contract says, and the
+[phase reports](docs/phase-reports/) for exactly what was built and verified in each phase.
 
 ## Prerequisites
 
@@ -74,6 +81,7 @@ Run `make help` to see this list in your terminal.
 | `make format` | Rewrite files into the project style |
 | `make typecheck` | Type check the backend and the frontend |
 | `make build` | Produce the frontend production bundle |
+| `make schema` | Regenerate the published JSON Schema from the domain models |
 | `make ci` | Run the core local checks that CI mirrors. No Docker, no network. |
 | `make verify` | Run the core checks plus the dependency audit and the container checks |
 | `make audit` | Report known vulnerabilities in the locked dependencies. Needs network. |
@@ -173,14 +181,26 @@ current.
 
 These rules apply from the first line of domain code in later phases:
 
-- All monetary amounts are integers in minor units. Floating point is never used for money.
-- Ingestion is idempotent, because duplicate events are expected.
-- Events carry both an event time and an ingestion time, because they can arrive out of order.
+These are no longer aspirations. Phase 1 turned each one into code, and
+[docs/domain-contract.md](docs/domain-contract.md) explains how.
+
+- All monetary amounts are integers in minor units. Floating point is never used for money, and
+  the published schema contains no `"number"` type anywhere.
+- Ingestion is idempotent, because duplicate events are expected. An identical replay is a no-op;
+  the same identity with a different payload is a conflict.
+- Events carry both an observed time and an occurred time, because they can arrive out of order.
+- Source facts are append-only. A correction is a later fact, never an edit.
 - The controller never edits financial records. Suggested repairs are reviewable work items.
 - Secrets never reach the frontend or the logs.
 
 ## Documentation
 
+- [docs/domain-contract.md](docs/domain-contract.md) explains the domain contract. The models in
+  `backend/app/domain/` are the definition; that page describes them.
+- [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
+  graded. It was written before the system it grades.
+- [docs/schema/v1/](docs/schema/v1/) holds JSON Schema generated from the models by
+  `make schema`. A test fails if it drifts from the code.
 - [docs/adr/](docs/adr/) records the decisions and why they were made.
 - [docs/phase-reports/](docs/phase-reports/) records what each phase built and verified.
 - [CONTRIBUTING.md](CONTRIBUTING.md) explains the development workflow.

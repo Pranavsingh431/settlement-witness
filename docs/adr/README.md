@@ -13,3 +13,4 @@ Rules:
 | Record | Title | Status |
 | --- | --- | --- |
 | [ADR-001](ADR-001-stack-and-modular-monolith.md) | Stack and modular monolith | Accepted |
+| [ADR-002](ADR-002-domain-contract-and-verifier-authority.md) | Domain contract and verifier authority | Accepted |

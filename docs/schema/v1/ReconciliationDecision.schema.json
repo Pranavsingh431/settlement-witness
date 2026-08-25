@@ -1,0 +1,283 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "DecisionId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "DecisionStatus": {
+      "description": "The four states a decision may end in. There is no fifth.",
+      "enum": [
+        "RESOLVED",
+        "EXCEPTION",
+        "PENDING",
+        "INSUFFICIENT_EVIDENCE"
+      ],
+      "title": "DecisionStatus",
+      "type": "string"
+    },
+    "DomainSchemaVersion": {
+      "const": "1.0.0",
+      "type": "string"
+    },
+    "EventId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "description": "A pointer to one source fact that supports a decision.\n\nEvidence is a reference to an observation, never a description of one. This\nmodel has no free text field and forbids extra keys, so a caller cannot\nattach a summary, a justification or model output to a piece of evidence.\nThe payload hash is carried so that a stored decision can be checked against\nthe fact it cited, and a later rewrite of that fact would be detectable.",
+      "properties": {
+        "payload_hash": {
+          "$ref": "#/$defs/PayloadHash"
+        },
+        "source_record_id": {
+          "$ref": "#/$defs/SourceRecordId"
+        },
+        "source_system": {
+          "$ref": "#/$defs/SourceSystem"
+        }
+      },
+      "required": [
+        "source_record_id",
+        "source_system",
+        "payload_hash"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "ExceptionCode": {
+      "description": "Why a settlement line could not simply be resolved.",
+      "enum": [
+        "MISSING_PAYMENT",
+        "MISSING_SETTLEMENT",
+        "AMOUNT_MISMATCH",
+        "FEE_MISMATCH",
+        "CURRENCY_MISMATCH",
+        "DUPLICATE_CONFLICT",
+        "OUT_OF_ORDER_EVENT",
+        "PARTIAL_REFUND",
+        "TIMING_PENDING",
+        "UNMAPPED_REFERENCE",
+        "MALFORMED_RECORD",
+        "UNSUPPORTED_STATE",
+        "INSUFFICIENT_EVIDENCE"
+      ],
+      "title": "ExceptionCode",
+      "type": "string"
+    },
+    "InvariantId": {
+      "description": "Stable identifiers for the invariants. These never change meaning.",
+      "enum": [
+        "INV-001",
+        "INV-002",
+        "INV-003",
+        "INV-004",
+        "INV-005",
+        "INV-006",
+        "INV-007",
+        "INV-008"
+      ],
+      "title": "InvariantId",
+      "type": "string"
+    },
+    "InvariantOutcome": {
+      "description": "The four answers a check may give.",
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "NOT_APPLICABLE",
+        "INSUFFICIENT_INPUT"
+      ],
+      "title": "InvariantOutcome",
+      "type": "string"
+    },
+    "InvariantResult": {
+      "additionalProperties": false,
+      "description": "The recorded outcome of one check.\n\nA result carries codes and numbers, never prose. Everything on it can be\ncompared exactly by an evaluator.",
+      "properties": {
+        "expected_minor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AmountMinor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "invariant_id": {
+          "$ref": "#/$defs/InvariantId"
+        },
+        "observed_minor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AmountMinor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "$ref": "#/$defs/InvariantOutcome"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "invariant_id",
+        "outcome"
+      ],
+      "title": "InvariantResult",
+      "type": "object"
+    },
+    "PayloadHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "ReasonCode": {
+      "description": "The deterministic reason a decision reached its status.\n\nA reason code says which rule fired. It is never a sentence, never\nmodel-generated, and never an explanation of intent.",
+      "enum": [
+        "ALL_REQUIRED_INVARIANTS_PASSED",
+        "NET_FORMULA_MISMATCH",
+        "PAYOUT_TOTAL_MISMATCH",
+        "RETURNS_EXCEED_CAPTURE",
+        "CURRENCY_NOT_UNIFORM",
+        "PAYLOAD_HASH_CONFLICT",
+        "SOURCE_FACT_REWRITE_ATTEMPTED",
+        "EVIDENCE_MISSING",
+        "EVIDENCE_NOT_LINKED",
+        "REQUIRED_INVARIANT_FAILED",
+        "REQUIRED_INVARIANT_NOT_EVALUATED",
+        "REQUIRED_INVARIANT_MISSING_INPUT",
+        "SETTLEMENT_WITHIN_EXPECTED_WINDOW",
+        "NO_APPLICABLE_RETURN_EVENTS"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "SettlementLineId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceSystem": {
+      "description": "Where an observation came from.",
+      "enum": [
+        "PSP_API",
+        "PSP_WEBHOOK",
+        "BANK_STATEMENT",
+        "MERCHANT_LEDGER"
+      ],
+      "title": "SourceSystem",
+      "type": "string"
+    },
+    "UtcTimestamp": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One decision about one settlement line.\n\nThe subject is a single settlement line. The evidence and linked events may\nbe many, because a line's correctness can depend on a capture, later\nrefunds, the payout it belongs to and a bank credit, all at once.",
+  "properties": {
+    "created_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "decision_id": {
+      "$ref": "#/$defs/DecisionId"
+    },
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EvidenceRef"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "exception_codes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExceptionCode"
+      },
+      "title": "Exception Codes",
+      "type": "array"
+    },
+    "invariant_results": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InvariantResult"
+      },
+      "title": "Invariant Results",
+      "type": "array"
+    },
+    "linked_event_ids": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EventId"
+      },
+      "title": "Linked Event Ids",
+      "type": "array"
+    },
+    "linked_source_record_ids": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SourceRecordId"
+      },
+      "title": "Linked Source Record Ids",
+      "type": "array"
+    },
+    "reason_codes": {
+      "items": {
+        "$ref": "#/$defs/ReasonCode"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/DomainSchemaVersion",
+      "default": "1.0.0"
+    },
+    "status": {
+      "$ref": "#/$defs/DecisionStatus"
+    },
+    "subject_settlement_line_id": {
+      "$ref": "#/$defs/SettlementLineId"
+    }
+  },
+  "required": [
+    "decision_id",
+    "status",
+    "subject_settlement_line_id",
+    "reason_codes",
+    "created_at"
+  ],
+  "title": "ReconciliationDecision",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

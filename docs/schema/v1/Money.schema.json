@@ -1,0 +1,29 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An amount in the minor unit of a single currency.\n\nEquality is structural, so two amounts in different currencies are simply\nnot equal. Ordering and arithmetic raise instead, because an answer there\nwould have to invent an exchange rate. This mirrors how Python treats naive\nand aware datetimes.",
+  "properties": {
+    "amount_minor": {
+      "$ref": "#/$defs/AmountMinor"
+    },
+    "currency": {
+      "$ref": "#/$defs/CurrencyCode"
+    }
+  },
+  "required": [
+    "amount_minor",
+    "currency"
+  ],
+  "title": "Money",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

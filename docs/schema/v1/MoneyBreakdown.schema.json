@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "NonNegativeAmountMinor": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The parts of a settled amount, before the net is asserted by a source.\n\nThis holds the components only. It does not hold the net, because the net a\nsource declares is exactly what INV-002 exists to check. If the net were a\ncomputed property here, the check would compare a number against itself and\nalways pass.",
+  "properties": {
+    "adjustment_minor": {
+      "$ref": "#/$defs/AmountMinor"
+    },
+    "currency": {
+      "$ref": "#/$defs/CurrencyCode"
+    },
+    "fee_minor": {
+      "$ref": "#/$defs/NonNegativeAmountMinor"
+    },
+    "gross_minor": {
+      "$ref": "#/$defs/NonNegativeAmountMinor"
+    },
+    "tax_minor": {
+      "$ref": "#/$defs/NonNegativeAmountMinor"
+    }
+  },
+  "required": [
+    "currency",
+    "gross_minor",
+    "fee_minor",
+    "tax_minor",
+    "adjustment_minor"
+  ],
+  "title": "MoneyBreakdown",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

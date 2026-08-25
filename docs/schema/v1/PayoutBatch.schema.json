@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "Identifier": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "MerchantId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "PayoutId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SettlementLineId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "UtcTimestamp": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A batch of settlement lines paid out to a merchant as one transfer.",
+  "properties": {
+    "currency": {
+      "$ref": "#/$defs/CurrencyCode"
+    },
+    "merchant_id": {
+      "$ref": "#/$defs/MerchantId"
+    },
+    "net_minor": {
+      "$ref": "#/$defs/AmountMinor"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "payout_id": {
+      "$ref": "#/$defs/PayoutId"
+    },
+    "settlement_line_ids": {
+      "items": {
+        "$ref": "#/$defs/SettlementLineId"
+      },
+      "title": "Settlement Line Ids",
+      "type": "array"
+    },
+    "source_record_id": {
+      "$ref": "#/$defs/SourceRecordId"
+    },
+    "utr": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Identifier"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "payout_id",
+    "merchant_id",
+    "currency",
+    "net_minor",
+    "settlement_line_ids",
+    "occurred_at",
+    "source_record_id"
+  ],
+  "title": "PayoutBatch",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

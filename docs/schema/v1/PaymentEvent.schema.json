@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "EventId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in the minor unit of a single currency.\n\nEquality is structural, so two amounts in different currencies are simply\nnot equal. Ordering and arithmetic raise instead, because an answer there\nwould have to invent an exchange rate. This mirrors how Python treats naive\nand aware datetimes.",
+      "properties": {
+        "amount_minor": {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        }
+      },
+      "required": [
+        "amount_minor",
+        "currency"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "PaymentEventType": {
+      "description": "What happened to a payment.",
+      "enum": [
+        "CAPTURE",
+        "REFUND",
+        "REVERSAL",
+        "CHARGEBACK"
+      ],
+      "title": "PaymentEventType",
+      "type": "string"
+    },
+    "PaymentId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "UtcTimestamp": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One thing that happened to one payment, as a source reported it.",
+  "properties": {
+    "amount": {
+      "$ref": "#/$defs/Money"
+    },
+    "event_id": {
+      "$ref": "#/$defs/EventId"
+    },
+    "event_type": {
+      "$ref": "#/$defs/PaymentEventType"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "payment_id": {
+      "$ref": "#/$defs/PaymentId"
+    },
+    "source_record_id": {
+      "$ref": "#/$defs/SourceRecordId"
+    }
+  },
+  "required": [
+    "event_id",
+    "payment_id",
+    "event_type",
+    "amount",
+    "occurred_at",
+    "source_record_id"
+  ],
+  "title": "PaymentEvent",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

@@ -1,0 +1,42 @@
+{
+  "$defs": {
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "MerchantId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "PaymentId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The stable identity of one payment.",
+  "properties": {
+    "currency": {
+      "$ref": "#/$defs/CurrencyCode"
+    },
+    "merchant_id": {
+      "$ref": "#/$defs/MerchantId"
+    },
+    "payment_id": {
+      "$ref": "#/$defs/PaymentId"
+    }
+  },
+  "required": [
+    "payment_id",
+    "merchant_id",
+    "currency"
+  ],
+  "title": "PaymentIdentity",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

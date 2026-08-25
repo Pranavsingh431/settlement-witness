@@ -19,7 +19,7 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build audit ci verify verify-containers clean \
+        build schema audit ci verify verify-containers clean \
         docker-build docker-up docker-down
 
 help: ## List the available targets
@@ -78,6 +78,9 @@ typecheck-frontend: ## Type check the frontend with the TypeScript compiler
 
 build: ## Produce the frontend production bundle
 	cd $(FRONTEND) && $(PNPM) run build
+
+schema: ## Regenerate the published JSON Schema from the domain models
+	cd $(BACKEND) && $(UV) run python -m app.schema_export
 
 audit: ## Report known vulnerabilities in the locked dependencies (needs network)
 	cd $(BACKEND) && $(UV) run --with pip-audit pip-audit

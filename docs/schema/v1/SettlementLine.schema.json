@@ -1,0 +1,111 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "CurrencyCode": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "MoneyBreakdown": {
+      "additionalProperties": false,
+      "description": "The parts of a settled amount, before the net is asserted by a source.\n\nThis holds the components only. It does not hold the net, because the net a\nsource declares is exactly what INV-002 exists to check. If the net were a\ncomputed property here, the check would compare a number against itself and\nalways pass.",
+      "properties": {
+        "adjustment_minor": {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "fee_minor": {
+          "$ref": "#/$defs/NonNegativeAmountMinor"
+        },
+        "gross_minor": {
+          "$ref": "#/$defs/NonNegativeAmountMinor"
+        },
+        "tax_minor": {
+          "$ref": "#/$defs/NonNegativeAmountMinor"
+        }
+      },
+      "required": [
+        "currency",
+        "gross_minor",
+        "fee_minor",
+        "tax_minor",
+        "adjustment_minor"
+      ],
+      "title": "MoneyBreakdown",
+      "type": "object"
+    },
+    "NonNegativeAmountMinor": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "PaymentId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "PayoutId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SettlementLineId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "UtcTimestamp": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One line of a payout, covering one payment.\n\n``net_minor`` is what the source declared. It is stored rather than computed\nso that INV-002 has something real to check the signed formula against.",
+  "properties": {
+    "breakdown": {
+      "$ref": "#/$defs/MoneyBreakdown"
+    },
+    "net_minor": {
+      "$ref": "#/$defs/AmountMinor"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "payment_id": {
+      "$ref": "#/$defs/PaymentId"
+    },
+    "payout_id": {
+      "$ref": "#/$defs/PayoutId"
+    },
+    "settlement_line_id": {
+      "$ref": "#/$defs/SettlementLineId"
+    },
+    "source_record_id": {
+      "$ref": "#/$defs/SourceRecordId"
+    }
+  },
+  "required": [
+    "settlement_line_id",
+    "payout_id",
+    "payment_id",
+    "breakdown",
+    "net_minor",
+    "occurred_at",
+    "source_record_id"
+  ],
+  "title": "SettlementLine",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

@@ -1,0 +1,57 @@
+{
+  "$defs": {
+    "InvariantId": {
+      "description": "Stable identifiers for the invariants. These never change meaning.",
+      "enum": [
+        "INV-001",
+        "INV-002",
+        "INV-003",
+        "INV-004",
+        "INV-005",
+        "INV-006",
+        "INV-007",
+        "INV-008"
+      ],
+      "title": "InvariantId",
+      "type": "string"
+    },
+    "MissingInputPolicy": {
+      "description": "What an absent input means for the decision that needed this invariant.",
+      "enum": [
+        "PENDING",
+        "INSUFFICIENT_EVIDENCE",
+        "EXCEPTION"
+      ],
+      "title": "MissingInputPolicy",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry in the catalogue.",
+  "properties": {
+    "invariant_id": {
+      "$ref": "#/$defs/InvariantId"
+    },
+    "missing_input_policy": {
+      "$ref": "#/$defs/MissingInputPolicy"
+    },
+    "required_for_resolution": {
+      "title": "Required For Resolution",
+      "type": "boolean"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "invariant_id",
+    "title",
+    "missing_input_policy",
+    "required_for_resolution"
+  ],
+  "title": "InvariantSpec",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

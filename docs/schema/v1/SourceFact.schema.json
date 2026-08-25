@@ -1,0 +1,172 @@
+{
+  "$defs": {
+    "CanonicalPayload": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "Identifier": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "PayloadHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "ProviderEventId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceLocator": {
+      "additionalProperties": false,
+      "description": "Where an observation can be found again.\n\nThis exists so that an exception can point a person at the exact row or\nresource that caused it, rather than at a record ID they then have to hunt\nfor.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SourceLocatorKind"
+        },
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "row_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Number"
+        }
+      },
+      "required": [
+        "kind",
+        "reference"
+      ],
+      "title": "SourceLocator",
+      "type": "object"
+    },
+    "SourceLocatorKind": {
+      "description": "How to find the observation again in its source.",
+      "enum": [
+        "FILE_ROW",
+        "API_RESOURCE",
+        "WEBHOOK_DELIVERY"
+      ],
+      "title": "SourceLocatorKind",
+      "type": "string"
+    },
+    "SourceRecordId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceRecordType": {
+      "description": "What kind of record an observation holds.",
+      "enum": [
+        "PAYMENT_EVENT",
+        "SETTLEMENT_LINE",
+        "PAYOUT",
+        "BANK_TRANSACTION"
+      ],
+      "title": "SourceRecordType",
+      "type": "string"
+    },
+    "SourceSystem": {
+      "description": "Where an observation came from.",
+      "enum": [
+        "PSP_API",
+        "PSP_WEBHOOK",
+        "BANK_STATEMENT",
+        "MERCHANT_LEDGER"
+      ],
+      "title": "SourceSystem",
+      "type": "string"
+    },
+    "UtcTimestamp": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One immutable observation of one source record.\n\nDerived fields are validated here. ``payload_hash`` is computed by this\nsystem rather than supplied by the source, so a fact whose hash disagrees\nwith its own payload is incoherent and is rejected at construction. Fields\nthat the source declares, such as the amounts on a settlement line, are not\nsecond guessed here. Checking those is what the invariants are for.",
+  "properties": {
+    "canonical_payload": {
+      "$ref": "#/$defs/CanonicalPayload"
+    },
+    "observed_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "payload_hash": {
+      "$ref": "#/$defs/PayloadHash"
+    },
+    "provider_event_id": {
+      "$ref": "#/$defs/ProviderEventId"
+    },
+    "source_locator": {
+      "$ref": "#/$defs/SourceLocator"
+    },
+    "source_record_id": {
+      "$ref": "#/$defs/SourceRecordId"
+    },
+    "source_record_type": {
+      "$ref": "#/$defs/SourceRecordType"
+    },
+    "source_system": {
+      "$ref": "#/$defs/SourceSystem"
+    }
+  },
+  "required": [
+    "source_record_id",
+    "source_system",
+    "source_record_type",
+    "source_locator",
+    "provider_event_id",
+    "observed_at",
+    "occurred_at",
+    "payload_hash",
+    "canonical_payload"
+  ],
+  "title": "SourceFact",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

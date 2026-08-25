@@ -1,0 +1,39 @@
+{
+  "$defs": {
+    "ProviderEventId": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\S(.*\\S)?$",
+      "type": "string"
+    },
+    "SourceSystem": {
+      "description": "Where an observation came from.",
+      "enum": [
+        "PSP_API",
+        "PSP_WEBHOOK",
+        "BANK_STATEMENT",
+        "MERCHANT_LEDGER"
+      ],
+      "title": "SourceSystem",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The identity that decides whether two observations are the same record.\n\nThe key is the source system plus the provider event ID. The same provider\nevent ID seen through two different systems is two observations, not one,\nbecause the systems can disagree and that disagreement is worth keeping.",
+  "properties": {
+    "provider_event_id": {
+      "$ref": "#/$defs/ProviderEventId"
+    },
+    "source_system": {
+      "$ref": "#/$defs/SourceSystem"
+    }
+  },
+  "required": [
+    "source_system",
+    "provider_event_id"
+  ],
+  "title": "IdempotencyKey",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}

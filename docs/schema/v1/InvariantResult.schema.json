@@ -1,0 +1,105 @@
+{
+  "$defs": {
+    "AmountMinor": {
+      "type": "integer"
+    },
+    "InvariantId": {
+      "description": "Stable identifiers for the invariants. These never change meaning.",
+      "enum": [
+        "INV-001",
+        "INV-002",
+        "INV-003",
+        "INV-004",
+        "INV-005",
+        "INV-006",
+        "INV-007",
+        "INV-008"
+      ],
+      "title": "InvariantId",
+      "type": "string"
+    },
+    "InvariantOutcome": {
+      "description": "The four answers a check may give.",
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "NOT_APPLICABLE",
+        "INSUFFICIENT_INPUT"
+      ],
+      "title": "InvariantOutcome",
+      "type": "string"
+    },
+    "ReasonCode": {
+      "description": "The deterministic reason a decision reached its status.\n\nA reason code says which rule fired. It is never a sentence, never\nmodel-generated, and never an explanation of intent.",
+      "enum": [
+        "ALL_REQUIRED_INVARIANTS_PASSED",
+        "NET_FORMULA_MISMATCH",
+        "PAYOUT_TOTAL_MISMATCH",
+        "RETURNS_EXCEED_CAPTURE",
+        "CURRENCY_NOT_UNIFORM",
+        "PAYLOAD_HASH_CONFLICT",
+        "SOURCE_FACT_REWRITE_ATTEMPTED",
+        "EVIDENCE_MISSING",
+        "EVIDENCE_NOT_LINKED",
+        "REQUIRED_INVARIANT_FAILED",
+        "REQUIRED_INVARIANT_NOT_EVALUATED",
+        "REQUIRED_INVARIANT_MISSING_INPUT",
+        "SETTLEMENT_WITHIN_EXPECTED_WINDOW",
+        "NO_APPLICABLE_RETURN_EVENTS"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The recorded outcome of one check.\n\nA result carries codes and numbers, never prose. Everything on it can be\ncompared exactly by an evaluator.",
+  "properties": {
+    "expected_minor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "invariant_id": {
+      "$ref": "#/$defs/InvariantId"
+    },
+    "observed_minor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AmountMinor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "outcome": {
+      "$ref": "#/$defs/InvariantOutcome"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "invariant_id",
+    "outcome"
+  ],
+  "title": "InvariantResult",
+  "type": "object",
+  "x-domain-contract-version": "1.0.0"
+}
