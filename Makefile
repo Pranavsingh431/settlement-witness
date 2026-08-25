@@ -19,7 +19,7 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build schema audit ci verify verify-containers clean \
+        build schema db-setup import-fixtures audit ci verify verify-containers clean \
         docker-build docker-up docker-down
 
 help: ## List the available targets
@@ -81,6 +81,22 @@ build: ## Produce the frontend production bundle
 
 schema: ## Regenerate the published JSON Schema from the domain models
 	cd $(BACKEND) && $(UV) run python -m app.schema_export
+
+DB ?= data/generated/settlement.sqlite
+
+db-setup: ## Create the SQLite schema at $(DB), safe to run again
+	cd $(BACKEND) && $(UV) run python -m app.db_setup --database ../$(DB)
+
+import-fixtures: db-setup ## Import the documented example documents into $(DB)
+	cd $(BACKEND) && $(UV) run python -m app.ingest_cli --database ../$(DB) \
+		--source-system PSP_API --record-type PAYMENT_EVENT \
+		../data/fixtures/ingestion/payment_events.csv
+	cd $(BACKEND) && $(UV) run python -m app.ingest_cli --database ../$(DB) \
+		--source-system PSP_API --record-type SETTLEMENT_LINE \
+		../data/fixtures/ingestion/settlement_lines.csv
+	cd $(BACKEND) && $(UV) run python -m app.ingest_cli --database ../$(DB) \
+		--source-system PSP_API --record-type PAYOUT \
+		../data/fixtures/ingestion/payouts.csv
 
 audit: ## Report known vulnerabilities in the locked dependencies (needs network)
 	cd $(BACKEND) && $(UV) run --with pip-audit pip-audit

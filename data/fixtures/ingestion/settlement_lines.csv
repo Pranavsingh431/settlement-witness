@@ -1,0 +1,4 @@
+provider_event_id,settlement_line_id,payout_id,payment_id,gross_minor,fee_minor,tax_minor,adjustment_minor,net_minor,currency,occurred_at
+sl-0001,line-0001,payout-0001,pay-0001,1000000,20000,3600,0,976400,INR,2026-08-21T18:00:00+05:30
+sl-0002,line-0002,payout-0001,pay-0002,250000,5000,900,0,244100,INR,2026-08-21T18:00:00+05:30
+sl-0003,line-0003,payout-0002,pay-0003,75000,1500,270,-500,72730,INR,2026-08-22T18:00:00+05:30

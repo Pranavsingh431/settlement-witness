@@ -12,3 +12,4 @@ so.
 | 1 | [phase-1.md](phase-1.md) | Passed |
 | 1.1 | [phase-1-1.md](phase-1-1.md) | Passed |
 | 1.2 | [phase-1-2.md](phase-1-2.md) | Passed |
+| 2 | [phase-2.md](phase-2.md) | Passed |

@@ -15,3 +15,4 @@ Rules:
 | [ADR-001](ADR-001-stack-and-modular-monolith.md) | Stack and modular monolith | Accepted |
 | [ADR-002](ADR-002-domain-contract-and-verifier-authority.md) | Domain contract and verifier authority | Accepted |
 | [ADR-003](ADR-003-derived-status-and-source-fact-verification.md) | Derived status and source-fact verification | Accepted |
+| [ADR-004](ADR-004-append-only-import-and-atomicity.md) | Append-only import, audit trail and atomicity | Accepted |
