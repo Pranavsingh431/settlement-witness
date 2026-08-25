@@ -156,9 +156,14 @@ class DecisionCandidate(BaseModel):
     """A decision before its citations have been checked and its status decided.
 
     A candidate is what a caller builds. It is structurally validated, so it
-    cannot be incoherent, but it carries no status: choosing one is not a
-    caller's job. Pass it to :func:`verify_decision` with the available facts to
-    get a :class:`ReconciliationDecision`.
+    cannot be incoherent, but it carries neither a status nor reason codes:
+    neither is a caller's to supply. Pass it to :func:`verify_decision` with the
+    available facts to get a :class:`ReconciliationDecision`.
+
+    Exception codes are different and are carried across. They are findings a
+    caller made while examining the case, such as noticing a refund dated before
+    its capture, and the verifier has no way to rediscover them. Reason codes
+    are the verifier's own account of which rule fired, so it derives them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -171,7 +176,6 @@ class DecisionCandidate(BaseModel):
     evidence: tuple[EvidenceRef, ...] = ()
     invariant_results: tuple[InvariantResult, ...] = ()
     exception_codes: tuple[ExceptionCode, ...] = ()
-    reason_codes: tuple[ReasonCode, ...] = ()
     created_at: UtcTimestamp
 
     @model_validator(mode="after")
@@ -317,15 +321,6 @@ def verify_decision(
 
     exception_codes = tuple(dict.fromkeys((*candidate.exception_codes, *implied_codes)))
 
-    reason_codes = tuple(
-        dict.fromkeys(
-            (
-                *candidate.reason_codes,
-                *(result.reason_code for result in verification if result.reason_code is not None),
-            )
-        )
-    )
-
     status = derive_status(
         evidence=candidate.evidence,
         invariant_results=candidate.invariant_results,
@@ -333,8 +328,13 @@ def verify_decision(
         evidence_verification=verification,
     )
 
-    if not reason_codes:
-        reason_codes = (_default_reason_for(status),)
+    reason_codes = derive_reason_codes(
+        status=status,
+        evidence=candidate.evidence,
+        invariant_results=candidate.invariant_results,
+        exception_codes=exception_codes,
+        evidence_verification=verification,
+    )
 
     return ReconciliationDecision(
         decision_id=candidate.decision_id,
@@ -352,20 +352,91 @@ def verify_decision(
     )
 
 
-#: The reason recorded when a candidate offered none. Every decision must say
-#: why it reached its status, so the verifier supplies the rule that fired
-#: rather than leaving the field empty.
-_DEFAULT_REASON: dict[DecisionStatus, ReasonCode] = {
-    DecisionStatus.RESOLVED: ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,
-    DecisionStatus.EXCEPTION: ReasonCode.REQUIRED_INVARIANT_FAILED,
-    DecisionStatus.PENDING: ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW,
-    DecisionStatus.INSUFFICIENT_EVIDENCE: ReasonCode.EVIDENCE_MISSING,
-}
+#: Canonical order for reason codes, taken from the enum declaration order. A
+#: decision's reason codes are always emitted in this order, so two runs over the
+#: same backing produce byte identical output.
+_REASON_ORDER: dict[ReasonCode, int] = {code: rank for rank, code in enumerate(ReasonCode)}
 
 
-def _default_reason_for(status: DecisionStatus) -> ReasonCode:
-    """Return the reason code recorded when a candidate supplied none."""
-    return _DEFAULT_REASON[status]
+def derive_reason_codes(
+    *,
+    status: DecisionStatus,
+    evidence: Sequence[EvidenceRef],
+    invariant_results: Sequence[InvariantResult],
+    exception_codes: Sequence[ExceptionCode],
+    evidence_verification: Sequence[EvidenceVerification],
+) -> tuple[ReasonCode, ...]:
+    """Return the reason codes the backing implies, in canonical order.
+
+    A reason code says which rule fired. It is the verifier's own account of the
+    decision, so it is computed here rather than accepted from a caller. A
+    caller that could supply its own reason codes could describe a decision as
+    having been reached for reasons that had nothing to do with it, and nothing
+    would contradict them.
+
+    This is a pure function of the arguments, and the arguments are themselves
+    derived from evidence and invariants. So two decisions with the same backing
+    carry the same reasons, whatever the callers that built them believed.
+
+    Args:
+        status: The status already derived from the same backing.
+        evidence: The citations the decision rests on.
+        invariant_results: Outcomes of the checks that were run.
+        exception_codes: Codes raised, including any implied by verification.
+        evidence_verification: Results of resolving the citations.
+
+    Returns:
+        At least one reason code, ordered canonically and without repeats.
+    """
+    reasons: set[ReasonCode] = set()
+
+    for citation in evidence_verification:
+        if citation.reason_code is not None:
+            reasons.add(citation.reason_code)
+
+    if not evidence:
+        reasons.add(ReasonCode.EVIDENCE_MISSING)
+
+    by_id = {check.invariant_id: check for check in invariant_results}
+    for invariant_id in REQUIRED_FOR_RESOLUTION:
+        required = by_id.get(invariant_id)
+        if required is None:
+            reasons.add(ReasonCode.REQUIRED_INVARIANT_NOT_EVALUATED)
+        elif required.outcome is InvariantOutcome.INSUFFICIENT_INPUT:
+            reasons.add(ReasonCode.REQUIRED_INVARIANT_MISSING_INPUT)
+
+    failed = [check for check in invariant_results if check.outcome is InvariantOutcome.FAILED]
+    if failed:
+        reasons.add(ReasonCode.REQUIRED_INVARIANT_FAILED)
+    # A FAILED result always names its reason: InvariantResult refuses one that
+    # does not. filter drops the None the type allows and the model prevents.
+    reasons.update(filter(None, (check.reason_code for check in failed)))
+
+    if ExceptionCode.TIMING_PENDING in exception_codes:
+        reasons.add(ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW)
+
+    if status is DecisionStatus.RESOLVED:
+        reasons.add(ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED)
+
+    if not reasons and exception_codes:
+        # Nothing failed and nothing was missing. The case carries a finding
+        # that this system cannot settle, and the exception codes say what.
+        reasons.add(ReasonCode.EXCEPTION_CODE_REPORTED)
+
+    if not reasons:
+        # Unreachable for a status this module derived: every non-resolved
+        # status needs a code or a failure, and both produce a reason. It is
+        # reachable by calling this with a status that does not match the
+        # backing, and the honest answer there is to refuse rather than invent a
+        # reason. An earlier version filled the gap with a fixed code per
+        # status, which named a rule that had never fired.
+        message = (
+            f"status {status.value} does not follow from this backing, so no "
+            "reason code describes it"
+        )
+        raise ValueError(message)
+
+    return tuple(sorted(reasons, key=lambda code: _REASON_ORDER[code]))
 
 
 def check_decision_evidence(decision: ReconciliationDecision) -> InvariantResult:

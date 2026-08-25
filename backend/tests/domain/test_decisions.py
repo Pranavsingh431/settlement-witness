@@ -602,19 +602,16 @@ class TestVerifyDecisionAgainstRealFacts:
 
     def test_a_declared_exception_code_still_wins_over_a_clean_citation(self) -> None:
         """Verifying the evidence does not clear a break found elsewhere."""
-        candidate = make_candidate(
-            exception_codes=(ExceptionCode.AMOUNT_MISMATCH,),
-            reason_codes=(ReasonCode.NET_FORMULA_MISMATCH,),
-        )
+        candidate = make_candidate(exception_codes=(ExceptionCode.AMOUNT_MISMATCH,))
         assert verify_decision(candidate, [make_fact()]).status is DecisionStatus.EXCEPTION
 
     def test_timing_pending_survives_verification(self) -> None:
         """A verified citation on a case that is merely late is still pending."""
-        candidate = make_candidate(
-            exception_codes=(ExceptionCode.TIMING_PENDING,),
-            reason_codes=(ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW,),
-        )
-        assert verify_decision(candidate, [make_fact()]).status is DecisionStatus.PENDING
+        candidate = make_candidate(exception_codes=(ExceptionCode.TIMING_PENDING,))
+        decision = verify_decision(candidate, [make_fact()])
+
+        assert decision.status is DecisionStatus.PENDING
+        assert ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW in decision.reason_codes
 
     def test_the_factory_accepts_a_prepared_index(self) -> None:
         """Phase 2 storage will hand over an index rather than a list."""
@@ -623,9 +620,9 @@ class TestVerifyDecisionAgainstRealFacts:
         index = build_fact_index([make_fact()])
         assert verify_decision(make_candidate(), index).status is DecisionStatus.RESOLVED
 
-    def test_a_candidate_without_reason_codes_gets_the_rule_that_fired(self) -> None:
-        """Every decision says why, even when the caller offered nothing."""
-        decision = verify_decision(make_candidate(reason_codes=()), [make_fact()])
+    def test_the_verifier_supplies_the_rule_that_fired(self) -> None:
+        """Every decision says why. A caller never gets to say it for them."""
+        decision = verify_decision(make_candidate(), [make_fact()])
         assert decision.reason_codes == (ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,)
 
     def test_the_factory_is_pure(self) -> None:

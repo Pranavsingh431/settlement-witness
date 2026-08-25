@@ -85,6 +85,15 @@ class ReasonCode(StrEnum):
     REQUIRED_INVARIANT_FAILED = "REQUIRED_INVARIANT_FAILED"
     REQUIRED_INVARIANT_NOT_EVALUATED = "REQUIRED_INVARIANT_NOT_EVALUATED"
     REQUIRED_INVARIANT_MISSING_INPUT = "REQUIRED_INVARIANT_MISSING_INPUT"
+    EXCEPTION_CODE_REPORTED = "EXCEPTION_CODE_REPORTED"
+    """The case carries an exception code, and that is why it did not resolve.
+
+    Used when nothing else fired: every invariant passed, every citation
+    resolved, and the case still cannot be settled because something was found
+    while examining it, such as a partial refund. The exception codes on the
+    decision say what. Reporting REQUIRED_INVARIANT_FAILED here would name a
+    rule that never fired."""
+
     SETTLEMENT_WITHIN_EXPECTED_WINDOW = "SETTLEMENT_WITHIN_EXPECTED_WINDOW"
     NO_APPLICABLE_RETURN_EVENTS = "NO_APPLICABLE_RETURN_EVENTS"
 

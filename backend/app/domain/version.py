@@ -8,7 +8,7 @@ edited.
 
 from typing import Final, Literal
 
-DOMAIN_SCHEMA_VERSION: Final = "2.0.0"
+DOMAIN_SCHEMA_VERSION: Final = "3.0.0"
 """Semantic version of the domain contract.
 
 Patch: wording and non-behavioural fixes.
@@ -19,7 +19,7 @@ code, or that removes one.
 """
 
 
-type DomainSchemaVersion = Literal["2.0.0"]
+type DomainSchemaVersion = Literal["3.0.0"]
 """The version as a type, so a decision cannot claim a contract this code does
 not implement.
 

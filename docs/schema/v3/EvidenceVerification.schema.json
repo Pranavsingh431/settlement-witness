@@ -30,6 +30,7 @@
         "REQUIRED_INVARIANT_FAILED",
         "REQUIRED_INVARIANT_NOT_EVALUATED",
         "REQUIRED_INVARIANT_MISSING_INPUT",
+        "EXCEPTION_CODE_REPORTED",
         "SETTLEMENT_WITHIN_EXPECTED_WINDOW",
         "NO_APPLICABLE_RETURN_EVENTS"
       ],
@@ -71,5 +72,5 @@
   ],
   "title": "EvidenceVerification",
   "type": "object",
-  "x-domain-contract-version": "2.0.0"
+  "x-domain-contract-version": "3.0.0"
 }

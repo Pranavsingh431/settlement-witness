@@ -26,8 +26,12 @@ Phase 2 built ingestion and storage. Documented CSV documents become immutable s
 SQLite. An import is accepted whole or not at all, every attempt leaves an audit receipt whether
 it succeeded or not, and storage supplies the complete fact index that verification needs.
 
-There is still no matching, model call or user interface. Those come next, and they will be built
-against the contract rather than alongside it.
+Phase 3 built the deterministic reconciliation baseline. It matches on exact references only, and
+produces evidence-backed decisions for direct, unambiguous links. On the demo fixtures one of
+three settlement lines resolves, which is the honest number: a baseline that resolved all three
+would be guessing at two of them.
+
+There is still no model call, no decision persistence and no user interface.
 
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract says, and the
 [phase reports](docs/phase-reports/) for exactly what was built and verified in each phase.
@@ -92,6 +96,7 @@ Run `make help` to see this list in your terminal.
 | `make schema` | Regenerate the published JSON Schema from the domain models |
 | `make db-setup` | Create the SQLite schema. Safe to run again. |
 | `make import-fixtures` | Import the documented example CSV documents |
+| `make reconcile-fixtures` | Reconcile the imported facts and print JSON |
 | `make ci` | Run the core local checks that CI mirrors. No Docker, no network. |
 | `make verify` | Run the core checks plus the dependency audit and the container checks |
 | `make audit` | Report known vulnerabilities in the locked dependencies. Needs network. |
@@ -209,6 +214,8 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   `backend/app/domain/` are the definition; that page describes them.
 - [docs/ingestion-contract.md](docs/ingestion-contract.md) explains the three CSV schemas, the
   refusal rules, and how imports are made atomic and auditable.
+- [docs/reconciliation-baseline.md](docs/reconciliation-baseline.md) explains what the baseline
+  matches, what it refuses to match, and what a result does and does not mean.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
 - [docs/schema/v2/](docs/schema/v2/) holds JSON Schema generated from the models by

@@ -311,7 +311,6 @@ class TestFactIndexForVerification:
                 InvariantResult(invariant_id=invariant_id, outcome=InvariantOutcome.PASSED)
                 for invariant_id in sorted(REQUIRED_FOR_RESOLUTION, key=lambda item: item.value)
             ),
-            reason_codes=(ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,),
             created_at=datetime(2026, 8, 24, tzinfo=UTC),
         )
 
@@ -347,7 +346,6 @@ class TestFactIndexForVerification:
                 InvariantResult(invariant_id=invariant_id, outcome=InvariantOutcome.PASSED)
                 for invariant_id in sorted(REQUIRED_FOR_RESOLUTION, key=lambda item: item.value)
             ),
-            reason_codes=(ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,),
             created_at=datetime(2026, 8, 24, tzinfo=UTC),
         )
 

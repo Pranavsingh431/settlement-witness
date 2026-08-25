@@ -23,6 +23,7 @@ from app.domain.decisions import (
     ReconciliationDecision,
     check_decision_evidence,
     check_decision_invariants,
+    derive_reason_codes,
     derive_status,
     verify_decision,
 )
@@ -129,6 +130,7 @@ __all__ = [
     "classify_ingestion",
     "compute_net_minor",
     "compute_payload_hash",
+    "derive_reason_codes",
     "derive_status",
     "exception_codes_for",
     "highest_precedence",

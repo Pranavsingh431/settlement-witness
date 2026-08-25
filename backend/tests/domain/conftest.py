@@ -169,7 +169,6 @@ def make_candidate(**overrides: Any) -> DecisionCandidate:
         "evidence": (make_evidence(),),
         "invariant_results": passing_required_results(),
         "exception_codes": (),
-        "reason_codes": (ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,),
         "created_at": FIXED_TIME,
     }
     fields.update(overrides)

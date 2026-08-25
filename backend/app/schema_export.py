@@ -35,7 +35,7 @@ from app.domain.version import DOMAIN_SCHEMA_VERSION
 #: directory is the compatibility boundary, not the exact version: a minor
 #: release stays readable by a reader of v1, so it overwrites in place, while a
 #: major release would write to a new directory and leave this one intact.
-SCHEMA_DIR = Path("docs") / "schema" / "v2"
+SCHEMA_DIR = Path("docs") / "schema" / "v3"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
