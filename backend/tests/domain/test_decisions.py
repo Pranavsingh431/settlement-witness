@@ -681,3 +681,39 @@ class TestInv006CoversVerification:
         """The happy path."""
         decision = verify_decision(make_candidate(), [make_fact()])
         assert check_decision_evidence(decision).outcome is InvariantOutcome.PASSED
+
+
+class TestAMalformedIndexCannotResolve:
+    """The decision level consequence of the source-fact index boundary."""
+
+    def test_a_mapping_key_that_lies_cannot_produce_a_resolution(self) -> None:
+        """The whole point: a lying container must not buy a clean result.
+
+        Before this was hardened, the mapping below produced RESOLVED. The fact
+        it holds matches the citation on source system and payload hash, and
+        differs only in the record ID it declares about itself.
+        """
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+        candidate = make_candidate(
+            linked_source_record_ids=("cited-record-id",), evidence=(reference,)
+        )
+
+        decision = verify_decision(candidate, {"cited-record-id": impostor})
+
+        assert decision.status is not DecisionStatus.RESOLVED
+        assert decision.status is DecisionStatus.INSUFFICIENT_EVIDENCE
+        assert ReasonCode.EVIDENCE_FACT_NOT_FOUND in decision.reason_codes
+        assert decision.verified_evidence_count == 0
+
+    def test_a_well_formed_mapping_still_resolves(self) -> None:
+        """The ordinary mapping path is unchanged by the hardening."""
+        decision = verify_decision(make_candidate(), {"rec-1": make_fact()})
+        assert decision.status is DecisionStatus.RESOLVED
+
+    def test_a_fact_filed_under_a_wrong_key_still_resolves(self) -> None:
+        """Keys are discarded, so a mislabelled fact is still the fact it is."""
+        decision = verify_decision(make_candidate(), {"nonsense-key": make_fact()})
+        assert decision.status is DecisionStatus.RESOLVED

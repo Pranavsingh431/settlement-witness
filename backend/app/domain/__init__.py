@@ -34,6 +34,7 @@ from app.domain.evidence import (
     all_verified,
     build_fact_index,
     exception_codes_for,
+    verify_against_index,
     verify_evidence,
     verify_reference,
 )
@@ -132,6 +133,7 @@ __all__ = [
     "exception_codes_for",
     "highest_precedence",
     "precedence_rank",
+    "verify_against_index",
     "verify_decision",
     "verify_evidence",
     "verify_reference",

@@ -45,6 +45,13 @@ So a hand-built `RESOLVED` decision is not an oversight that slips through. It
 requires fabricating verification results, which is a deliberate lie rather than
 a missing check.
 
+The facts may be given as a prepared index or as any collection. When a mapping
+is supplied its keys are discarded and the index is rebuilt from the facts
+themselves, because a key is a label the caller chose and can disagree with the
+fact stored under it. A citation therefore resolves against what a fact says it
+is, never against where it was filed. `verify_against_index` checks the fact's
+own record ID alongside its source system and payload hash for the same reason.
+
 Phase 1 has no persistence, so the caller supplies the facts. Phase 2 ingestion
 and storage will supply the index instead. The boundary does not move when that
 happens: the same function is called with a larger index. What changes is who
@@ -193,7 +200,7 @@ rewrite of the fact would then be detectable.
 | Outcome | Meaning | Implies |
 | --- | --- | --- |
 | `VERIFIED` | Record ID exists, system and hash both match | Nothing |
-| `FACT_NOT_FOUND` | No fact with that record ID was supplied | `INSUFFICIENT_EVIDENCE` |
+| `FACT_NOT_FOUND` | No fact declaring that record ID was supplied | `INSUFFICIENT_EVIDENCE` |
 | `SOURCE_SYSTEM_MISMATCH` | The record exists but came from elsewhere | `UNMAPPED_REFERENCE` |
 | `PAYLOAD_HASH_MISMATCH` | The content is not what was cited | `UNMAPPED_REFERENCE` |
 

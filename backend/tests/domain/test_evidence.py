@@ -15,6 +15,7 @@ from app.domain.evidence import (
     all_verified,
     build_fact_index,
     exception_codes_for,
+    verify_against_index,
     verify_evidence,
     verify_reference,
 )
@@ -213,3 +214,113 @@ class TestVerificationRecord:
         """A certificate cannot be edited after the fact."""
         with pytest.raises(ValidationError):
             make_verification().outcome = EvidenceOutcome.FACT_NOT_FOUND
+
+
+class TestAContainerKeyIsNeverTrusted:
+    """A mapping key is a label the caller chose. The fact carries its own identity.
+
+    Before this was hardened, a mapping whose key disagreed with the fact stored
+    under it produced a VERIFIED citation and a RESOLVED decision, because the
+    lookup trusted the key and then checked only the system and the hash. These
+    tests pin the rule that the fact, not its filing location, decides what it is.
+    """
+
+    def test_a_key_that_lies_about_its_fact_does_not_verify(self) -> None:
+        """The exact shape of the original hole."""
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+
+        result = verify_reference(reference, {"cited-record-id": impostor})
+
+        assert result.outcome is not EvidenceOutcome.VERIFIED
+        assert not result.is_verified
+
+    def test_the_failure_is_reported_as_a_missing_fact(self) -> None:
+        """For that citation the fact is absent, whatever else is in the mapping."""
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+
+        result = verify_reference(reference, {"cited-record-id": impostor})
+
+        assert result.outcome is EvidenceOutcome.FACT_NOT_FOUND
+        assert result.reason_code is ReasonCode.EVIDENCE_FACT_NOT_FOUND
+
+    def test_a_matching_system_and_hash_do_not_rescue_a_wrong_identity(self) -> None:
+        """The two checks that used to be the only ones are not enough alone."""
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+
+        assert impostor.source_system is reference.source_system
+        assert impostor.payload_hash == reference.payload_hash
+        assert not verify_reference(reference, {"cited-record-id": impostor}).is_verified
+
+    def test_verify_evidence_rejects_the_same_mapping(self) -> None:
+        """The batch path shares the boundary, so it inherits the rule."""
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+
+        results = verify_evidence((reference,), {"cited-record-id": impostor})
+
+        assert not all_verified((reference,), results)
+
+    def test_the_guard_holds_even_when_handed_a_lying_index_directly(self) -> None:
+        """Defence in depth.
+
+        Normalisation means the guard inside ``verify_against_index`` is
+        unreachable through the public entry points. It is kept because the
+        alternative is a verifier that accepts a fact on the strength of where it
+        was filed. This reaches it deliberately.
+        """
+        impostor = make_fact(source_record_id="different-record-id")
+        reference = make_evidence(
+            source_record_id="cited-record-id", payload_hash=impostor.payload_hash
+        )
+
+        result = verify_against_index(reference, {"cited-record-id": impostor})
+
+        assert result.outcome is EvidenceOutcome.FACT_NOT_FOUND
+
+
+class TestMappingsAreRebuiltFromTheirFacts:
+    """Keys are discarded, so a mislabelled fact is still found by its own ID."""
+
+    def test_a_fact_filed_under_a_wrong_key_is_found_by_its_own_id(self) -> None:
+        """The fact is present, so a citation naming it correctly resolves."""
+        result = verify_reference(make_evidence(), {"nonsense-key": make_fact()})
+        assert result.is_verified
+
+    def test_a_well_formed_mapping_still_works(self) -> None:
+        """The ordinary case is unaffected."""
+        assert verify_reference(make_evidence(), {"rec-1": make_fact()}).is_verified
+
+    def test_an_index_from_build_fact_index_still_works(self) -> None:
+        """A caller that prepared an index properly sees no change."""
+        assert verify_reference(make_evidence(), build_fact_index([make_fact()])).is_verified
+
+    def test_a_plain_iterable_still_works(self) -> None:
+        """The list path is unchanged."""
+        assert verify_reference(make_evidence(), [make_fact()]).is_verified
+
+    def test_an_empty_mapping_verifies_nothing(self) -> None:
+        """No facts, no verification."""
+        assert not verify_reference(make_evidence(), {}).is_verified
+
+    def test_a_mapping_holding_contradicting_facts_is_refused(self) -> None:
+        """Rebuilding applies the append-only rule to a mapping's values too."""
+        with pytest.raises(ValueError, match="append-only"):
+            verify_reference(
+                make_evidence(),
+                {"a": make_fact(), "b": make_fact(provider_event_id="evt-changed")},
+            )
+
+    def test_the_same_fact_under_two_keys_is_harmless(self) -> None:
+        """Duplication is not contradiction."""
+        assert verify_reference(make_evidence(), {"a": make_fact(), "b": make_fact()}).is_verified

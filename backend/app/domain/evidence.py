@@ -138,28 +138,50 @@ def build_fact_index(facts: Iterable[SourceFact]) -> SourceFactIndex:
 
 
 def _coerce_index(facts: SourceFactIndex | Iterable[SourceFact]) -> SourceFactIndex:
-    """Accept either a prepared index or a plain collection of facts."""
+    """Return an index keyed by each fact's own source record ID.
+
+    A caller may hand over any mapping, and a mapping key is just a label the
+    caller chose. It can disagree with the fact stored under it, by mistake or
+    otherwise. So the key is discarded and the index is rebuilt from the facts
+    themselves, which are the only thing here that carries its own identity.
+
+    The rule this enforces is small and worth stating plainly: this module never
+    trusts a container key more than the fact inside it.
+
+    Args:
+        facts: A mapping whose values are facts, or any iterable of facts.
+
+    Returns:
+        A read-only index in which every key is the record ID its fact declares.
+    """
     if isinstance(facts, Mapping):
-        return facts
+        return build_fact_index(facts.values())
     return build_fact_index(facts)
 
 
-def verify_reference(
-    reference: EvidenceRef, facts: SourceFactIndex | Iterable[SourceFact]
-) -> EvidenceVerification:
-    """Resolve one citation against the supplied facts.
+def verify_against_index(reference: EvidenceRef, index: SourceFactIndex) -> EvidenceVerification:
+    """Resolve one citation against an index that is already keyed by record ID.
+
+    Three things must agree before a citation verifies: the fact's own record ID,
+    its source system, and its payload hash.
+
+    Checking the record ID looks redundant, because :func:`_coerce_index` has
+    already rebuilt the index from the facts and every key therefore matches the
+    fact under it. It is kept because the alternative is a verifier that would
+    accept a fact purely on the strength of where it was filed. A fact whose own
+    identity disagrees with the citation resolves to nothing, exactly as if it
+    were absent, because for that citation it is.
 
     Args:
         reference: The citation to check.
-        facts: The facts available, as an index or any iterable of facts.
+        index: Facts keyed by the record ID each one declares.
 
     Returns:
         The verification result, naming the precise way it failed if it did.
     """
-    index = _coerce_index(facts)
     fact = index.get(reference.source_record_id)
 
-    if fact is None:
+    if fact is None or fact.source_record_id != reference.source_record_id:
         outcome = EvidenceOutcome.FACT_NOT_FOUND
     elif fact.source_system is not reference.source_system:
         outcome = EvidenceOutcome.SOURCE_SYSTEM_MISMATCH
@@ -175,6 +197,22 @@ def verify_reference(
     )
 
 
+def verify_reference(
+    reference: EvidenceRef, facts: SourceFactIndex | Iterable[SourceFact]
+) -> EvidenceVerification:
+    """Resolve one citation against the supplied facts.
+
+    Args:
+        reference: The citation to check.
+        facts: The facts available, as a mapping or any iterable of facts. A
+            mapping's keys are discarded and rebuilt from the facts.
+
+    Returns:
+        The verification result, naming the precise way it failed if it did.
+    """
+    return verify_against_index(reference, _coerce_index(facts))
+
+
 def verify_evidence(
     evidence: Sequence[EvidenceRef], facts: SourceFactIndex | Iterable[SourceFact]
 ) -> tuple[EvidenceVerification, ...]:
@@ -184,7 +222,7 @@ def verify_evidence(
     per reference in the order the references were given.
     """
     index = _coerce_index(facts)
-    return tuple(verify_reference(reference, index) for reference in evidence)
+    return tuple(verify_against_index(reference, index) for reference in evidence)
 
 
 def exception_codes_for(
