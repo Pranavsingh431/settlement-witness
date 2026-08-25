@@ -18,7 +18,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from app.domain.decisions import EvidenceRef, ReconciliationDecision
+from app.domain.decisions import DecisionCandidate, ReconciliationDecision
+from app.domain.evidence import EvidenceRef, EvidenceVerification
 from app.domain.facts import IdempotencyKey, SourceFact, SourceLocator
 from app.domain.invariants import InvariantResult, InvariantSpec
 from app.domain.lifecycle import (
@@ -34,7 +35,7 @@ from app.domain.version import DOMAIN_SCHEMA_VERSION
 #: directory is the compatibility boundary, not the exact version: a minor
 #: release stays readable by a reader of v1, so it overwrites in place, while a
 #: major release would write to a new directory and leave this one intact.
-SCHEMA_DIR = Path("docs") / "schema" / "v1"
+SCHEMA_DIR = Path("docs") / "schema" / "v2"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,7 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: listed, because publishing them would imply a stability promise this phase
 #: does not make.
 EXPORTED_MODELS: tuple[type[BaseModel], ...] = (
+    DecisionCandidate,
     EvidenceRef,
+    EvidenceVerification,
     IdempotencyKey,
     InvariantResult,
     InvariantSpec,

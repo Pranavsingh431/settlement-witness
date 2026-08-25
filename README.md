@@ -14,9 +14,13 @@ Phase 0 built the foundation: dependency locking, formatting, linting, strict ty
 tests with coverage gates, container images, and a continuous integration pipeline.
 
 Phase 1 froze the domain contract. `backend/app/domain/` defines what a fact, an amount, a
-lifecycle event, an invariant, an exception and a decision mean, and enforces those meanings. The
-central rule is enforced there: a decision claiming `RESOLVED` without evidence, or with a failed
-or unevaluated required invariant, cannot be constructed at all.
+lifecycle event, an invariant, an exception and a decision mean, and enforces those meanings.
+
+A decision's status is derived from its backing, never chosen: one that disagrees with what its
+evidence, invariant results and exception codes imply cannot be constructed. `RESOLVED` also
+requires every evidence reference to have been resolved against a real source fact, by record ID,
+source system and payload hash. That check needs the facts, so it happens at an explicit boundary
+rather than inside a validator.
 
 There is still no ingestion, matching, model call, database or user interface. Those come next,
 and they will be built against the contract rather than alongside it.
@@ -199,7 +203,7 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   `backend/app/domain/` are the definition; that page describes them.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
-- [docs/schema/v1/](docs/schema/v1/) holds JSON Schema generated from the models by
+- [docs/schema/v2/](docs/schema/v2/) holds JSON Schema generated from the models by
   `make schema`. A test fails if it drifts from the code.
 - [docs/adr/](docs/adr/) records the decisions and why they were made.
 - [docs/phase-reports/](docs/phase-reports/) records what each phase built and verified.

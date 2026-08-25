@@ -12,12 +12,15 @@ from pydantic import ValidationError
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import (
     STATUS_BY_EXCEPTION_CODE,
+    DecisionCandidate,
     DecisionStatus,
-    EvidenceRef,
     check_decision_evidence,
     check_decision_invariants,
     derive_status,
+    verify_decision,
 )
+from app.domain.evidence import EvidenceOutcome
+from app.domain.facts import SourceSystem
 from app.domain.invariants import (
     REQUIRED_FOR_RESOLUTION,
     InvariantId,
@@ -26,8 +29,11 @@ from app.domain.invariants import (
 )
 from app.domain.version import DOMAIN_SCHEMA_VERSION
 from tests.domain.conftest import (
+    make_candidate,
     make_decision,
     make_evidence,
+    make_fact,
+    make_verification,
     passing_required_results,
 )
 
@@ -44,33 +50,6 @@ def _results_with(
     return (*kept, replacement)
 
 
-class TestEvidenceRef:
-    """Evidence points at an observation. It never describes one."""
-
-    def test_evidence_carries_only_a_pointer(self) -> None:
-        """Record ID, system and payload hash, and nothing else."""
-        assert set(EvidenceRef.model_fields) == {
-            "source_record_id",
-            "source_system",
-            "payload_hash",
-        }
-
-    def test_evidence_rejects_free_text(self) -> None:
-        """There is no field through which model prose could arrive."""
-        with pytest.raises(ValidationError):
-            make_evidence(explanation="the model believes these match")
-
-    def test_evidence_rejects_a_confidence_score(self) -> None:
-        """Confidence is not evidence and cannot be attached to it."""
-        with pytest.raises(ValidationError):
-            make_evidence(confidence=0.97)
-
-    def test_evidence_is_immutable(self) -> None:
-        """A citation cannot be edited after a decision is made."""
-        with pytest.raises(ValidationError):
-            make_evidence().source_record_id = "rec-2"
-
-
 class TestResolvedRequiresBacking:
     """The central rule. Each test removes exactly one pillar of a resolution."""
 
@@ -80,7 +59,7 @@ class TestResolvedRequiresBacking:
 
     def test_resolved_without_evidence_cannot_be_built(self) -> None:
         """A resolution with nothing behind it is exactly what this forbids."""
-        with pytest.raises(ValidationError, match="must cite at least one source fact"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(evidence=(), linked_source_record_ids=())
 
     def test_resolved_with_a_failed_invariant_cannot_be_built(self) -> None:
@@ -92,7 +71,7 @@ class TestResolvedRequiresBacking:
 
     def test_resolved_with_an_undetermined_invariant_cannot_be_built(self) -> None:
         """Not knowing is not the same as passing."""
-        with pytest.raises(ValidationError, match="pass or be not applicable"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(
                 invariant_results=_results_with(
                     InvariantId.INV_003, InvariantOutcome.INSUFFICIENT_INPUT
@@ -106,12 +85,12 @@ class TestResolvedRequiresBacking:
             for result in passing_required_results()
             if result.invariant_id is not InvariantId.INV_004
         )
-        with pytest.raises(ValidationError, match="must carry a result for every required"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(invariant_results=partial)
 
     def test_resolved_with_an_exception_code_cannot_be_built(self) -> None:
         """A decision cannot be both clean and broken."""
-        with pytest.raises(ValidationError, match="cannot also carry exception codes"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(exception_codes=(ExceptionCode.AMOUNT_MISMATCH,))
 
     def test_evidence_must_be_linked_to_the_decision(self) -> None:
@@ -136,7 +115,7 @@ class TestResolvedRequiresBacking:
                 reason_code=ReasonCode.PAYLOAD_HASH_CONFLICT,
             ),
         )
-        with pytest.raises(ValidationError, match="cannot carry a failed invariant"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(invariant_results=extra)
 
 
@@ -145,7 +124,7 @@ class TestOtherStatuses:
 
     def test_exception_requires_a_code(self) -> None:
         """An exception with no code tells nobody anything."""
-        with pytest.raises(ValidationError, match="at least one exception code"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(
                 status=DecisionStatus.EXCEPTION,
                 exception_codes=(),
@@ -163,7 +142,7 @@ class TestOtherStatuses:
 
     def test_insufficient_evidence_requires_its_own_code(self) -> None:
         """The status and the code must agree."""
-        with pytest.raises(ValidationError, match="must carry the"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(
                 status=DecisionStatus.INSUFFICIENT_EVIDENCE,
                 exception_codes=(ExceptionCode.MISSING_PAYMENT,),
@@ -184,7 +163,7 @@ class TestOtherStatuses:
 
     def test_pending_may_only_carry_timing_pending(self) -> None:
         """A real break must not be parked as merely late."""
-        with pytest.raises(ValidationError, match="stronger status"):
+        with pytest.raises(ValidationError, match="contradicts the backing"):
             make_decision(
                 status=DecisionStatus.PENDING,
                 exception_codes=(ExceptionCode.AMOUNT_MISMATCH,),
@@ -283,20 +262,27 @@ class TestDeriveStatus:
             evidence=(make_evidence(),),
             invariant_results=passing_required_results(),
             exception_codes=(),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.RESOLVED
 
     def test_no_evidence_derives_insufficient_evidence(self) -> None:
         """Nothing cited means nothing proved."""
         status = derive_status(
-            evidence=(), invariant_results=passing_required_results(), exception_codes=()
+            evidence=(),
+            invariant_results=passing_required_results(),
+            exception_codes=(),
+            evidence_verification=(),
         )
         assert status is DecisionStatus.INSUFFICIENT_EVIDENCE
 
     def test_a_missing_required_invariant_derives_insufficient_evidence(self) -> None:
         """An unrun check is unknown, not passed."""
         status = derive_status(
-            evidence=(make_evidence(),), invariant_results=(), exception_codes=()
+            evidence=(make_evidence(),),
+            invariant_results=(),
+            exception_codes=(),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.INSUFFICIENT_EVIDENCE
 
@@ -308,6 +294,7 @@ class TestDeriveStatus:
                 InvariantId.INV_003, InvariantOutcome.INSUFFICIENT_INPUT
             ),
             exception_codes=(),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.INSUFFICIENT_EVIDENCE
 
@@ -317,6 +304,7 @@ class TestDeriveStatus:
             evidence=(make_evidence(),),
             invariant_results=_results_with(InvariantId.INV_002, InvariantOutcome.FAILED),
             exception_codes=(),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.EXCEPTION
 
@@ -331,7 +319,10 @@ class TestDeriveStatus:
             ),
         )
         status = derive_status(
-            evidence=(make_evidence(),), invariant_results=results, exception_codes=()
+            evidence=(make_evidence(),),
+            invariant_results=results,
+            exception_codes=(),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.EXCEPTION
 
@@ -341,6 +332,7 @@ class TestDeriveStatus:
             evidence=(make_evidence(),),
             invariant_results=passing_required_results(),
             exception_codes=(ExceptionCode.TIMING_PENDING,),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.PENDING
 
@@ -350,6 +342,7 @@ class TestDeriveStatus:
             evidence=(make_evidence(),),
             invariant_results=passing_required_results(),
             exception_codes=(ExceptionCode.TIMING_PENDING, ExceptionCode.MALFORMED_RECORD),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.EXCEPTION
 
@@ -359,6 +352,7 @@ class TestDeriveStatus:
             evidence=(make_evidence(),),
             invariant_results=passing_required_results(),
             exception_codes=(ExceptionCode.INSUFFICIENT_EVIDENCE,),
+            evidence_verification=(make_verification(),),
         )
         assert status is DecisionStatus.INSUFFICIENT_EVIDENCE
 
@@ -425,6 +419,26 @@ class TestDecisionChecksAsSecondLineOfDefence:
         assert result.outcome is InvariantOutcome.FAILED
         assert result.reason_code is ReasonCode.REQUIRED_INVARIANT_MISSING_INPUT
 
+    def test_evidence_check_catches_a_resolution_whose_citations_did_not_verify(
+        self,
+    ) -> None:
+        """A RESOLVED decision whose certificate records a failure.
+
+        The model refuses to construct this, because the status would contradict
+        the backing. INV-006 is the layer that catches it if one arrives anyway.
+        """
+        smuggled = make_decision().model_construct(
+            **{
+                **make_decision().__dict__,
+                "evidence_verification": (
+                    make_verification(outcome=EvidenceOutcome.PAYLOAD_HASH_MISMATCH),
+                ),
+            }
+        )
+        result = check_decision_evidence(smuggled)
+        assert result.outcome is InvariantOutcome.FAILED
+        assert result.reason_code is ReasonCode.EVIDENCE_NOT_VERIFIED
+
     def test_invariant_check_catches_a_failed_invariant(self) -> None:
         """A recorded break must not sit inside a resolution."""
         smuggled = make_decision().model_construct(
@@ -450,3 +464,220 @@ def test_version_literal_matches_the_constant() -> None:
     from app.domain.version import DomainSchemaVersion
 
     assert get_args(DomainSchemaVersion.__value__) == (DOMAIN_SCHEMA_VERSION,)
+
+
+class TestStatusIsDerivedNotAsserted:
+    """The four bypasses that Phase 1 left open, each now impossible.
+
+    Every one of these was constructible before. Each is now refused because the
+    status a caller supplied contradicts the status the backing implies.
+    """
+
+    def test_exception_with_only_timing_pending_is_refused(self) -> None:
+        """Lateness is not a break, so it cannot be dressed up as one."""
+        with pytest.raises(ValidationError, match="implies PENDING"):
+            make_decision(
+                status=DecisionStatus.EXCEPTION,
+                exception_codes=(ExceptionCode.TIMING_PENDING,),
+                reason_codes=(ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW,),
+            )
+
+    def test_pending_without_timing_pending_is_refused(self) -> None:
+        """Parking a case as pending requires an actual reason to wait."""
+        with pytest.raises(ValidationError, match="contradicts the backing"):
+            make_decision(
+                status=DecisionStatus.PENDING,
+                exception_codes=(),
+                reason_codes=(ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW,),
+            )
+
+    def test_insufficient_evidence_carrying_a_stronger_code_is_refused(self) -> None:
+        """A malformed record is a break, not an absence of information."""
+        with pytest.raises(ValidationError, match="implies EXCEPTION"):
+            make_decision(
+                status=DecisionStatus.INSUFFICIENT_EVIDENCE,
+                exception_codes=(
+                    ExceptionCode.INSUFFICIENT_EVIDENCE,
+                    ExceptionCode.MALFORMED_RECORD,
+                ),
+                reason_codes=(ReasonCode.EVIDENCE_MISSING,),
+            )
+
+    def test_a_status_conflicting_with_the_highest_code_is_refused(self) -> None:
+        """The highest precedence code decides, whatever the caller wrote."""
+        with pytest.raises(ValidationError, match="implies INSUFFICIENT_EVIDENCE"):
+            make_decision(
+                status=DecisionStatus.EXCEPTION,
+                exception_codes=(ExceptionCode.INSUFFICIENT_EVIDENCE,),
+                reason_codes=(ReasonCode.EVIDENCE_MISSING,),
+            )
+
+    def test_resolved_cannot_be_claimed_with_unchecked_citations(self) -> None:
+        """A citation with no verification result is not a verified citation."""
+        with pytest.raises(ValidationError, match="contradicts the backing"):
+            make_decision(evidence_verification=())
+
+    def test_resolved_cannot_be_claimed_when_a_citation_failed(self) -> None:
+        """A certificate that records a failure cannot support a resolution."""
+        with pytest.raises(ValidationError, match="contradicts the backing"):
+            make_decision(
+                evidence_verification=(make_verification(outcome=EvidenceOutcome.FACT_NOT_FOUND),)
+            )
+
+    def test_verification_cannot_name_a_record_the_decision_never_cited(self) -> None:
+        """A certificate is about the citations made, not about arbitrary records."""
+        with pytest.raises(ValidationError, match="does not cite"):
+            make_decision(
+                evidence_verification=(
+                    make_verification(),
+                    make_verification(source_record_id="rec-elsewhere"),
+                )
+            )
+
+    def test_one_citation_cannot_have_two_verification_results(self) -> None:
+        """Two answers would let a caller pick the flattering one."""
+        with pytest.raises(ValidationError, match="more than one result for the same record"):
+            make_decision(evidence_verification=(make_verification(), make_verification()))
+
+    def test_the_same_record_cannot_be_cited_twice(self) -> None:
+        """Citing one record twice would inflate an evidence count for free."""
+        with pytest.raises(ValidationError, match="more than once"):
+            make_decision(evidence=(make_evidence(), make_evidence()))
+
+
+class TestVerifyDecisionAgainstRealFacts:
+    """The factory that resolves citations and then decides the status."""
+
+    def test_a_complete_candidate_resolves_against_a_matching_fact(self) -> None:
+        """The path this whole contract exists to make trustworthy."""
+        decision = verify_decision(make_candidate(), [make_fact()])
+
+        assert decision.status is DecisionStatus.RESOLVED
+        assert decision.exception_codes == ()
+        assert decision.verified_evidence_count == 1
+        assert all(result.is_verified for result in decision.evidence_verification)
+
+    def test_a_citation_to_a_nonexistent_record_cannot_resolve(self) -> None:
+        """The evidence is not there, so nothing can be concluded."""
+        candidate = make_candidate(
+            linked_source_record_ids=("rec-nope",),
+            evidence=(make_evidence(source_record_id="rec-nope"),),
+        )
+        decision = verify_decision(candidate, [make_fact()])
+
+        assert decision.status is DecisionStatus.INSUFFICIENT_EVIDENCE
+        assert ExceptionCode.INSUFFICIENT_EVIDENCE in decision.exception_codes
+        assert ReasonCode.EVIDENCE_FACT_NOT_FOUND in decision.reason_codes
+
+    def test_a_hash_mismatch_cannot_resolve(self) -> None:
+        """The cited content is not the stored content."""
+        candidate = make_candidate(evidence=(make_evidence(payload_hash="b" * 64),))
+        decision = verify_decision(candidate, [make_fact()])
+
+        assert decision.status is DecisionStatus.EXCEPTION
+        assert ExceptionCode.UNMAPPED_REFERENCE in decision.exception_codes
+        assert ReasonCode.EVIDENCE_PAYLOAD_HASH_MISMATCH in decision.reason_codes
+
+    def test_a_source_system_mismatch_cannot_resolve(self) -> None:
+        """The record exists but did not come from where the citation claimed."""
+        candidate = make_candidate(
+            evidence=(make_evidence(source_system=SourceSystem.BANK_STATEMENT),)
+        )
+        decision = verify_decision(candidate, [make_fact()])
+
+        assert decision.status is DecisionStatus.EXCEPTION
+        assert ExceptionCode.UNMAPPED_REFERENCE in decision.exception_codes
+        assert ReasonCode.EVIDENCE_SOURCE_SYSTEM_MISMATCH in decision.reason_codes
+
+    def test_no_facts_at_all_cannot_resolve(self) -> None:
+        """An empty store proves nothing."""
+        assert verify_decision(make_candidate(), []).status is DecisionStatus.INSUFFICIENT_EVIDENCE
+
+    def test_a_candidate_with_no_evidence_cannot_resolve(self) -> None:
+        """Citing nothing is not a shortcut to a clean result."""
+        candidate = make_candidate(evidence=(), linked_source_record_ids=())
+        assert (
+            verify_decision(candidate, [make_fact()]).status is DecisionStatus.INSUFFICIENT_EVIDENCE
+        )
+
+    def test_a_declared_exception_code_still_wins_over_a_clean_citation(self) -> None:
+        """Verifying the evidence does not clear a break found elsewhere."""
+        candidate = make_candidate(
+            exception_codes=(ExceptionCode.AMOUNT_MISMATCH,),
+            reason_codes=(ReasonCode.NET_FORMULA_MISMATCH,),
+        )
+        assert verify_decision(candidate, [make_fact()]).status is DecisionStatus.EXCEPTION
+
+    def test_timing_pending_survives_verification(self) -> None:
+        """A verified citation on a case that is merely late is still pending."""
+        candidate = make_candidate(
+            exception_codes=(ExceptionCode.TIMING_PENDING,),
+            reason_codes=(ReasonCode.SETTLEMENT_WITHIN_EXPECTED_WINDOW,),
+        )
+        assert verify_decision(candidate, [make_fact()]).status is DecisionStatus.PENDING
+
+    def test_the_factory_accepts_a_prepared_index(self) -> None:
+        """Phase 2 storage will hand over an index rather than a list."""
+        from app.domain.evidence import build_fact_index
+
+        index = build_fact_index([make_fact()])
+        assert verify_decision(make_candidate(), index).status is DecisionStatus.RESOLVED
+
+    def test_a_candidate_without_reason_codes_gets_the_rule_that_fired(self) -> None:
+        """Every decision says why, even when the caller offered nothing."""
+        decision = verify_decision(make_candidate(reason_codes=()), [make_fact()])
+        assert decision.reason_codes == (ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,)
+
+    def test_the_factory_is_pure(self) -> None:
+        """Running it twice on the same inputs gives the same decision."""
+        first = verify_decision(make_candidate(), [make_fact()])
+        second = verify_decision(make_candidate(), [make_fact()])
+        assert first == second
+
+    def test_verifying_does_not_mutate_the_candidate(self) -> None:
+        """The draft a caller holds is unchanged afterwards."""
+        candidate = make_candidate()
+        verify_decision(candidate, [make_fact()])
+        assert candidate == make_candidate()
+
+
+class TestDecisionCandidate:
+    """A candidate is structurally validated and deliberately has no status."""
+
+    def test_a_candidate_has_no_status_field(self) -> None:
+        """Choosing a status is not a caller's job."""
+        assert "status" not in DecisionCandidate.model_fields
+
+    def test_a_candidate_has_no_verification_field(self) -> None:
+        """A caller cannot supply its own certificate."""
+        assert "evidence_verification" not in DecisionCandidate.model_fields
+
+    def test_a_candidate_still_rejects_unlinked_evidence(self) -> None:
+        """Structural rules apply before any fact is looked at."""
+        with pytest.raises(ValidationError, match="must name a source record"):
+            make_candidate(linked_source_record_ids=("rec-other",))
+
+    def test_a_candidate_still_rejects_repeated_invariants(self) -> None:
+        """One invariant, one result."""
+        duplicated = (*passing_required_results(), passing_required_results()[0])
+        with pytest.raises(ValidationError, match="more than one result"):
+            make_candidate(invariant_results=duplicated)
+
+    def test_a_candidate_rejects_free_text(self) -> None:
+        """Model narrative has no home on a draft either."""
+        with pytest.raises(ValidationError):
+            make_candidate(explanation="this looks close enough")
+
+    def test_a_candidate_is_immutable(self) -> None:
+        """A draft cannot be edited while it is being verified."""
+        with pytest.raises(ValidationError):
+            make_candidate().decision_id = "dec-2"
+
+
+class TestInv006CoversVerification:
+    """INV-006 now means verified evidence, not merely cited evidence."""
+
+    def test_a_verified_resolution_passes(self) -> None:
+        """The happy path."""
+        decision = verify_decision(make_candidate(), [make_fact()])
+        assert check_decision_evidence(decision).outcome is InvariantOutcome.PASSED

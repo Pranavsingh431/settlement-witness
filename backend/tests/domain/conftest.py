@@ -11,7 +11,12 @@ from typing import Any
 import pytest
 
 from app.domain.codes import ReasonCode
-from app.domain.decisions import DecisionStatus, EvidenceRef, ReconciliationDecision
+from app.domain.decisions import (
+    DecisionCandidate,
+    DecisionStatus,
+    ReconciliationDecision,
+)
+from app.domain.evidence import EvidenceOutcome, EvidenceRef, EvidenceVerification
 from app.domain.facts import (
     SourceFact,
     SourceLocator,
@@ -129,14 +134,46 @@ def make_event(**overrides: Any) -> PaymentEvent:
 
 
 def make_evidence(**overrides: Any) -> EvidenceRef:
-    """Return an evidence reference."""
+    """Return a citation that resolves against ``make_fact()``.
+
+    The default hash is the real hash of the default fact's payload, so a test
+    that verifies this citation against that fact succeeds for the right reason
+    rather than because both sides happen to hold the same placeholder.
+    """
     fields: dict[str, Any] = {
         "source_record_id": "rec-1",
         "source_system": SourceSystem.PSP_API,
-        "payload_hash": "a" * 64,
+        "payload_hash": make_fact().payload_hash,
     }
     fields.update(overrides)
     return EvidenceRef(**fields)
+
+
+def make_verification(**overrides: Any) -> EvidenceVerification:
+    """Return a verification result, verified unless overridden."""
+    fields: dict[str, Any] = {
+        "source_record_id": "rec-1",
+        "outcome": EvidenceOutcome.VERIFIED,
+    }
+    fields.update(overrides)
+    return EvidenceVerification(**fields)
+
+
+def make_candidate(**overrides: Any) -> DecisionCandidate:
+    """Return a candidate that would resolve if its citation checks out."""
+    fields: dict[str, Any] = {
+        "decision_id": "dec-1",
+        "subject_settlement_line_id": "sl-1",
+        "linked_source_record_ids": ("rec-1",),
+        "linked_event_ids": ("evt-1",),
+        "evidence": (make_evidence(),),
+        "invariant_results": passing_required_results(),
+        "exception_codes": (),
+        "reason_codes": (ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,),
+        "created_at": FIXED_TIME,
+    }
+    fields.update(overrides)
+    return DecisionCandidate(**fields)
 
 
 def passing_required_results() -> tuple[InvariantResult, ...]:
@@ -156,12 +193,20 @@ def make_decision(**overrides: Any) -> ReconciliationDecision:
         "linked_source_record_ids": ("rec-1",),
         "linked_event_ids": ("evt-1",),
         "evidence": (make_evidence(),),
+        "evidence_verification": (make_verification(),),
         "invariant_results": passing_required_results(),
         "exception_codes": (),
         "reason_codes": (ReasonCode.ALL_REQUIRED_INVARIANTS_PASSED,),
         "created_at": FIXED_TIME,
     }
     fields.update(overrides)
+    if "evidence" in overrides and "evidence_verification" not in overrides:
+        # Keep the certificate matched to the citations, so a test that changes
+        # the evidence does not fail on an unrelated rule.
+        fields["evidence_verification"] = tuple(
+            make_verification(source_record_id=reference.source_record_id)
+            for reference in fields["evidence"]
+        )
     return ReconciliationDecision(**fields)
 
 

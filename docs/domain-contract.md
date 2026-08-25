@@ -1,17 +1,17 @@
-# Domain contract, version 1.0.0
+# Domain contract, version 2.0.0
 
 This document explains the contract. It does not define it. The Pydantic models
 in `backend/app/domain/` are the definition, and the JSON Schema in
-`docs/schema/v1/` is generated from them. Where this page and the code ever
+`docs/schema/v2/` is generated from them. Where this page and the code ever
 disagree, the code is right and this page is a bug.
 
 Start with `backend/app/domain/decisions.py`. The central rule lives there.
 
 ## The central rule
 
-> A decision may be `RESOLVED` only when every required evidence reference
-> exists and every required deterministic invariant reached a determinate,
-> passing answer.
+> A decision may be `RESOLVED` only when every evidence reference has been
+> resolved against a real source fact, and every required deterministic
+> invariant reached a determinate, passing answer.
 
 Model output can never satisfy either half. There is no field on a decision, on
 an evidence reference or on an invariant result that accepts prose, a confidence
@@ -19,9 +19,36 @@ value or a chain of reasoning, and every model in the contract sets
 `extra="forbid"`. So there is nothing to weigh against an invariant, because
 there is nowhere for it to be written down.
 
-The rule is enforced by the model itself, in a validator, not by a separate step
-a caller has to remember. A decision that claims `RESOLVED` without the backing
-is not flagged after the fact. It cannot be constructed.
+Two layers enforce this, and keeping them apart is what makes the claim honest.
+
+### Structural validation, in the model
+
+`ReconciliationDecision` checks that a decision is internally coherent, and that
+its `status` is exactly the status its recorded backing implies. A status is
+never chosen by a caller: it is computed by `derive_status` from the evidence,
+the invariant results and the exception codes, and construction fails if the two
+disagree.
+
+What this layer cannot do is confirm that a cited fact exists. A validator has
+no way to go and look. Building an `EvidenceRef` proves only that the citation
+is well formed, and a well formed citation can still be wrong.
+
+### Source-fact verification, at an explicit boundary
+
+`verify_decision(candidate, facts)` takes the available source facts as an
+argument and resolves every citation against them, checking that the record ID
+exists, the source system matches, and the payload hash matches exactly. It
+returns a decision carrying the resulting certificate, and `RESOLVED` requires
+every citation in that certificate to have verified.
+
+So a hand-built `RESOLVED` decision is not an oversight that slips through. It
+requires fabricating verification results, which is a deliberate lie rather than
+a missing check.
+
+Phase 1 has no persistence, so the caller supplies the facts. Phase 2 ingestion
+and storage will supply the index instead. The boundary does not move when that
+happens: the same function is called with a larger index. What changes is who
+builds it, not what verification means.
 
 ## Money
 
@@ -135,6 +162,12 @@ A decision is about one settlement line. Its evidence and linked events may be
 many, because a line's correctness can depend on a capture, later refunds, the
 payout it belongs to and a bank credit, all at once.
 
+There are two models. A `DecisionCandidate` is the draft a caller builds. It is
+structurally validated and has no `status` field, because choosing a status is
+not a caller's job. Passing it to `verify_decision` with the available facts
+returns a `ReconciliationDecision`, which has a derived status and a
+verification certificate.
+
 | Field | Meaning |
 | --- | --- |
 | `decision_id` | Identity of this decision |
@@ -144,32 +177,72 @@ payout it belongs to and a bank credit, all at once.
 | `linked_source_record_ids` | Every source record the decision rests on |
 | `linked_event_ids` | Every lifecycle event it rests on |
 | `evidence` | Pointers to source facts, each with its payload hash |
+| `evidence_verification` | One result per citation, recording whether it resolved |
 | `invariant_results` | Outcomes of the checks that were run |
 | `exception_codes` | Codes raised, if any |
 | `reason_codes` | Deterministic codes saying which rule fired |
 | `created_at` | When the decision was made, in UTC |
 
 An `EvidenceRef` holds a source record ID, the source system and the payload
-hash. Nothing else. The hash is carried so a stored decision can be checked
-against the fact it cited, and a later rewrite of that fact would be detectable.
+hash. Nothing else. Building one proves nothing about the fact it names. The
+hash is carried so the citation can be checked against that fact, and a later
+rewrite of the fact would then be detectable.
+
+`verify_reference` resolves one citation and returns one of four outcomes:
+
+| Outcome | Meaning | Implies |
+| --- | --- | --- |
+| `VERIFIED` | Record ID exists, system and hash both match | Nothing |
+| `FACT_NOT_FOUND` | No fact with that record ID was supplied | `INSUFFICIENT_EVIDENCE` |
+| `SOURCE_SYSTEM_MISMATCH` | The record exists but came from elsewhere | `UNMAPPED_REFERENCE` |
+| `PAYLOAD_HASH_MISMATCH` | The content is not what was cited | `UNMAPPED_REFERENCE` |
+
+A missing fact is an absence, so it means the evidence is not there to judge on.
+A mismatch is a contradiction between the decision and the store, so it is a
+reference that does not resolve to what it claims.
+
+A citation with no verification result at all counts as unresolved. Without that
+rule, a decision could avoid every evidence code simply by never recording the
+check.
 
 ### Status obligations
 
-| Status | Must hold |
+The status is not a set of obligations a caller must remember. It is computed.
+`derive_status` runs these checks in order, and a decision whose `status` field
+disagrees with the result cannot be constructed:
+
+1. Citations that did not resolve imply their own exception codes, so a decision
+   cannot escape them by omitting them.
+2. The highest precedence code among those and the declared ones decides the
+   status.
+3. With no code and no evidence, the answer is `INSUFFICIENT_EVIDENCE`.
+4. A required invariant that is absent or `INSUFFICIENT_INPUT` means the same.
+5. Any failed invariant means `EXCEPTION`.
+6. `RESOLVED` is what remains.
+
+That last direction is deliberate: a resolution is the absence of any reason not
+to resolve, not a positive claim a caller may assert.
+
+Because the status is derived, several statuses that a caller could previously
+write down are now impossible to construct:
+
+| Attempt | Refused because |
 | --- | --- |
-| `RESOLVED` | At least one evidence reference; no exception codes; a determinate, passing result for every required invariant; no failed invariant anywhere |
-| `EXCEPTION` | At least one exception code |
-| `PENDING` | No exception code other than `TIMING_PENDING` |
-| `INSUFFICIENT_EVIDENCE` | Carries the `INSUFFICIENT_EVIDENCE` code |
+| `EXCEPTION` carrying only `TIMING_PENDING` | That code implies `PENDING` |
+| `PENDING` with no `TIMING_PENDING` | Nothing in the backing says to wait |
+| `INSUFFICIENT_EVIDENCE` alongside `MALFORMED_RECORD` | The stronger code implies `EXCEPTION` |
+| Any status that disagrees with the highest precedence code | The code decides, not the caller |
+| `RESOLVED` with citations that were never checked | An unchecked citation is not a verified one |
+| `RESOLVED` whose certificate records a failure | The failure implies a code, and the code implies a status |
+
+`RESOLVED` still requires all of: no exception codes; at least one evidence
+reference; every citation verified against a real fact; a determinate, passing
+or not-applicable result for every required invariant; and no failed invariant
+anywhere.
 
 Every decision carries at least one reason code, no invariant may appear twice,
-and every evidence reference must name a record that is also in
-`linked_source_record_ids`.
-
-`derive_status` expresses the rule as a function, so a caller never picks a
-status. `RESOLVED` is what remains when nothing else applies. That direction is
-deliberate: a resolution is the absence of any reason not to resolve, not a
-positive claim a caller may assert.
+no record may be cited twice, and every evidence reference must name a record
+that is also in `linked_source_record_ids`.
 
 ## Invariants
 
@@ -272,7 +345,7 @@ Only two codes map to a status other than `EXCEPTION`: `TIMING_PENDING` gives
 
 ## Versioning
 
-`DOMAIN_SCHEMA_VERSION` is `1.0.0`. Every decision records the version it was
+`DOMAIN_SCHEMA_VERSION` is `2.0.0`. Every decision records the version it was
 made under, so a stored decision stays readable after the contract moves on.
 
 - Patch: wording and non-behavioural fixes.
@@ -281,6 +354,13 @@ made under, so a stored decision stays readable after the contract moves on.
 - Major: anything that changes the meaning of an existing field, invariant or
   code, or removes one.
 
-The JSON Schema in `docs/schema/v1/` is generated by `make schema`. A test
+Version 2.0.0 is a major step from 1.0.0. Closing the two gaps described above
+made decisions unconstructible that 1.0.0 accepted, which is breaking by that
+rule even though the change only ever removes wrong answers. The schema moved to
+`docs/schema/v2/` and `v1` was removed rather than left in place: it existed for
+a single commit, nothing consumed it because there is still no persistence, and
+republishing it would mean publishing a contract with a known correctness gap.
+
+The JSON Schema in `docs/schema/v2/` is generated by `make schema`. A test
 regenerates it and compares, so a model change that is not reflected in the
 committed artifact fails the build rather than leaving a stale file behind.

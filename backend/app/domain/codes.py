@@ -45,7 +45,11 @@ class ExceptionCode(StrEnum):
     has simply not arrived."""
 
     UNMAPPED_REFERENCE = "UNMAPPED_REFERENCE"
-    """A reference exists but points at nothing this system knows about."""
+    """A reference exists but does not resolve to what it claims.
+
+    Either it points at nothing this system knows about, or it points at a
+    record that disagrees with the reference about its source system or its
+    payload hash. Both mean the citation cannot be relied on."""
 
     MALFORMED_RECORD = "MALFORMED_RECORD"
     """The source record could not be read into the canonical model at all."""
@@ -74,6 +78,10 @@ class ReasonCode(StrEnum):
     SOURCE_FACT_REWRITE_ATTEMPTED = "SOURCE_FACT_REWRITE_ATTEMPTED"
     EVIDENCE_MISSING = "EVIDENCE_MISSING"
     EVIDENCE_NOT_LINKED = "EVIDENCE_NOT_LINKED"
+    EVIDENCE_FACT_NOT_FOUND = "EVIDENCE_FACT_NOT_FOUND"
+    EVIDENCE_SOURCE_SYSTEM_MISMATCH = "EVIDENCE_SOURCE_SYSTEM_MISMATCH"
+    EVIDENCE_PAYLOAD_HASH_MISMATCH = "EVIDENCE_PAYLOAD_HASH_MISMATCH"
+    EVIDENCE_NOT_VERIFIED = "EVIDENCE_NOT_VERIFIED"
     REQUIRED_INVARIANT_FAILED = "REQUIRED_INVARIANT_FAILED"
     REQUIRED_INVARIANT_NOT_EVALUATED = "REQUIRED_INVARIANT_NOT_EVALUATED"
     REQUIRED_INVARIANT_MISSING_INPUT = "REQUIRED_INVARIANT_MISSING_INPUT"

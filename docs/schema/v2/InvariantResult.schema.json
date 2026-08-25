@@ -41,6 +41,10 @@
         "SOURCE_FACT_REWRITE_ATTEMPTED",
         "EVIDENCE_MISSING",
         "EVIDENCE_NOT_LINKED",
+        "EVIDENCE_FACT_NOT_FOUND",
+        "EVIDENCE_SOURCE_SYSTEM_MISMATCH",
+        "EVIDENCE_PAYLOAD_HASH_MISMATCH",
+        "EVIDENCE_NOT_VERIFIED",
         "REQUIRED_INVARIANT_FAILED",
         "REQUIRED_INVARIANT_NOT_EVALUATED",
         "REQUIRED_INVARIANT_MISSING_INPUT",
@@ -101,5 +105,5 @@
   ],
   "title": "InvariantResult",
   "type": "object",
-  "x-domain-contract-version": "1.0.0"
+  "x-domain-contract-version": "2.0.0"
 }

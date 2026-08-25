@@ -46,5 +46,5 @@
   ],
   "title": "SourceLocator",
   "type": "object",
-  "x-domain-contract-version": "1.0.0"
+  "x-domain-contract-version": "2.0.0"
 }

@@ -4,6 +4,7 @@
 - Date: 2026-08-24
 - Supersedes: none
 - Superseded by: none
+- Amended by: [ADR-003](ADR-003-derived-status-and-source-fact-verification.md)
 - Related: [ADR-001](ADR-001-stack-and-modular-monolith.md)
 
 ## Context
@@ -26,7 +27,7 @@ differently changes the others.
 ### 1. The models are the contract; the documents describe it
 
 `backend/app/domain/` is the executable source of truth. `docs/domain-contract.md`
-explains it and `docs/schema/v1/` is generated from it by `make schema`. Where a
+explains it and `docs/schema/v2/` is generated from it by `make schema`. Where a
 document and the code disagree, the code is right and the document is a bug.
 
 A test regenerates the schema and compares it against the committed files, so a
@@ -35,6 +36,12 @@ test the published schema would drift into describing a contract that no longer
 exists, which is worse than publishing nothing.
 
 ### 2. The verifier is enforced by construction, not by convention
+
+> Amended by [ADR-003](ADR-003-derived-status-and-source-fact-verification.md). This section
+> claimed more than the implementation delivered. A validator cannot confirm that a cited
+> source fact exists, and the status rules described here did not consult the precedence
+> order. ADR-003 splits structural validation from source-fact verification and makes the
+> status derived. The intent recorded here stands; read ADR-003 for what is actually enforced.
 
 A `ReconciliationDecision` that claims `RESOLVED` without evidence, or with a
 failed or unevaluated required invariant, cannot be constructed. The rule lives

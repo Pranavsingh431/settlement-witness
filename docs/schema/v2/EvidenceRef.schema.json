@@ -24,7 +24,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A pointer to one source fact that supports a decision.\n\nEvidence is a reference to an observation, never a description of one. This\nmodel has no free text field and forbids extra keys, so a caller cannot\nattach a summary, a justification or model output to a piece of evidence.\nThe payload hash is carried so that a stored decision can be checked against\nthe fact it cited, and a later rewrite of that fact would be detectable.",
+  "description": "A pointer to one source fact that a decision rests on.\n\nEvidence is a reference to an observation, never a description of one. This\nmodel has no free text field and forbids extra keys, so a caller cannot\nattach a summary, a justification or model output to a piece of evidence.\n\nThe payload hash is carried so the citation can be checked against the fact\nit names. A hash that no longer matches means either the citation was wrong\nor the fact was rewritten, and both are worth catching.\n\nConstructing this does not prove the fact exists. Only\n:func:`verify_evidence` does that, and only against facts it is given.",
   "properties": {
     "payload_hash": {
       "$ref": "#/$defs/PayloadHash"
@@ -43,5 +43,5 @@
   ],
   "title": "EvidenceRef",
   "type": "object",
-  "x-domain-contract-version": "1.0.0"
+  "x-domain-contract-version": "2.0.0"
 }
