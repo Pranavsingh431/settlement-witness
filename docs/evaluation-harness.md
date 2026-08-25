@@ -1,4 +1,4 @@
-# Evaluation harness, version 1.0.0
+# Evaluation harness, version 2.0.0
 
 This describes the seeded scenario generator and the evaluator that grades the
 reconciliation baseline against it. The code in `backend/app/benchmark/` is the
@@ -67,7 +67,13 @@ and therefore cannot be evidence of anything.
 
 The seed is recorded in every manifest and every report. So are the generator,
 harness, baseline, parser and domain contract versions, because two corpora with
-the same seed differ if the rules changed between them.
+the same seed differ if the rules changed between them, and a metric can change
+meaning without the corpus changing at all.
+
+Harness 2.0.0 corrected exception recall. Until then the metric counted an
+anomaly only when its entire code set matched, which is exact-set accuracy under
+a recall label. A report from 1.0.0 and one from 2.0.0 give different numbers
+for the same run and must not be compared.
 
 Randomness decides amounts only. Which shapes exist, how many of each, and what
 each must produce are fixed by the configuration and the templates, so a
@@ -95,19 +101,53 @@ Nothing is simulated or stubbed.
 | Metric | Denominator | Measures |
 | --- | --- | --- |
 | Decision accuracy | Every scenario | Exact status match |
-| Exception recall | Anomalous scenarios | Exact exception code set |
+| Exception recall | Expected code occurrences | Expected codes the system actually raised |
+| Exact exception set accuracy | Anomalous scenarios | Code set matched exactly, no misses and no extras |
 | Evidence completeness | Every scenario | Exact set of cited source record IDs |
 | Evidence verification completeness | Every scenario | Every citation resolved against a stored fact |
 | False resolution rate | Anomalous scenarios | Resolved when the oracle says it must not |
 | pass@1 | Every scenario | Status, codes and evidence all exactly right |
+
+### Recall and exact-set accuracy answer different questions
+
+Exception recall is counted over code occurrences, not over scenarios. A case
+expecting `OUT_OF_ORDER_EVENT` and `PARTIAL_REFUND` where only the refund was
+raised contributes one out of two, because half the findings were in fact made.
+
+Exact-set accuracy scores that same case zero, because the set did not match. It
+is stricter in both directions: it fails on a missing code and on an extra one,
+where recall is blind to over-reporting.
+
+| Expected | Actual | Recall | Exact set |
+| --- | --- | --- | --- |
+| Two codes | Both | 2/2 | 1/1 |
+| Two codes | One of them | 1/2 | 0/1 |
+| Two codes | Both plus an extra | 2/2 | 0/1 |
+| Two codes | Neither | 0/2 | 0/1 |
+
+Both are reported because a single number hides one of the two. A system that
+over-reports scores well on recall and badly on exact-set accuracy, and one that
+finds half of every pair scores the reverse.
+
+Recall is summed across scenarios rather than averaged per scenario, so a case
+expecting two codes weighs twice as much as one expecting a single code.
+Averaging per scenario would let a system that always finds the easy single code
+look better than one finding most of a harder pair.
+
+Within one scenario, codes are compared as sets. Raising the same code twice
+does not manufacture recall it did not earn.
+
+pass@1 is unchanged. It remains the strict composite: exact status, exact
+exception code set, and exact evidence IDs.
 
 Every rate is reported with its numerator and denominator, because a rate
 without its denominator cannot be checked, combined, or compared across runs of
 different sizes.
 
 **A rate over no cases is `null`, not zero and not one.** A corpus containing no
-anomalies has no measurable exception recall; reporting 1.0 there would say the
-system caught every anomaly when it was never shown one.
+anomalies has no measurable exception recall or exact-set accuracy; reporting
+1.0 there would say the system caught every anomaly when it was never shown
+one.
 
 **No pass@k.** The baseline is deterministic and runs once. Reporting a pass@k
 would imply a sampling budget that does not exist.

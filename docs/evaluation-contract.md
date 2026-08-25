@@ -72,7 +72,8 @@ each one hides a different failure that the others make invisible.
 | Measure | Definition | What it catches |
 | --- | --- | --- |
 | Decision accuracy | Share of cases where the status is exactly right | The headline number, and on its own the least informative |
-| Exception recall | Share of cases that should be an exception where one was raised, per code | A system that resolves everything and looks accurate on a clean-heavy set |
+| Exception recall | Share of expected exception code occurrences the system actually raised | A system that resolves everything and looks accurate on a clean-heavy set |
+| Exact exception set accuracy | Share of anomalies whose code set matched exactly | Over-reporting, which recall alone is blind to |
 | False-resolution rate | Share of cases marked `RESOLVED` that should not have been | The failure that actually costs money. Weighted above the rest |
 | Evidence completeness | Share of resolutions carrying exactly the required source IDs and invariant results | Right answers reached with the wrong evidence |
 | pass@1 | First-attempt success, with no retries and no sampling | Retry luck. The demonstration gets one attempt, so this is the product number |

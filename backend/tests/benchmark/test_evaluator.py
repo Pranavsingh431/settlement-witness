@@ -369,6 +369,7 @@ class TestZeroDenominators:
         report = grade(controls_only, decisions, [])
 
         assert report.exception_recall.value is None
+        assert report.exact_exception_set_accuracy.value is None
         assert report.false_resolution_rate.value is None
         assert report.decision_accuracy.value == 1.0
 
@@ -488,3 +489,222 @@ class TestAnUnpairedAnomaly:
         report = grade(orphaned, TestTheOracleIsIndependent._decisions(small_corpus), [])
 
         assert report.pass_at_1.value == 1.0
+
+
+class TestExceptionRecallIsRecall:
+    """Recall counts codes found. Exact-set accuracy counts sets matched.
+
+    Until harness 2.0.0 the metric named recall counted an anomaly only when its
+    entire code set matched, which is exact-set accuracy wearing a recall label.
+    A case expecting two codes where one was raised scored zero, when half the
+    findings had in fact been made. The two questions are different and a single
+    number hid one of them.
+    """
+
+    TWO_CODE_TEMPLATE = TemplateId.OUT_OF_ORDER_RETURN
+    """Expects OUT_OF_ORDER_EVENT and PARTIAL_REFUND, so it can be half right."""
+
+    @staticmethod
+    def _regrade(
+        corpus: GeneratedCorpus, template: TemplateId, codes: tuple[ExceptionCode, ...]
+    ) -> EvaluationReport:
+        """Replace one scenario's exception codes and grade the run again."""
+        decisions = list(TestTheOracleIsIndependent._decisions(corpus))
+        line = next(
+            entry.subject_settlement_line_id
+            for entry in corpus.manifest.scenarios
+            if entry.template is template
+        )
+        target = next(d for d in decisions if d.subject_settlement_line_id == line)
+        decisions[decisions.index(target)] = target.model_construct(
+            **{**target.__dict__, "exception_codes": codes}
+        )
+        return grade(corpus.manifest, tuple(decisions), [])
+
+    def test_one_of_two_expected_codes_is_half_recalled(
+        self, small_corpus: GeneratedCorpus
+    ) -> None:
+        """The case the old metric got wrong.
+
+        Expected two codes, raised one. Recall is one half; exact-set accuracy
+        is zero, because the set did not match.
+        """
+        report = self._regrade(
+            small_corpus, self.TWO_CODE_TEMPLATE, (ExceptionCode.PARTIAL_REFUND,)
+        )
+        breakdown = next(
+            entry for entry in report.template_breakdown if entry.template is self.TWO_CODE_TEMPLATE
+        )
+
+        assert breakdown.exception_recall.value == 0.5
+        assert (breakdown.exception_recall.numerator, breakdown.exception_recall.denominator) == (
+            1,
+            2,
+        )
+        assert breakdown.exact_exception_set_accuracy.value == 0.0
+        assert breakdown.exact_exception_set_accuracy.denominator == 1
+
+    def test_an_extra_unexpected_code_leaves_recall_perfect(
+        self, small_corpus: GeneratedCorpus
+    ) -> None:
+        """Every expected code was found, so recall is one.
+
+        Exact-set accuracy is zero, because an extra code means the set does not
+        match. Recall is deliberately blind to over-reporting; that is what the
+        second metric is for.
+        """
+        expected = next(
+            entry.expected.exception_codes
+            for entry in small_corpus.manifest.scenarios
+            if entry.template is self.TWO_CODE_TEMPLATE
+        )
+        report = self._regrade(
+            small_corpus,
+            self.TWO_CODE_TEMPLATE,
+            (*expected, ExceptionCode.MALFORMED_RECORD),
+        )
+        breakdown = next(
+            entry for entry in report.template_breakdown if entry.template is self.TWO_CODE_TEMPLATE
+        )
+
+        assert breakdown.exception_recall.value == 1.0
+        assert breakdown.exact_exception_set_accuracy.value == 0.0
+
+    def test_the_two_metrics_differ_on_the_same_run(self, small_corpus: GeneratedCorpus) -> None:
+        """Which is the point of reporting both."""
+        report = self._regrade(
+            small_corpus, self.TWO_CODE_TEMPLATE, (ExceptionCode.PARTIAL_REFUND,)
+        )
+
+        assert report.exception_recall.value != report.exact_exception_set_accuracy.value
+
+    def test_recall_is_counted_over_code_occurrences(self, small_corpus: GeneratedCorpus) -> None:
+        """Summed across scenarios, not averaged per scenario.
+
+        A case expecting two codes weighs twice as much as one expecting a
+        single code. Averaging per scenario would let a system that always finds
+        the easy single code look better than one finding most of a harder pair.
+        """
+        report = self._regrade(
+            small_corpus, self.TWO_CODE_TEMPLATE, (ExceptionCode.PARTIAL_REFUND,)
+        )
+
+        expected_total = sum(
+            len(entry.expected.exception_codes) for entry in small_corpus.manifest.scenarios
+        )
+        assert report.exception_recall.denominator == expected_total
+        assert report.exception_recall.numerator == expected_total - 1
+
+    def test_a_repeated_code_cannot_be_counted_twice(self, small_corpus: GeneratedCorpus) -> None:
+        """Codes are compared as sets within one scenario.
+
+        Raising the same code twice does not manufacture recall it did not earn.
+        """
+        report = self._regrade(
+            small_corpus,
+            self.TWO_CODE_TEMPLATE,
+            (ExceptionCode.PARTIAL_REFUND, ExceptionCode.PARTIAL_REFUND),
+        )
+        breakdown = next(
+            entry for entry in report.template_breakdown if entry.template is self.TWO_CODE_TEMPLATE
+        )
+
+        assert breakdown.exception_recall.numerator == 1
+        assert breakdown.exception_recall.denominator == 2
+
+    def test_missing_every_code_scores_zero_recall(self, small_corpus: GeneratedCorpus) -> None:
+        """The floor, so the metric is not merely always near one."""
+        report = self._regrade(small_corpus, self.TWO_CODE_TEMPLATE, ())
+        breakdown = next(
+            entry for entry in report.template_breakdown if entry.template is self.TWO_CODE_TEMPLATE
+        )
+
+        assert breakdown.exception_recall.value == 0.0
+
+    def test_pass_at_1_is_unchanged_by_the_split(self, small_corpus: GeneratedCorpus) -> None:
+        """It remains the strict composite: status, exact code set, exact evidence.
+
+        A half-recalled case still fails pass@1, because the set did not match.
+        """
+        report = self._regrade(
+            small_corpus, self.TWO_CODE_TEMPLATE, (ExceptionCode.PARTIAL_REFUND,)
+        )
+
+        assert report.pass_at_1.value != 1.0
+        assert len(report.failures) == 1
+        assert not report.failures[0].exception_codes_correct
+
+    def test_a_scenario_carries_the_counts_its_rate_was_built_from(
+        self, small_corpus: GeneratedCorpus
+    ) -> None:
+        """A rate is only checkable against its own detail."""
+        report = self._regrade(
+            small_corpus, self.TWO_CODE_TEMPLATE, (ExceptionCode.PARTIAL_REFUND,)
+        )
+        failure = report.failures[0]
+
+        assert failure.expected_exception_code_count == 2
+        assert failure.matched_exception_code_count == 1
+
+    def test_a_clean_run_scores_one_on_both(self, small_corpus: GeneratedCorpus) -> None:
+        """The corrected metric did not weaken the unmodified case."""
+        report = run_corpus(small_corpus)
+
+        assert report.exception_recall.value == 1.0
+        assert report.exact_exception_set_accuracy.value == 1.0
+
+    def test_both_metrics_appear_in_the_rendered_report(
+        self, small_corpus: GeneratedCorpus
+    ) -> None:
+        """Separately, at the top level and per template."""
+        parsed = json.loads(render_report(run_corpus(small_corpus)))
+
+        assert "exception_recall" in parsed
+        assert "exact_exception_set_accuracy" in parsed
+        for entry in parsed["template_breakdown"]:
+            assert "exception_recall" in entry
+            assert "exact_exception_set_accuracy" in entry
+
+    def test_the_harness_version_records_the_change(self) -> None:
+        """A report from 1.0.0 and one from 2.0.0 are not comparable."""
+        assert HARNESS_VERSION == "2.0.0"
+
+
+class TestExceptionMetricsWithNoAnomalies:
+    """Both metrics are absent when nothing anomalous was shown."""
+
+    def test_an_empty_manifest_leaves_both_null(self) -> None:
+        """Neither zero nor one, following the existing policy."""
+        empty = CorpusManifest(
+            generator_version=GENERATOR_VERSION,
+            domain_schema_version=DOMAIN_SCHEMA_VERSION,
+            parser_version=PARSER_VERSION,
+            seed=0,
+            corpus_name="empty",
+            scenario_count=0,
+            documents=(),
+            scenarios=(),
+        )
+
+        report = grade(empty, (), [])
+
+        assert report.exception_recall.value is None
+        assert report.exact_exception_set_accuracy.value is None
+
+    def test_the_rendered_report_shows_null_for_both(self) -> None:
+        """What a reader of the JSON actually sees."""
+        empty = CorpusManifest(
+            generator_version=GENERATOR_VERSION,
+            domain_schema_version=DOMAIN_SCHEMA_VERSION,
+            parser_version=PARSER_VERSION,
+            seed=0,
+            corpus_name="empty",
+            scenario_count=0,
+            documents=(),
+            scenarios=(),
+        )
+        parsed = json.loads(render_report(grade(empty, (), [])))
+
+        assert parsed["exception_recall"]["value"] is None
+        assert parsed["exact_exception_set_accuracy"]["value"] is None
+        assert parsed["exception_recall"]["denominator"] == 0

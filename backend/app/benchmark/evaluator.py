@@ -42,8 +42,15 @@ from app.storage.database import (
 )
 from app.storage.repository import SourceFactRepository
 
-HARNESS_VERSION = "1.0.0"
-"""Version of the grading rules."""
+HARNESS_VERSION = "2.0.0"
+"""Version of the grading rules.
+
+2.0.0 corrected `exception_recall`. Until then it counted an anomaly only
+when its entire code set matched, which is exact-set accuracy under a
+recall label. The stricter signal is kept as `exact_exception_set_accuracy`,
+so a report from 1.0.0 and one from 2.0.0 give different numbers for the
+same run and must not be compared.
+"""
 
 RECORD_TYPE_BY_FILE: Mapping[str, SourceRecordType] = {
     name: record_type for record_type, name in FILE_NAMES.items()
@@ -77,8 +84,17 @@ class ScenarioResult(BaseModel):
     expected_evidence_record_ids: tuple[str, ...]
     actual_evidence_record_ids: tuple[str, ...]
 
+    expected_exception_code_count: int
+    matched_exception_code_count: int
+    """How many expected codes appeared in the actual set.
+
+    Carried per scenario because a rate is only checkable against the counts it
+    was computed from, and these are the counts exception recall sums."""
+
     status_correct: bool
     exception_codes_correct: bool
+    """The actual code set equals the expected one exactly. This is what
+    `exact_exception_set_accuracy` counts, and what pass@1 requires."""
     evidence_correct: bool
     evidence_fully_verified: bool
     is_false_resolution: bool
@@ -97,6 +113,11 @@ class TemplateBreakdown(BaseModel):
     scenario_count: int
     decision_accuracy: Rate
     exception_recall: Rate
+    """Expected code occurrences found, over expected code occurrences."""
+
+    exact_exception_set_accuracy: Rate
+    """Anomalies whose code set matched exactly, over anomalies."""
+
     evidence_completeness: Rate
     pass_at_1: Rate
     false_resolutions: int
@@ -143,6 +164,21 @@ class EvaluationReport(BaseModel):
 
     decision_accuracy: Rate
     exception_recall: Rate
+    """Of every exception code the oracle expects across all anomalous
+    scenarios, how many the system actually raised.
+
+    Counted per code occurrence, not per scenario. A case expecting two codes
+    where one was raised contributes one out of two, rather than being scored
+    as a whole failure. That is what recall means, and it is not the same
+    question as whether the whole set matched."""
+
+    exact_exception_set_accuracy: Rate
+    """How many anomalous scenarios had exactly the expected code set.
+
+    Stricter than recall in both directions: it fails on a missing code and on
+    an extra one. Reported alongside recall because the two answer different
+    questions and a single number hides one of them."""
+
     evidence_completeness: Rate
     evidence_verification_completeness: Rate
     false_resolution_rate: Rate
@@ -175,6 +211,8 @@ def _grade_one(entry: ScenarioEntry, decision: ReconciliationDecision | None) ->
             actual_exception_codes=(),
             expected_evidence_record_ids=entry.expected_evidence_record_ids,
             actual_evidence_record_ids=(),
+            expected_exception_code_count=len(expected_codes),
+            matched_exception_code_count=0,
             status_correct=False,
             exception_codes_correct=False,
             evidence_correct=False,
@@ -202,6 +240,8 @@ def _grade_one(entry: ScenarioEntry, decision: ReconciliationDecision | None) ->
         actual_exception_codes=actual_codes,
         expected_evidence_record_ids=entry.expected_evidence_record_ids,
         actual_evidence_record_ids=actual_evidence,
+        expected_exception_code_count=len(expected_codes),
+        matched_exception_code_count=len(set(expected_codes) & set(actual_codes)),
         status_correct=status_correct,
         exception_codes_correct=codes_correct,
         evidence_correct=evidence_correct,
@@ -212,6 +252,28 @@ def _grade_one(entry: ScenarioEntry, decision: ReconciliationDecision | None) ->
         ),
         passed=status_correct and codes_correct and evidence_correct,
     )
+
+
+def _exception_recall(results: Sequence[ScenarioResult]) -> Rate:
+    """Return recall over expected exception code occurrences.
+
+    Summed across scenarios rather than averaged per scenario, so a case
+    expecting two codes weighs twice as much as one expecting a single code.
+    Averaging per scenario would let a system that always finds the easy single
+    code look better than one that finds most of a harder pair.
+
+    Codes are compared as sets within a scenario, so an expected code cannot be
+    counted twice by being raised twice.
+    """
+    return Rate.of(
+        sum(result.matched_exception_code_count for result in results),
+        sum(result.expected_exception_code_count for result in results),
+    )
+
+
+def _exact_exception_sets(results: Sequence[ScenarioResult]) -> Rate:
+    """Return how many scenarios had exactly the expected code set."""
+    return Rate.of(sum(1 for result in results if result.exception_codes_correct), len(results))
 
 
 def _breakdown_by_template(results: Sequence[ScenarioResult]) -> tuple[TemplateBreakdown, ...]:
@@ -229,9 +291,8 @@ def _breakdown_by_template(results: Sequence[ScenarioResult]) -> tuple[TemplateB
                 template=template,
                 scenario_count=len(subset),
                 decision_accuracy=Rate.of(sum(1 for r in subset if r.status_correct), len(subset)),
-                exception_recall=Rate.of(
-                    sum(1 for r in anomalies if r.exception_codes_correct), len(anomalies)
-                ),
+                exception_recall=_exception_recall(anomalies),
+                exact_exception_set_accuracy=_exact_exception_sets(anomalies),
                 evidence_completeness=Rate.of(
                     sum(1 for r in subset if r.evidence_correct), len(subset)
                 ),
@@ -305,9 +366,8 @@ def grade(
         decision_count=len(decisions),
         import_outcomes=tuple(import_outcomes),
         decision_accuracy=Rate.of(sum(1 for r in results if r.status_correct), len(results)),
-        exception_recall=Rate.of(
-            sum(1 for r in anomalies if r.exception_codes_correct), len(anomalies)
-        ),
+        exception_recall=_exception_recall(anomalies),
+        exact_exception_set_accuracy=_exact_exception_sets(anomalies),
         evidence_completeness=Rate.of(sum(1 for r in results if r.evidence_correct), len(results)),
         evidence_verification_completeness=Rate.of(
             sum(1 for r in results if r.evidence_fully_verified), len(results)
