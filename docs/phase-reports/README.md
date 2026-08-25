@@ -17,3 +17,4 @@ so.
 | 3 | [phase-3.md](phase-3.md) | Passed |
 | 3.1 | [phase-3-1.md](phase-3-1.md) | Passed |
 | 3.2 | [phase-3-2.md](phase-3-2.md) | Passed |
+| 4 | [phase-4.md](phase-4.md) | Passed |

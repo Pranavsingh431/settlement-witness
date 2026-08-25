@@ -19,3 +19,4 @@ Rules:
 | [ADR-005](ADR-005-exact-reference-matching-and-snapshot-payouts.md) | Exact-reference matching and snapshot-relative payout grouping | Accepted |
 | [ADR-006](ADR-006-settlement-gross-must-match-its-capture.md) | A settled gross must equal the capture it settles | Accepted |
 | [ADR-007](ADR-007-payment-event-amounts-are-strictly-positive.md) | Payment event amounts are strictly positive | Accepted |
+| [ADR-008](ADR-008-seeded-generation-and-independent-oracle.md) | Seeded generation, paired controls and an independent oracle | Accepted |

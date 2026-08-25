@@ -1,0 +1,6 @@
+{
+  "corpus_name": "public-demonstration",
+  "seed": 20260701,
+  "controls_per_anomaly": 3,
+  "extra_controls": 5
+}

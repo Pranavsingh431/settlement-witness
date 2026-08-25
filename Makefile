@@ -19,7 +19,8 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build schema db-setup import-fixtures reconcile-fixtures audit ci \
+        build schema db-setup import-fixtures reconcile-fixtures \
+        benchmark-generate benchmark-evaluate benchmark-evaluate-private audit ci \
         verify verify-containers clean \
         docker-build docker-up docker-down
 
@@ -101,6 +102,22 @@ import-fixtures: db-setup ## Import the documented example documents into $(DB)
 
 reconcile-fixtures: ## Reconcile the facts in $(DB) and print JSON
 	cd $(BACKEND) && $(UV) run python -m app.reconcile_cli --database ../$(DB)
+
+BENCHMARK_CONFIG ?= benchmark/public-corpus.json
+BENCHMARK_OUT    ?= data/generated/benchmark
+
+benchmark-generate: ## Write the public synthetic corpus to $(BENCHMARK_OUT)
+	cd $(BACKEND) && $(UV) run python -m app.benchmark_cli generate \
+		--config ../$(BENCHMARK_CONFIG) --output ../$(BENCHMARK_OUT)/public
+
+benchmark-evaluate: ## Evaluate the baseline on the public synthetic corpus
+	cd $(BACKEND) && $(UV) run python -m app.benchmark_cli evaluate \
+		--config ../$(BENCHMARK_CONFIG) \
+		--report ../$(BENCHMARK_OUT)/public-report.json
+
+benchmark-evaluate-private: ## Evaluate an externally supplied config: make benchmark-evaluate-private CONFIG=path
+	@test -n "$(CONFIG)" || (echo "set CONFIG=path/to/private-corpus.json" && exit 1)
+	cd $(BACKEND) && $(UV) run python -m app.benchmark_cli evaluate --config ../$(CONFIG)
 
 audit: ## Report known vulnerabilities in the locked dependencies (needs network)
 	cd $(BACKEND) && $(UV) run --with pip-audit pip-audit

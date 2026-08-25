@@ -31,6 +31,11 @@ produces evidence-backed decisions for direct, unambiguous links. On the demo fi
 three settlement lines resolves, which is the honest number: a baseline that resolved all three
 would be guessing at two of them.
 
+Phase 4 built the seeded scenario generator and the evaluator harness. It generates controlled
+synthetic cases, runs them through the real ingestion and reconciliation paths, and grades the
+result against an oracle reasoned from the contract rather than read off a run. That gives the
+baseline a measured floor for a later AI-assisted method to beat.
+
 There is still no model call, no decision persistence and no user interface.
 
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract says, and the
@@ -97,6 +102,8 @@ Run `make help` to see this list in your terminal.
 | `make db-setup` | Create the SQLite schema. Safe to run again. |
 | `make import-fixtures` | Import the documented example CSV documents |
 | `make reconcile-fixtures` | Reconcile the imported facts and print JSON |
+| `make benchmark-generate` | Write the public synthetic corpus and its manifest |
+| `make benchmark-evaluate` | Score the baseline against the public corpus |
 | `make ci` | Run the core local checks that CI mirrors. No Docker, no network. |
 | `make verify` | Run the core checks plus the dependency audit and the container checks |
 | `make audit` | Report known vulnerabilities in the locked dependencies. Needs network. |
@@ -216,6 +223,8 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   refusal rules, and how imports are made atomic and auditable.
 - [docs/reconciliation-baseline.md](docs/reconciliation-baseline.md) explains what the baseline
   matches, what it refuses to match, and what a result does and does not mean.
+- [docs/evaluation-harness.md](docs/evaluation-harness.md) explains the seeded generator, the
+  independent oracle, and the public and private evaluation boundary.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
 - [docs/schema/v5/](docs/schema/v5/) holds JSON Schema generated from the models by
