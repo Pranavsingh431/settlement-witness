@@ -1,4 +1,4 @@
-# Ingestion contract, parser version 2.0.0
+# Ingestion contract, parser version 3.0.0
 
 This describes the CSV documents Settlement Witness accepts and what it does
 with them. The code in `backend/app/ingestion/` is the definition; this page
@@ -25,7 +25,9 @@ amount_minor, currency, occurred_at
 ```
 
 `event_type` is one of `CAPTURE`, `REFUND`, `REVERSAL`, `CHARGEBACK`.
-`amount_minor` is a non-negative magnitude; direction comes from the type.
+`amount_minor` must be strictly greater than zero; direction comes from the
+type. An event that moved no money is not an event, and a zero refund was
+previously usable to switch off the settlement gross check.
 
 ### Settlement lines
 
@@ -62,6 +64,7 @@ Every cell is read exactly as the document wrote it. Nothing is trimmed.
 | Identifier | Non-empty text | Empty, or any surrounding whitespace |
 | Amount, minor units | A whole number, optionally signed | `12.5`, `12.0`, `1e3`, `"1,000"`, `NaN` |
 | Amount, magnitude | The same, and not below zero | Anything negative |
+| Amount, must move money | The same, and above zero | Zero and anything negative |
 | Currency | ISO 4217 alpha-3, upper case | `inr`, `rupees`, `IN` |
 | Timestamp | ISO 8601 with an offset | Anything naive, anything unparseable |
 | Enum | A value the contract defines | Anything else |
@@ -204,8 +207,13 @@ Row level: `ACCEPTED`, `DUPLICATE_NO_OP`, `DUPLICATE_CONFLICT`, `REJECTED`,
 `NOT_APPLIED`.
 
 Row refusal codes: `MISSING_VALUE`, `SURROUNDING_WHITESPACE`, `NOT_AN_INTEGER`,
-`NEGATIVE_AMOUNT`, `INVALID_CURRENCY`, `NAIVE_TIMESTAMP`, `INVALID_TIMESTAMP`,
-`INVALID_ENUM`, `WRONG_FIELD_COUNT`, `DOMAIN_VALIDATION_FAILED`.
+`NEGATIVE_AMOUNT`, `NON_POSITIVE_AMOUNT`, `INVALID_CURRENCY`, `NAIVE_TIMESTAMP`,
+`INVALID_TIMESTAMP`, `INVALID_ENUM`, `WRONG_FIELD_COUNT`,
+`DOMAIN_VALIDATION_FAILED`.
+
+`NEGATIVE_AMOUNT` and `NON_POSITIVE_AMOUNT` are different rules on different
+columns. A settlement fee may be zero, so only a negative one is refused. A
+payment event amount must move money, so zero is refused as well.
 
 Document refusal codes: `UNREADABLE_ENCODING`, `MISSING_HEADER`,
 `UNEXPECTED_COLUMNS`, `UNSUPPORTED_RECORD_TYPE`, `NO_ROWS`.
@@ -309,6 +317,8 @@ that it handles them.
 | `invalid_naive_timestamp.csv` | A timestamp with no offset |
 | `invalid_headers.csv` | An unexpected column |
 | `invalid_mixed_rows.csv` | One good row and two bad ones, to show atomicity |
+| `invalid_zero_amount.csv` | A capture followed by a refund of zero |
+| `invalid_negative_amount.csv` | A capture of a negative amount |
 
 ## Parser version
 
@@ -316,8 +326,8 @@ that it handles them.
 always be traced to the rules that produced it. It changes when a header set, a
 coercion rule, or the source-record ID derivation changes.
 
-2.0.0 stopped trimming whitespace and started refusing it. Documents that 1.0.0
-accepted can be refused by 2.0.0, which is why this is a major step rather than
-a minor one. Facts already stored are unaffected: the change is to what is
-accepted, not to how an accepted row is represented. The domain contract version
-is untouched, and the generated domain schemas are byte identical.
+2.0.0 stopped trimming whitespace and started refusing it. 3.0.0 started
+refusing a payment event amount of zero. Each is a major step because documents
+the previous version accepted can be refused by the next. Facts already stored
+are unaffected in both cases: the change is to what is accepted, not to how an
+accepted row is represented.

@@ -6,11 +6,13 @@ several reasons applied.
 """
 
 import pytest
+from pydantic import ValidationError
 
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import DecisionStatus, ReconciliationDecision
 from app.domain.evidence import SourceFactIndex
 from app.domain.invariants import REQUIRED_FOR_RESOLUTION, InvariantId, InvariantOutcome
+from app.ingestion.projection import project_payment_event
 from app.reconciliation.baseline import EXCEPTION_BY_INVARIANT, reconcile_line
 from app.reconciliation.batch import reconcile
 from app.reconciliation.snapshot import FactSnapshot
@@ -559,3 +561,121 @@ class TestInv009AcrossLifecycleShapes:
             payout("po-1"),
         )
         assert only_decision(index).status is DecisionStatus.EXCEPTION
+
+
+class TestTheZeroReturnBypassIsClosed:
+    """A zero refund used to switch off the settlement gross check.
+
+    With one positive capture and a refund of zero: INV-004 passed because
+    nothing exceeded the capture, INV-009 became NOT_APPLICABLE because a return
+    existed, and no lifecycle code fired because zero is neither a partial nor a
+    full return. A settlement line settling any amount at all could resolve.
+
+    The fix is at the contract boundary, so these tests prove the scenario
+    cannot be built rather than that it is handled.
+    """
+
+    def test_the_zero_return_event_cannot_be_projected(self) -> None:
+        """A fact carrying one cannot become a PaymentEvent."""
+        fact = payment_event("pe-2", event_id="evt-2", event_type="REFUND", amount_minor=0)
+
+        with pytest.raises(ValidationError, match="must move a positive amount"):
+            project_payment_event(fact)
+
+    def test_such_a_fact_cannot_reach_a_decision(self) -> None:
+        """Reconciliation refuses rather than resolving over it.
+
+        A fact like this can no longer be imported, so its presence means the
+        store was populated outside the sanctioned path. Failing loudly is the
+        safe direction: the alternative was resolving a settlement whose gross
+        was never checked.
+        """
+        index = index_of(
+            payment_event("pe-1", amount_minor=100_000),
+            payment_event("pe-2", event_id="evt-2", event_type="REFUND", amount_minor=0),
+            settlement_line("sl-1"),
+            payout("po-1"),
+        )
+
+        with pytest.raises(ValidationError, match="must move a positive amount"):
+            reconcile(index)
+
+    def test_the_gross_mismatch_it_used_to_hide_is_unreachable(self) -> None:
+        """The worst form: a zero refund masking an 80000 against 100000 gap."""
+        index = index_of(
+            payment_event("pe-1", amount_minor=100_000),
+            payment_event("pe-2", event_id="evt-2", event_type="REFUND", amount_minor=0),
+            settlement_line("sl-1", gross_minor=80_000, net_minor=77_640),
+            payout("po-1", net_minor=77_640),
+        )
+
+        with pytest.raises(ValidationError):
+            reconcile(index)
+
+    def test_a_real_partial_refund_is_still_reported_normally(self) -> None:
+        """The closure did not turn a genuine refund into a crash."""
+        decision = only_decision(
+            index_of(
+                payment_event("pe-1"),
+                payment_event(
+                    "pe-2",
+                    event_id="evt-2",
+                    event_type="REFUND",
+                    amount_minor=40_000,
+                    occurred_at=at(30),
+                ),
+                settlement_line("sl-1"),
+                payout("po-1"),
+            )
+        )
+
+        assert decision.status is DecisionStatus.EXCEPTION
+        assert ExceptionCode.PARTIAL_REFUND in decision.exception_codes
+
+    def test_every_return_now_produces_a_non_resolution(self) -> None:
+        """The lifecycle logic has no zero path left.
+
+        Every returning event moves at least one minor unit, so a non-empty set
+        of returns always falls into partial, full, or exceeding the capture,
+        and each of those carries a code.
+        """
+        for returned, expected in [
+            (40_000, ExceptionCode.PARTIAL_REFUND),
+            (100_000, ExceptionCode.UNSUPPORTED_STATE),
+            (150_000, ExceptionCode.AMOUNT_MISMATCH),
+        ]:
+            decision = only_decision(
+                index_of(
+                    payment_event("pe-1", amount_minor=100_000),
+                    payment_event(
+                        "pe-2",
+                        event_id="evt-2",
+                        event_type="REFUND",
+                        amount_minor=returned,
+                        occurred_at=at(30),
+                    ),
+                    settlement_line("sl-1"),
+                    payout("po-1"),
+                )
+            )
+            assert decision.status is not DecisionStatus.RESOLVED
+            assert expected in decision.exception_codes
+
+    def test_a_one_unit_refund_is_a_partial_refund(self) -> None:
+        """The smallest return the contract now allows still declines a resolution."""
+        decision = only_decision(
+            index_of(
+                payment_event("pe-1", amount_minor=100_000),
+                payment_event(
+                    "pe-2",
+                    event_id="evt-2",
+                    event_type="REFUND",
+                    amount_minor=1,
+                    occurred_at=at(30),
+                ),
+                settlement_line("sl-1"),
+                payout("po-1"),
+            )
+        )
+
+        assert ExceptionCode.PARTIAL_REFUND in decision.exception_codes

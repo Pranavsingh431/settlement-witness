@@ -218,7 +218,7 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   matches, what it refuses to match, and what a result does and does not mean.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
-- [docs/schema/v4/](docs/schema/v4/) holds JSON Schema generated from the models by
+- [docs/schema/v5/](docs/schema/v5/) holds JSON Schema generated from the models by
   `make schema`. A test fails if it drifts from the code.
 - [docs/adr/](docs/adr/) records the decisions and why they were made.
 - [docs/phase-reports/](docs/phase-reports/) records what each phase built and verified.

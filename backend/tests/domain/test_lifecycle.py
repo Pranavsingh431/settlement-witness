@@ -5,10 +5,19 @@ from pydantic import ValidationError
 
 from app.domain.lifecycle import (
     RETURNING_EVENT_TYPES,
+    PaymentEvent,
     PaymentEventType,
     PaymentIdentity,
 )
-from tests.domain.conftest import make_breakdown, make_event, make_payout, make_settlement_line
+from app.domain.money import Money
+from tests.domain.conftest import (
+    FIXED_TIME,
+    make_breakdown,
+    make_event,
+    make_money,
+    make_payout,
+    make_settlement_line,
+)
 
 
 class TestPaymentIdentity:
@@ -100,3 +109,92 @@ class TestPayoutBatch:
         """Frozen, like every other record in the contract."""
         with pytest.raises(ValidationError):
             make_payout().net_minor = 1
+
+
+class TestPaymentEventAmountsAreStrictlyPositive:
+    """An event amount is a magnitude of something that happened.
+
+    Zero is not a smaller version of that, it is the absence of it. The model
+    always documented amounts as positive magnitudes and did not enforce it,
+    which left a zero refund usable as a one line switch: a return existed, so
+    INV-009 became not applicable, and no lifecycle code fired because zero is
+    neither a partial nor a full return.
+    """
+
+    @pytest.mark.parametrize("event_type", list(PaymentEventType))
+    def test_a_zero_amount_is_refused_for_every_event_type(
+        self, event_type: PaymentEventType
+    ) -> None:
+        """Capture, refund, reversal and chargeback alike."""
+        with pytest.raises(ValidationError, match="must move a positive amount"):
+            make_event(event_type=event_type, amount=make_money(0))
+
+    @pytest.mark.parametrize("event_type", list(PaymentEventType))
+    def test_a_negative_amount_is_refused_for_every_event_type(
+        self, event_type: PaymentEventType
+    ) -> None:
+        """Direction comes from the type, so the amount is never signed."""
+        with pytest.raises(ValidationError, match="must move a positive amount"):
+            make_event(event_type=event_type, amount=make_money(-1))
+
+    def test_the_refusal_names_the_type_and_the_amount(self) -> None:
+        """A person reading the failure should not have to guess which event."""
+        with pytest.raises(ValidationError, match="REFUND"):
+            make_event(event_type=PaymentEventType.REFUND, amount=make_money(0))
+
+    def test_one_minor_unit_is_enough(self) -> None:
+        """The rule is strictly positive, not a minimum size."""
+        assert make_event(amount=make_money(1)).amount.amount_minor == 1
+
+    def test_a_negative_amount_is_refused_outside_csv_ingestion(self) -> None:
+        """The constraint is on the model, not on the parser.
+
+        A caller building an event directly, from an API response or a test,
+        gets the same refusal as a document would.
+        """
+        with pytest.raises(ValidationError):
+            PaymentEvent(
+                event_id="evt-1",
+                payment_id="pay-1",
+                event_type=PaymentEventType.CAPTURE,
+                amount=Money(amount_minor=-500, currency="INR"),
+                occurred_at=FIXED_TIME,
+                source_record_id="rec-1",
+            )
+
+
+class TestMoneyStaysSigned:
+    """The tightening is on events only. Settlement amounts are unaffected."""
+
+    def test_a_settlement_line_may_declare_a_zero_net(self) -> None:
+        """A line whose fee consumed the whole gross settles nothing, validly."""
+        line = make_settlement_line(
+            breakdown=make_breakdown(gross_minor=100, fee_minor=100, tax_minor=0),
+            net_minor=0,
+        )
+        assert line.net_minor == 0
+
+    def test_a_settlement_line_may_declare_a_negative_net(self) -> None:
+        """A clawback larger than the line is representable."""
+        line = make_settlement_line(
+            breakdown=make_breakdown(gross_minor=100, adjustment_minor=-500),
+            net_minor=-436,
+        )
+        assert line.net_minor < 0
+
+    def test_an_adjustment_may_be_zero(self) -> None:
+        """Most lines have no adjustment at all."""
+        assert make_breakdown(adjustment_minor=0).adjustment_minor == 0
+
+    def test_a_fee_may_be_zero(self) -> None:
+        """A free transaction is a real thing."""
+        assert make_breakdown(fee_minor=0).fee_minor == 0
+
+    def test_a_payout_may_total_zero(self) -> None:
+        """A batch that nets to nothing is still a batch."""
+        assert make_payout(net_minor=0).net_minor == 0
+
+    def test_money_itself_still_allows_zero_and_negative(self) -> None:
+        """The constraint belongs to PaymentEvent, not to Money."""
+        assert make_money(0).amount_minor == 0
+        assert make_money(-500).amount_minor == -500

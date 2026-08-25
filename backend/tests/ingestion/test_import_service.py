@@ -82,7 +82,7 @@ class TestValidImports:
     def test_a_receipt_records_the_parser_version(self, session: Session) -> None:
         """A fact can always be traced to the rules that produced it."""
         assert run_import(session, "payment_events.csv").parser_version == PARSER_VERSION
-        assert PARSER_VERSION == "2.0.0"
+        assert PARSER_VERSION == "3.0.0"
 
     def test_every_row_gets_a_recorded_outcome(self, session: Session) -> None:
         """The receipt accounts for every row, not just the interesting ones."""
@@ -685,3 +685,89 @@ class TestDatabaseConflictReceiptIsTruthful:
         assert outcomes == [RowOutcome.DUPLICATE_NO_OP, RowOutcome.DUPLICATE_CONFLICT]
         assert receipt.duplicate_count == 1
         assert receipt.conflict_count == 1
+
+
+class TestZeroEventAmountsAreRejectedAtImport:
+    """A document carrying an event that moved no money is refused.
+
+    The whole document, atomically, like every other invalid row. This is the
+    boundary that stops such a fact ever being stored, which is what makes the
+    reconciliation guarantee hold.
+    """
+
+    def test_a_zero_refund_rejects_its_document(self, session: Session) -> None:
+        """The exact bypass, refused before anything is written."""
+        receipt = run_import(session, "invalid_zero_amount.csv")
+
+        assert receipt.outcome is ImportOutcome.REJECTED_INVALID
+        assert fact_count(session) == 0
+
+    def test_the_row_error_names_the_new_code(self, session: Session) -> None:
+        """Stable and precise, not folded into NEGATIVE_AMOUNT."""
+        receipt = run_import(session, "invalid_zero_amount.csv")
+
+        rejected = [r for r in receipt.row_results if r.outcome is RowOutcome.REJECTED]
+        assert [r.code for r in rejected] == ["NON_POSITIVE_AMOUNT"]
+
+    def test_the_valid_row_in_that_document_is_not_written(self, session: Session) -> None:
+        """Atomic, so the good capture on row 2 is not stored either."""
+        receipt = run_import(session, "invalid_zero_amount.csv")
+
+        assert receipt.accepted_count == 0
+        assert any(r.outcome is RowOutcome.NOT_APPLIED for r in receipt.row_results)
+        assert fact_count(session) == 0
+
+    def test_a_negative_amount_uses_the_same_code(self, session: Session) -> None:
+        """Both are the same failure: the column must move money and did not."""
+        receipt = run_import(session, "invalid_negative_amount.csv")
+
+        assert receipt.outcome is ImportOutcome.REJECTED_INVALID
+        assert receipt.row_results[0].code == "NON_POSITIVE_AMOUNT"
+
+    def test_a_rejected_document_still_writes_a_receipt(self, session: Session) -> None:
+        """A refusal leaves a trace, as every other refusal does."""
+        run_import(session, "invalid_zero_amount.csv")
+
+        receipts = ImportReceiptRepository(session).all_receipts()
+        assert len(receipts) == 1
+        assert receipts[0].parser_version == PARSER_VERSION
+
+    def test_the_valid_payment_events_still_import(self, session: Session) -> None:
+        """The tightening costs nothing for documents that were already correct."""
+        receipt = run_import(session, "payment_events.csv")
+
+        assert receipt.outcome is ImportOutcome.ACCEPTED
+        assert receipt.accepted_count == 5
+
+    def test_settlement_lines_may_still_carry_zero_components(self, session: Session) -> None:
+        """The rule is on payment events only.
+
+        A fee of zero is a free transaction and a real thing, so a settlement
+        line document with zeroes in it must still import.
+        """
+        header = (
+            "provider_event_id,settlement_line_id,payout_id,payment_id,gross_minor,"
+            "fee_minor,tax_minor,adjustment_minor,net_minor,currency,occurred_at\n"
+        )
+        row = "sl-z,line-z,payout-z,pay-z,1000,0,0,0,1000,INR,2026-08-20T09:15:00+00:00\n"
+        receipt = ImportService(session, now=FIXED_NOW).import_document(
+            (header + row).encode("utf-8"),
+            source_system=PSP,
+            record_type=SourceRecordType.SETTLEMENT_LINE,
+            document_name="zero-fee.csv",
+        )
+
+        assert receipt.outcome is ImportOutcome.ACCEPTED
+
+    def test_a_payout_may_still_total_zero(self, session: Session) -> None:
+        """Same reason. A batch that nets to nothing is still a batch."""
+        header = "provider_event_id,payout_id,merchant_id,net_minor,currency,utr,occurred_at\n"
+        row = "po-z,payout-z,merch-z,0,INR,,2026-08-20T09:15:00+00:00\n"
+        receipt = ImportService(session, now=FIXED_NOW).import_document(
+            (header + row).encode("utf-8"),
+            source_system=PSP,
+            record_type=SourceRecordType.PAYOUT,
+            document_name="zero-payout.csv",
+        )
+
+        assert receipt.outcome is ImportOutcome.ACCEPTED

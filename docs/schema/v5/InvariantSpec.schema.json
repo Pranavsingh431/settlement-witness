@@ -54,5 +54,5 @@
   ],
   "title": "InvariantSpec",
   "type": "object",
-  "x-domain-contract-version": "4.0.0"
+  "x-domain-contract-version": "5.0.0"
 }

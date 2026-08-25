@@ -11,17 +11,18 @@ from typing import Final
 
 from app.domain.facts import SourceRecordType
 
-PARSER_VERSION: Final = "2.0.0"
+PARSER_VERSION: Final = "3.0.0"
 """Version of the parsing and normalisation rules.
 
 Recorded on every import receipt, so a fact can always be traced to the rules
 that produced it. It changes when a header set, a coercion rule or the
 source-record ID derivation changes.
 
-2.0.0 stopped trimming whitespace and started refusing it. Documents that 1.0.0
-accepted can be refused by 2.0.0, which is why this is a major step rather than
-a minor one. Facts already stored are unaffected: the change is to what is
-accepted, not to how an accepted row is represented.
+2.0.0 stopped trimming whitespace and started refusing it. 3.0.0 started
+refusing a payment event amount of zero. Each is a major step because documents
+the previous version accepted can be refused by the next. Facts already stored
+are unaffected: the change is to what is accepted, not to how an accepted row is
+represented.
 """
 
 
@@ -36,6 +37,12 @@ class ColumnKind(StrEnum):
 
     NON_NEGATIVE_AMOUNT_MINOR = "NON_NEGATIVE_AMOUNT_MINOR"
     """An amount that must not be below zero, such as a fee magnitude."""
+
+    POSITIVE_AMOUNT_MINOR = "POSITIVE_AMOUNT_MINOR"
+    """An amount that must move money, so zero is refused as well as negative.
+
+    Payment event amounts only. A settlement line's fee or tax may legitimately
+    be zero; an event that took or returned nothing may not exist."""
 
     CURRENCY = "CURRENCY"
     """An ISO 4217 alpha-3 code, upper case."""
@@ -58,7 +65,7 @@ PAYMENT_EVENT_COLUMNS: Final[tuple[tuple[str, ColumnKind], ...]] = (
     ("payment_id", ColumnKind.IDENTIFIER),
     ("merchant_id", ColumnKind.IDENTIFIER),
     ("event_type", ColumnKind.PAYMENT_EVENT_TYPE),
-    ("amount_minor", ColumnKind.NON_NEGATIVE_AMOUNT_MINOR),
+    ("amount_minor", ColumnKind.POSITIVE_AMOUNT_MINOR),
     ("currency", ColumnKind.CURRENCY),
     ("occurred_at", ColumnKind.TIMESTAMP),
 )

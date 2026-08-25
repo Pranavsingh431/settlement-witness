@@ -8,8 +8,9 @@ the common cases look like exceptions.
 """
 
 from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.domain.money import Money, MoneyBreakdown
 from app.domain.primitives import (
@@ -78,6 +79,33 @@ class PaymentEvent(BaseModel):
     occurred_at: UtcTimestamp
     source_record_id: SourceRecordId
     """The source fact this event was read from. Every event is traceable."""
+
+    @model_validator(mode="after")
+    def _check_amount_is_positive(self) -> Self:
+        """Reject an event that moved no money.
+
+        Every one of these types is a magnitude of something that happened:
+        money taken, or money given back. Zero is not a smaller version of that,
+        it is the absence of it, and an event describing nothing should not be a
+        record at all.
+
+        This is not pedantry. A zero refund used to be a one line switch that
+        turned INV-009 off: a return existed, so the gross check became not
+        applicable, and no lifecycle code fired because zero is neither a
+        partial nor a full return. A settlement line settling any amount at all
+        could then resolve. The constraint the docstring above always claimed is
+        now enforced.
+
+        Money itself stays signed. A settlement net and an adjustment may
+        legitimately be zero or negative; an event amount may not.
+        """
+        if self.amount.amount_minor <= 0:
+            message = (
+                f"a {self.event_type.value} event must move a positive amount, "
+                f"got {self.amount.amount_minor}"
+            )
+            raise ValueError(message)
+        return self
 
 
 class SettlementLine(BaseModel):

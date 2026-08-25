@@ -180,7 +180,11 @@ def _coerce_cell(
     if kind is ColumnKind.IDENTIFIER:
         return text, None
 
-    if kind in (ColumnKind.AMOUNT_MINOR, ColumnKind.NON_NEGATIVE_AMOUNT_MINOR):
+    if kind in (
+        ColumnKind.AMOUNT_MINOR,
+        ColumnKind.NON_NEGATIVE_AMOUNT_MINOR,
+        ColumnKind.POSITIVE_AMOUNT_MINOR,
+    ):
         if not _INTEGER_PATTERN.match(text):
             return fail(
                 RowErrorCode.NOT_AN_INTEGER,
@@ -191,6 +195,11 @@ def _coerce_cell(
             return fail(
                 RowErrorCode.NEGATIVE_AMOUNT,
                 f"{column} is a magnitude and must not be negative, got {amount}",
+            )
+        if kind is ColumnKind.POSITIVE_AMOUNT_MINOR and amount <= 0:
+            return fail(
+                RowErrorCode.NON_POSITIVE_AMOUNT,
+                f"{column} must move money, so it must be greater than zero, got {amount}",
             )
         return amount, None
 

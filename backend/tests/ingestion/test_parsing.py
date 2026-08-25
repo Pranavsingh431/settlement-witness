@@ -186,9 +186,35 @@ class TestMoneyIsNeverDecimal:
         assert [error.code for error in errors] == [RowErrorCode.NOT_AN_INTEGER]
 
     def test_a_negative_magnitude_is_refused(self) -> None:
-        """An amount column that is a magnitude must not go below zero."""
-        _, errors = parse_one(payment_row(amount_minor="-1"))
+        """A magnitude column, such as a fee, must not go below zero."""
+        row = "sl-1,line-1,payout-1,pay-1,1000,-20,3,0,977,INR,2026-08-20T09:15:00+05:30"
+        _, errors = parse_one(row, SourceRecordType.SETTLEMENT_LINE)
         assert [error.code for error in errors] == [RowErrorCode.NEGATIVE_AMOUNT]
+
+    def test_a_zero_magnitude_is_accepted(self) -> None:
+        """A fee of zero is a free transaction, which is a real thing.
+
+        Only payment event amounts must move money. Settlement components may be
+        zero, and this holds the two rules apart.
+        """
+        row = "sl-1,line-1,payout-1,pay-1,1000,0,0,0,1000,INR,2026-08-20T09:15:00+05:30"
+        parsed, errors = parse_one(row, SourceRecordType.SETTLEMENT_LINE)
+        assert errors == []
+        assert parsed is not None
+        assert parsed.canonical_payload["fee_minor"] == 0
+
+    @pytest.mark.parametrize("value", ["0", "-1", "-1000"])
+    def test_a_payment_event_amount_must_move_money(self, value: str) -> None:
+        """Zero and negative alike. An event that moved nothing is not an event."""
+        _, errors = parse_one(payment_row(amount_minor=value))
+        assert [error.code for error in errors] == [RowErrorCode.NON_POSITIVE_AMOUNT]
+
+    def test_one_minor_unit_is_a_valid_event_amount(self) -> None:
+        """The rule is strictly positive, not a minimum size."""
+        parsed, errors = parse_one(payment_row(amount_minor="1"))
+        assert errors == []
+        assert parsed is not None
+        assert parsed.canonical_payload["amount_minor"] == 1
 
     def test_a_signed_adjustment_is_accepted(self) -> None:
         """Adjustments cover credits and debits, so they may be negative."""

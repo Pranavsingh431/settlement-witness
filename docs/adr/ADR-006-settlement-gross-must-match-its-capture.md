@@ -4,6 +4,8 @@
 - Date: 2026-08-25
 - Supersedes: none
 - Superseded by: none
+- Reinforced by: [ADR-007](ADR-007-payment-event-amounts-are-strictly-positive.md),
+  which closed a zero-amount return that made this reasoning incomplete
 - Related: [ADR-002](ADR-002-domain-contract-and-verifier-authority.md),
   [ADR-005](ADR-005-exact-reference-matching-and-snapshot-payouts.md)
 

@@ -39,6 +39,14 @@ class RowErrorCode(StrEnum):
     NEGATIVE_AMOUNT = "NEGATIVE_AMOUNT"
     """A magnitude column, such as a fee, held a value below zero."""
 
+    NON_POSITIVE_AMOUNT = "NON_POSITIVE_AMOUNT"
+    """A column that must move money held zero or less.
+
+    Payment event amounts are the case. A capture, refund, reversal or
+    chargeback of zero describes nothing happening, and a record of nothing is
+    not a record. Refusing it at the boundary is what stops a zero refund being
+    used to switch off the settlement gross check."""
+
     INVALID_CURRENCY = "INVALID_CURRENCY"
     """Not an ISO 4217 alpha-3 code."""
 
