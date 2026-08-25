@@ -1,5 +1,6 @@
 """Tests for the import service: outcomes, idempotency and atomicity."""
 
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,14 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from app.domain.facts import SourceRecordType, SourceSystem
-from app.ingestion.service import ImportOutcome, ImportReceipt, ImportService, RowOutcome
+from app.ingestion.schemas import PARSER_VERSION
+from app.ingestion.service import (
+    ImportOutcome,
+    ImportReceipt,
+    ImportService,
+    RowOutcome,
+    RowResult,
+)
 from app.storage.repository import ImportReceiptRepository, SourceFactRepository
 from tests.ingestion.conftest import FIXED_NOW, read_fixture
 
@@ -73,7 +81,8 @@ class TestValidImports:
 
     def test_a_receipt_records_the_parser_version(self, session: Session) -> None:
         """A fact can always be traced to the rules that produced it."""
-        assert run_import(session, "payment_events.csv").parser_version == "1.0.0"
+        assert run_import(session, "payment_events.csv").parser_version == PARSER_VERSION
+        assert PARSER_VERSION == "2.0.0"
 
     def test_every_row_gets_a_recorded_outcome(self, session: Session) -> None:
         """The receipt accounts for every row, not just the interesting ones."""
@@ -442,6 +451,237 @@ class TestSavepointRollback:
         assert receipt.outcome is ImportOutcome.REJECTED_CONFLICT
         assert receipt.accepted_count == 0
         assert receipt.failure_detail is not None
-        assert "none were written" in receipt.failure_detail
+        assert "no facts were written" in receipt.failure_detail
         assert SourceFactRepository(session).get("a-brand-new-record-id") is None
         assert SourceFactRepository(session).count() == 5
+
+
+class TestDatabaseConflictReceiptIsTruthful:
+    """A rolled-back import must not leave a receipt claiming it succeeded.
+
+    The preflight examination catches every conflict it can see, so reaching the
+    database constraint means the two disagreed. When that happens the receipt
+    has to describe the empty result, not the optimistic one the examination
+    produced. An earlier version kept the ACCEPTED row outcomes and only zeroed
+    the count, so the receipt contradicted itself.
+    """
+
+    @staticmethod
+    def _forced_conflict(session: Session) -> ImportReceipt:
+        """Append two facts sharing an identity, bypassing the preflight check.
+
+        The examination would never produce this pair. Calling the append step
+        directly is what forces the database to be the one that refuses.
+        """
+        run_import(session, "payment_events.csv")
+        session.flush()
+        stored = SourceFactRepository(session).all_facts()[0]
+
+        service = ImportService(session, now=FIXED_NOW)
+        fresh = stored.model_copy(
+            update={"source_record_id": "row-two-new", "provider_event_id": "pe-unseen"}
+        )
+        colliding = stored.model_copy(update={"source_record_id": "row-three-collides"})
+        pending = [fresh, colliding]
+
+        preflight = service._build_receipt(
+            receipt_id="r-forced",
+            document_hash="c" * 64,
+            document_name="forced.csv",
+            source_system=PSP,
+            record_type=SourceRecordType.PAYMENT_EVENT,
+            results=[
+                RowResult(
+                    row_number=number,
+                    outcome=RowOutcome.ACCEPTED,
+                    source_record_id=fact.source_record_id,
+                )
+                for number, fact in enumerate(pending, start=2)
+            ],
+            row_errors=[],
+            conflicts=[],
+        )
+        assert preflight.accepted_count == 2
+
+        return service._append_facts(preflight, pending)
+
+    def test_no_fact_is_written(self, session: Session) -> None:
+        """The savepoint rolled back, so the store is exactly as it was."""
+        self._forced_conflict(session)
+
+        repository = SourceFactRepository(session)
+        assert repository.count() == 5
+        assert repository.get("row-two-new") is None
+        assert repository.get("row-three-collides") is None
+
+    def test_no_row_is_still_reported_as_accepted(self, session: Session) -> None:
+        """Nothing was written, so nothing may claim to have been."""
+        receipt = self._forced_conflict(session)
+
+        assert receipt.accepted_count == 0
+        assert all(r.outcome is not RowOutcome.ACCEPTED for r in receipt.row_results)
+
+    def test_the_conflicting_row_is_named_as_a_conflict(self, session: Session) -> None:
+        """The row that actually collided is identified, not just counted."""
+        receipt = self._forced_conflict(session)
+
+        conflicts = [r for r in receipt.row_results if r.outcome is RowOutcome.DUPLICATE_CONFLICT]
+        assert [r.source_record_id for r in conflicts] == ["row-three-collides"]
+
+    def test_the_innocent_row_becomes_not_applied(self, session: Session) -> None:
+        """It was valid. It is not in the store, and the receipt says why."""
+        receipt = self._forced_conflict(session)
+
+        not_applied = [r for r in receipt.row_results if r.outcome is RowOutcome.NOT_APPLIED]
+        assert [r.source_record_id for r in not_applied] == ["row-two-new"]
+        assert not_applied[0].detail == "not written, because another row rejected the import"
+
+    def test_counts_agree_exactly_with_the_row_results(self, session: Session) -> None:
+        """A receipt that contradicts itself is worse than no receipt."""
+        receipt = self._forced_conflict(session)
+
+        tally = Counter(r.outcome for r in receipt.row_results)
+        assert receipt.accepted_count == tally[RowOutcome.ACCEPTED]
+        assert receipt.duplicate_count == tally[RowOutcome.DUPLICATE_NO_OP]
+        assert receipt.conflict_count == tally[RowOutcome.DUPLICATE_CONFLICT]
+        assert receipt.rejected_count == tally[RowOutcome.REJECTED]
+        assert receipt.row_count == len(receipt.row_results)
+
+    def test_the_failure_detail_is_deterministic_and_names_the_cause(
+        self, session: Session
+    ) -> None:
+        """Two identical runs produce the same words, and they identify the record."""
+        first = self._forced_conflict(session)
+        session.rollback()
+        second = self._forced_conflict(session)
+
+        assert first.failure_detail == second.failure_detail
+        assert first.failure_detail is not None
+        assert "no facts were written" in first.failure_detail
+        assert "row-three-collides" in first.failure_detail
+
+    def test_a_self_colliding_pair_is_identified_without_the_database(
+        self, session: Session
+    ) -> None:
+        """Two rows of one import colliding with each other, not with the store.
+
+        Nothing is in the database to compare against after the rollback, so the
+        cause has to be found in the pending set itself.
+        """
+        run_import(session, "payment_events.csv")
+        session.flush()
+        stored = SourceFactRepository(session).all_facts()[0]
+
+        service = ImportService(session, now=FIXED_NOW)
+        twins = [
+            stored.model_copy(
+                update={"source_record_id": f"twin-{index}", "provider_event_id": "pe-twin"}
+            )
+            for index in (1, 2)
+        ]
+        preflight = service._build_receipt(
+            receipt_id="r-twins",
+            document_hash="d" * 64,
+            document_name="twins.csv",
+            source_system=PSP,
+            record_type=SourceRecordType.PAYMENT_EVENT,
+            results=[
+                RowResult(
+                    row_number=number,
+                    outcome=RowOutcome.ACCEPTED,
+                    source_record_id=fact.source_record_id,
+                )
+                for number, fact in enumerate(twins, start=2)
+            ],
+            row_errors=[],
+            conflicts=[],
+        )
+
+        receipt = service._append_facts(preflight, twins)
+
+        assert receipt.conflict_count == 2
+        assert receipt.accepted_count == 0
+        assert receipt.failure_detail is not None
+        assert "twin-1" in receipt.failure_detail
+        assert "twin-2" in receipt.failure_detail
+
+    def test_a_repeated_source_record_id_in_one_import_is_identified(
+        self, session: Session
+    ) -> None:
+        """Two rows claiming the same record ID collide on the primary key.
+
+        Different cause from a repeated idempotency identity, and the receipt
+        has to name it just the same.
+        """
+        run_import(session, "payment_events.csv")
+        session.flush()
+        stored = SourceFactRepository(session).all_facts()[0]
+
+        service = ImportService(session, now=FIXED_NOW)
+        clones = [
+            stored.model_copy(
+                update={"source_record_id": "same-id", "provider_event_id": f"pe-{index}"}
+            )
+            for index in (1, 2)
+        ]
+        preflight = service._build_receipt(
+            receipt_id="r-clones",
+            document_hash="e" * 64,
+            document_name="clones.csv",
+            source_system=PSP,
+            record_type=SourceRecordType.PAYMENT_EVENT,
+            results=[
+                RowResult(
+                    row_number=number,
+                    outcome=RowOutcome.ACCEPTED,
+                    source_record_id=fact.source_record_id,
+                )
+                for number, fact in enumerate(clones, start=2)
+            ],
+            row_errors=[],
+            conflicts=[],
+        )
+
+        receipt = service._append_facts(preflight, clones)
+
+        assert receipt.outcome is ImportOutcome.REJECTED_CONFLICT
+        assert receipt.accepted_count == 0
+        assert receipt.failure_detail is not None
+        assert "same-id" in receipt.failure_detail
+
+    def test_a_row_that_was_already_a_duplicate_keeps_its_outcome(self, session: Session) -> None:
+        """Only ACCEPTED rows are rewritten. A no-op row was already truthful."""
+        run_import(session, "payment_events.csv")
+        session.flush()
+        stored = SourceFactRepository(session).all_facts()[0]
+
+        service = ImportService(session, now=FIXED_NOW)
+        colliding = stored.model_copy(update={"source_record_id": "collides"})
+        preflight = service._build_receipt(
+            receipt_id="r-mixed",
+            document_hash="f" * 64,
+            document_name="mixed.csv",
+            source_system=PSP,
+            record_type=SourceRecordType.PAYMENT_EVENT,
+            results=[
+                RowResult(
+                    row_number=2,
+                    outcome=RowOutcome.DUPLICATE_NO_OP,
+                    source_record_id="already-stored",
+                ),
+                RowResult(
+                    row_number=3,
+                    outcome=RowOutcome.ACCEPTED,
+                    source_record_id="collides",
+                ),
+            ],
+            row_errors=[],
+            conflicts=[],
+        )
+
+        receipt = service._append_facts(preflight, [colliding])
+
+        outcomes = [r.outcome for r in receipt.row_results]
+        assert outcomes == [RowOutcome.DUPLICATE_NO_OP, RowOutcome.DUPLICATE_CONFLICT]
+        assert receipt.duplicate_count == 1
+        assert receipt.conflict_count == 1

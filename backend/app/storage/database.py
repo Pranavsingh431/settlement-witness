@@ -62,9 +62,44 @@ def create_database_engine(url: str, *, echo: bool = False) -> Engine:
     return engine
 
 
+#: Tables that may only ever be inserted into.
+APPEND_ONLY_TABLES: tuple[str, ...] = ("source_facts", "import_receipts")
+
+
+def _immutability_triggers() -> tuple[str, ...]:
+    """Return the DDL that makes the append-only tables reject changes.
+
+    The repositories have no update or delete method, which stops the
+    application from rewriting history by mistake. It does nothing about a
+    migration script, a maintenance session, or anything else holding a
+    connection. Append-only is a property of the data, so it is enforced where
+    the data lives.
+
+    ``IF NOT EXISTS`` makes this safe to run again, which is what lets ordinary
+    setup create the protections rather than needing a separate step.
+    """
+    statements: list[str] = []
+    for table in APPEND_ONLY_TABLES:
+        for operation in ("UPDATE", "DELETE"):
+            statements.append(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_{operation.lower()} "
+                f"BEFORE {operation} ON {table} "
+                "BEGIN "
+                f"SELECT RAISE(ABORT, '{table} is append-only: {operation} is not permitted'); "
+                "END;"
+            )
+    return tuple(statements)
+
+
 def create_schema(engine: Engine) -> None:
-    """Create every table that does not already exist. Safe to run again."""
+    """Create every table and protection that is not already there.
+
+    Safe to run again. Existing tables are left alone and no data is touched.
+    """
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        for statement in _immutability_triggers():
+            connection.exec_driver_sql(statement)
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:

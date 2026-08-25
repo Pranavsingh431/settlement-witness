@@ -4,6 +4,7 @@
 - Date: 2026-08-25
 - Supersedes: none
 - Superseded by: none
+- Amended: 2026-08-25, see "Amendment" below
 - Related: [ADR-001](ADR-001-stack-and-modular-monolith.md),
   [ADR-002](ADR-002-domain-contract-and-verifier-authority.md),
   [ADR-003](ADR-003-derived-status-and-source-fact-verification.md)
@@ -89,6 +90,33 @@ framework would be ceremony without a subject.
 This is explicitly provisional. The first schema change that has to preserve
 existing rows needs a migration tool and a new ADR. Until then, setup is
 `create_all`, which is safe to run again and touches no data.
+
+## Amendment, 2026-08-25: append-only is enforced at the database
+
+Decision 1 said facts are append-only and the repositories have no way to change
+one. That was true and it was not enough.
+
+A repository without an update or delete method stops the application from
+rewriting history by mistake. It does nothing about a migration script, a
+maintenance session, or anything else holding a connection to the same file. A
+review confirmed it: a direct `UPDATE` rewrote five stored payload hashes and a
+direct `DELETE` removed every fact and every receipt, with nothing objecting.
+
+Append-only is a property of the data, not of one access path, so it is now
+enforced where the data lives. Both `source_facts` and `import_receipts` carry
+SQLite triggers that abort any `UPDATE` or `DELETE` with a message naming the
+table and the operation. `INSERT` is unaffected.
+
+The triggers are created by ordinary `create_schema` with `IF NOT EXISTS`, so a
+clean database is protected without a separate hardening step and setup stays
+safe to run again.
+
+Two consequences worth recording. A trigger firing raises the same
+`IntegrityError` that a unique constraint does, which is harmless here because
+the import path only ever inserts, but it is worth knowing before anything else
+starts catching that exception. And a future migration that has to rewrite these
+tables will have to drop the triggers deliberately, which is the point: it makes
+rewriting history an explicit act rather than an accident.
 
 ## Consequences
 

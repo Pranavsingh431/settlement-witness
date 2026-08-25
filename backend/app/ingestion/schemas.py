@@ -11,12 +11,17 @@ from typing import Final
 
 from app.domain.facts import SourceRecordType
 
-PARSER_VERSION: Final = "1.0.0"
+PARSER_VERSION: Final = "2.0.0"
 """Version of the parsing and normalisation rules.
 
 Recorded on every import receipt, so a fact can always be traced to the rules
 that produced it. It changes when a header set, a coercion rule or the
 source-record ID derivation changes.
+
+2.0.0 stopped trimming whitespace and started refusing it. Documents that 1.0.0
+accepted can be refused by 2.0.0, which is why this is a major step rather than
+a minor one. Facts already stored are unaffected: the change is to what is
+accepted, not to how an accepted row is represented.
 """
 
 

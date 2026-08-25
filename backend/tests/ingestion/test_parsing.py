@@ -165,7 +165,7 @@ class TestDocumentLevelRefusals:
 class TestMoneyIsNeverDecimal:
     """The rule that matters most for a reconciliation system."""
 
-    @pytest.mark.parametrize("value", ["12.5", "12.0", "1e3", " 12 .5", "12.", "0x10", "NaN"])
+    @pytest.mark.parametrize("value", ["12.5", "12.0", "1e3", "12.", "0x10", "NaN"])
     def test_a_non_integer_amount_is_refused(self, value: str) -> None:
         """Including 12.0, which is integral and still refused.
 
@@ -260,9 +260,9 @@ class TestNormalisation:
         assert parsed is not None
         assert parsed.occurred_at == datetime(2026, 8, 20, 3, 45, tzinfo=UTC)
 
-    def test_surrounding_whitespace_is_removed(self) -> None:
-        """A padded cell is the same value as an unpadded one."""
-        parsed, _ = parse_one(payment_row(payment_id="  pay-1  "))
+    def test_an_unpadded_cell_is_taken_exactly_as_written(self) -> None:
+        """Nothing is added or removed from a well formed value."""
+        parsed, _ = parse_one(payment_row(payment_id="pay-1"))
         assert parsed is not None
         assert parsed.canonical_payload["payment_id"] == "pay-1"
 
@@ -304,3 +304,110 @@ class TestSchemaDefinitions:
         for columns in COLUMNS_BY_RECORD_TYPE.values():
             names = [name for name, _ in columns]
             assert len(names) == len(set(names))
+
+
+class TestWhitespaceIsRefusedNotTrimmed:
+    """Padding is a refusal, because trimming is a guess about intent.
+
+    An earlier version of this parser trimmed every cell and every header. That
+    contradicted the documented exact-header rule, and it hid a real class of
+    defect: a padded identifier usually means an export template is broken, and
+    silently accepting it lets one file produce two identities depending on
+    which system read it.
+    """
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [
+            ("provider_event_id", "  pe-1  "),
+            ("payment_id", "pay-1 "),
+            ("merchant_id", " merch-1"),
+            ("amount_minor", " 1000 "),
+            ("currency", " INR"),
+            ("event_type", "CAPTURE "),
+            ("occurred_at", " 2026-08-20T09:15:00+05:30"),
+        ],
+    )
+    def test_padding_in_any_column_is_refused(self, column: str, value: str) -> None:
+        """Identifiers, numbers, currency, enums and timestamps alike."""
+        _, errors = parse_one(payment_row(**{column: value}))
+
+        assert [error.code for error in errors] == [RowErrorCode.SURROUNDING_WHITESPACE]
+        assert errors[0].column == column
+
+    def test_a_tab_counts_as_whitespace(self) -> None:
+        """Not just spaces."""
+        _, errors = parse_one(payment_row(payment_id="\tpay-1"))
+        assert [error.code for error in errors] == [RowErrorCode.SURROUNDING_WHITESPACE]
+
+    def test_internal_whitespace_is_left_alone(self) -> None:
+        """Only the edges are refused. A name with a space in it is a real value."""
+        parsed, errors = parse_one(payment_row(merchant_id="acme retail"))
+        assert errors == []
+        assert parsed is not None
+        assert parsed.canonical_payload["merchant_id"] == "acme retail"
+
+    def test_a_padded_header_is_refused(self) -> None:
+        """A header cell of " event_id" is not the column "event_id"."""
+        header = PAYMENT_HEADER.replace("event_id", " event_id", 1)
+        content = (header + "\n" + payment_row() + "\n").encode("utf-8")
+
+        with pytest.raises(DocumentError) as caught:
+            list(iter_document_rows(content, SourceRecordType.PAYMENT_EVENT))
+        assert caught.value.code is DocumentErrorCode.UNEXPECTED_COLUMNS
+
+    def test_a_whitespace_only_optional_column_is_refused(self) -> None:
+        """It is not the same as an empty cell and must not become one.
+
+        Otherwise a blank column and a space filled column would mean the same
+        thing, and one of them would be a defect nobody ever saw.
+        """
+        row = "po-1,payout-1,merch-1,1000,INR,   ,2026-08-20T09:15:00+05:30"
+        _, errors = parse_one(row, SourceRecordType.PAYOUT)
+
+        assert [error.code for error in errors] == [RowErrorCode.SURROUNDING_WHITESPACE]
+
+    def test_an_exactly_empty_optional_column_is_still_accepted(self) -> None:
+        """The documented behaviour for an absent bank reference is unchanged."""
+        row = "po-1,payout-1,merch-1,1000,INR,,2026-08-20T09:15:00+05:30"
+        parsed, errors = parse_one(row, SourceRecordType.PAYOUT)
+
+        assert errors == []
+        assert parsed is not None
+        assert parsed.canonical_payload["utr"] is None
+
+    def test_a_whitespace_only_required_column_is_refused_as_whitespace(self) -> None:
+        """Reported as padding rather than as a missing value, which is what it is."""
+        _, errors = parse_one(payment_row(payment_id="   "))
+        assert [error.code for error in errors] == [RowErrorCode.SURROUNDING_WHITESPACE]
+
+    def test_an_exactly_empty_required_column_is_still_missing(self) -> None:
+        """The existing code for a genuinely blank required cell is unchanged."""
+        _, errors = parse_one(payment_row(payment_id=""))
+        assert [error.code for error in errors] == [RowErrorCode.MISSING_VALUE]
+
+
+class TestValidFixturesStillImportUnchanged:
+    """The documented examples must be unaffected by the stricter rules."""
+
+    @pytest.mark.parametrize(
+        ("fixture", "record_type", "rows"),
+        [
+            ("payment_events.csv", SourceRecordType.PAYMENT_EVENT, 5),
+            ("settlement_lines.csv", SourceRecordType.SETTLEMENT_LINE, 3),
+            ("payouts.csv", SourceRecordType.PAYOUT, 2),
+        ],
+    )
+    def test_every_valid_fixture_still_parses(
+        self, fixture: str, record_type: SourceRecordType, rows: int
+    ) -> None:
+        """No fixture relied on trimming."""
+        parsed_rows = list(iter_document_rows(read_fixture(fixture), record_type))
+        assert len(parsed_rows) == rows
+
+        for row_number, cells in parsed_rows:
+            parsed, errors = parse_row(
+                cells, record_type, row_number, "a" * 64, SourceSystem.PSP_API
+            )
+            assert errors == []
+            assert parsed is not None

@@ -16,6 +16,19 @@ class RowErrorCode(StrEnum):
     MISSING_VALUE = "MISSING_VALUE"
     """A required column was empty."""
 
+    SURROUNDING_WHITESPACE = "SURROUNDING_WHITESPACE"
+    """A cell carried leading or trailing whitespace.
+
+    Refused rather than trimmed. Trimming is a guess about what the producer
+    meant, and this parser refuses ambiguous input rather than guessing. It also
+    hides a real class of defect: a padded identifier usually means an export
+    template is broken, and silently accepting it lets the same file produce two
+    different identities depending on which system read it.
+
+    A cell containing only whitespace is refused here too. It is not the same as
+    an empty cell, and quietly treating it as one would make a blank column and a
+    space-filled column mean the same thing."""
+
     NOT_AN_INTEGER = "NOT_AN_INTEGER"
     """A money column held something other than a whole number of minor units.
 

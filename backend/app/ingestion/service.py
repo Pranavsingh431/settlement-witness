@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.facts import (
+    IdempotencyKey,
     IngestionOutcome,
     SourceFact,
     SourceRecordType,
@@ -330,19 +331,107 @@ class ImportService:
             self._session.flush()
         except IntegrityError as error:
             savepoint.rollback()
-            return receipt.model_copy(
-                update={
-                    "outcome": ImportOutcome.REJECTED_CONFLICT,
-                    "accepted_count": 0,
-                    "conflict_count": len(pending),
-                    "failure_detail": (
-                        "the database refused these facts, so none were written: "
-                        f"{type(error).__name__}"
-                    ),
-                }
-            )
+            return self._conflict_receipt(receipt, pending, error)
         savepoint.commit()
         return receipt
+
+    def _conflict_receipt(
+        self,
+        receipt: ImportReceipt,
+        pending: Sequence[SourceFact],
+        error: IntegrityError,
+    ) -> ImportReceipt:
+        """Rewrite a receipt to say what the rolled-back import actually did.
+
+        Nothing was written, so no row may still claim to have been accepted.
+        Each pending row is re-examined against the rolled-back database and
+        against the rest of the import, so a row that genuinely collided is
+        reported as a conflict and a row that was merely caught up in the
+        rejection is reported as not applied.
+
+        Args:
+            receipt: The receipt the preflight examination produced.
+            pending: The facts that were attempted.
+            error: The database error that refused them.
+
+        Returns:
+            A receipt whose counts and row results agree with each other and
+            with the empty result of the import.
+        """
+        conflicting = self._identify_conflicts(pending)
+
+        rewritten = tuple(self._rewrite_row(result, conflicting) for result in receipt.row_results)
+        counts = dict.fromkeys(RowOutcome, 0)
+        for result in rewritten:
+            counts[result.outcome] += 1
+
+        named = sorted(conflicting) or ["none identifiable"]
+        return receipt.model_copy(
+            update={
+                "outcome": ImportOutcome.REJECTED_CONFLICT,
+                "accepted_count": 0,
+                "duplicate_count": counts[RowOutcome.DUPLICATE_NO_OP],
+                "conflict_count": counts[RowOutcome.DUPLICATE_CONFLICT],
+                "rejected_count": counts[RowOutcome.REJECTED],
+                "row_results": rewritten,
+                "failure_detail": (
+                    f"{type(error).__name__}: the database refused this import, so no "
+                    f"facts were written; conflicting source records: {named}"
+                ),
+            }
+        )
+
+    def _identify_conflicts(self, pending: Sequence[SourceFact]) -> set[str]:
+        """Return the source record IDs that explain a database level refusal.
+
+        Two things can cause one. A fact can collide with something already
+        stored, which the rolled-back database can still be asked about. Or two
+        facts in the same import can collide with each other, which only the
+        pending set knows about. Both are checked, so the receipt names a cause
+        whenever there is one to name.
+        """
+        conflicting: set[str] = set()
+
+        seen_keys: dict[IdempotencyKey, str] = {}
+        seen_ids: set[str] = set()
+        for fact in pending:
+            first = seen_keys.get(fact.idempotency_key)
+            if first is not None:
+                conflicting.update({first, fact.source_record_id})
+            else:
+                seen_keys[fact.idempotency_key] = fact.source_record_id
+            if fact.source_record_id in seen_ids:
+                conflicting.add(fact.source_record_id)
+            seen_ids.add(fact.source_record_id)
+
+        for fact in pending:
+            stored = self._facts.get(fact.source_record_id) or self._facts.find_by_idempotency_key(
+                fact.idempotency_key
+            )
+            if stored is not None:
+                conflicting.add(fact.source_record_id)
+
+        return conflicting
+
+    @staticmethod
+    def _rewrite_row(result: RowResult, conflicting: set[str]) -> RowResult:
+        """Return one row result as it stands after the import was rolled back."""
+        if result.outcome is not RowOutcome.ACCEPTED:
+            return result
+        if result.source_record_id in conflicting:
+            return result.model_copy(
+                update={
+                    "outcome": RowOutcome.DUPLICATE_CONFLICT,
+                    "code": IngestionOutcome.DUPLICATE_CONFLICT.value,
+                    "detail": "the database refused this record as a duplicate identity",
+                }
+            )
+        return result.model_copy(
+            update={
+                "outcome": RowOutcome.NOT_APPLIED,
+                "detail": "not written, because another row rejected the import",
+            }
+        )
 
     def _build_receipt(
         self,

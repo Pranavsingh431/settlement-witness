@@ -129,9 +129,12 @@ def _read_rows(text: str, record_type: SourceRecordType) -> list[list[str]]:
         message = "document is empty, so it has no header row"
         raise DocumentError(DocumentErrorCode.MISSING_HEADER, message)
 
-    header = tuple(cell.strip() for cell in rows[0])
+    header = tuple(rows[0])
     expected = expected_headers(record_type)
     if header != expected:
+        # Compared exactly, including whitespace. A header cell of " event_id"
+        # is not the column "event_id": accepting it would mean the documented
+        # schema is not actually the schema.
         message = (
             f"headers do not match the {record_type.value} schema exactly; "
             f"expected {list(expected)}, got {list(header)}"
@@ -148,13 +151,27 @@ def _read_rows(text: str, record_type: SourceRecordType) -> list[list[str]]:
 def _coerce_cell(
     value: str, column: str, kind: ColumnKind, row_number: int
 ) -> tuple[JsonValue | None, RowError | None]:
-    """Return the canonical value for one cell, or the error that refuses it."""
-    text = value.strip()
+    """Return the canonical value for one cell, or the error that refuses it.
+
+    The cell is read exactly as the document wrote it. Nothing is trimmed,
+    because trimming is a guess about intent and this parser refuses ambiguous
+    input rather than guessing.
+    """
+    text = value
 
     def fail(code: RowErrorCode, message: str) -> tuple[None, RowError]:
         return None, RowError(row_number=row_number, column=column, code=code, message=message)
 
+    if text != text.strip():
+        return fail(
+            RowErrorCode.SURROUNDING_WHITESPACE,
+            f"{column} has leading or trailing whitespace, which is refused "
+            f"rather than trimmed; got {text!r}",
+        )
+
     if kind is ColumnKind.OPTIONAL_IDENTIFIER:
+        # Exactly empty means absent. Whitespace never reaches here, because a
+        # whitespace-only cell was refused above rather than becoming empty.
         return (text or None), None
 
     if not text:

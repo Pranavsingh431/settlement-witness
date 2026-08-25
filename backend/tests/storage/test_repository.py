@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Engine, Executable, delete, update
+from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.codes import ReasonCode
@@ -23,16 +23,24 @@ from app.domain.invariants import (
 )
 from app.ingestion.service import ImportOutcome, ImportService
 from app.storage.database import (
+    APPEND_ONLY_TABLES,
     create_database_engine,
     create_schema,
     database_url_for,
     session_factory,
     session_scope,
 )
+from app.storage.models import ImportReceiptRow, SourceFactRow
 from app.storage.repository import ImportReceiptRepository, SourceFactRepository
 from tests.ingestion.conftest import FIXED_NOW, read_fixture
 
 PSP = SourceSystem.PSP_API
+
+
+def execute_and_commit(session: Session, statement: Executable) -> None:
+    """Run one statement and commit it, so a raises block holds a single call."""
+    session.execute(statement)
+    session.commit()
 
 
 def load(session: Session, fixture: str, record_type: SourceRecordType) -> None:
@@ -463,3 +471,140 @@ class TestDatabaseSetupCommand:
         capsys.readouterr()
         assert caught.value.code == 0
         assert database.is_file()
+
+
+class TestAppendOnlyAtTheDatabaseBoundary:
+    """The repositories have no update or delete method. That is not enough.
+
+    A repository without a write method stops the application from rewriting
+    history by mistake. It does nothing about a migration script, a maintenance
+    session, or anything else holding a connection. Append-only is a property of
+    the data, so it is enforced where the data lives.
+
+    These tests bypass the repositories entirely and issue SQL against the
+    tables, so they fail at the database layer rather than because a method is
+    missing.
+    """
+
+    @pytest.fixture
+    def loaded(self, session: Session) -> Session:
+        """Return a session with facts and a receipt already stored."""
+        load(session, "payment_events.csv", SourceRecordType.PAYMENT_EVENT)
+        session.commit()
+        return session
+
+    def test_updating_a_source_fact_is_refused(self, loaded: Session) -> None:
+        """Rewriting a payload hash would break every citation of that fact."""
+        with pytest.raises(DatabaseError, match="source_facts is append-only"):
+            execute_and_commit(loaded, update(SourceFactRow).values(payload_hash="f" * 64))
+        loaded.rollback()
+
+    def test_deleting_a_source_fact_is_refused(self, loaded: Session) -> None:
+        """A correction is a later fact, never a removal."""
+        with pytest.raises(DatabaseError, match="source_facts is append-only"):
+            execute_and_commit(loaded, delete(SourceFactRow))
+        loaded.rollback()
+
+    def test_updating_an_import_receipt_is_refused(self, loaded: Session) -> None:
+        """An audit trail that can be edited is not an audit trail."""
+        with pytest.raises(DatabaseError, match="import_receipts is append-only"):
+            execute_and_commit(loaded, update(ImportReceiptRow).values(outcome="ACCEPTED"))
+        loaded.rollback()
+
+    def test_deleting_an_import_receipt_is_refused(self, loaded: Session) -> None:
+        """A refused attempt cannot be made to disappear."""
+        with pytest.raises(DatabaseError, match="import_receipts is append-only"):
+            execute_and_commit(loaded, delete(ImportReceiptRow))
+        loaded.rollback()
+
+    def test_a_refused_update_changes_nothing(self, loaded: Session) -> None:
+        """The refusal is not partial."""
+        before = SourceFactRepository(loaded).all_facts()
+
+        with pytest.raises(DatabaseError):
+            execute_and_commit(loaded, update(SourceFactRow).values(payload_hash="f" * 64))
+        loaded.rollback()
+
+        assert SourceFactRepository(loaded).all_facts() == before
+
+    def test_a_single_row_update_is_refused_too(self, loaded: Session) -> None:
+        """Not only bulk statements."""
+        stored = SourceFactRepository(loaded).all_facts()[0]
+
+        with pytest.raises(DatabaseError, match="append-only"):
+            execute_and_commit(
+                loaded,
+                update(SourceFactRow)
+                .where(SourceFactRow.source_record_id == stored.source_record_id)
+                .values(provider_event_id="rewritten"),
+            )
+        loaded.rollback()
+
+    def test_inserting_is_still_allowed(self, loaded: Session) -> None:
+        """Append-only means append is the one thing that works."""
+        load(loaded, "settlement_lines.csv", SourceRecordType.SETTLEMENT_LINE)
+        loaded.commit()
+
+        assert SourceFactRepository(loaded).count() == 8
+
+    def test_protections_are_created_by_ordinary_setup(self, tmp_path: Path) -> None:
+        """No separate hardening step. A clean database is protected."""
+        database = tmp_path / "protected.sqlite"
+        engine = create_database_engine(database_url_for(database))
+        create_schema(engine)
+
+        with session_scope(engine) as opened:
+            load(opened, "payment_events.csv", SourceRecordType.PAYMENT_EVENT)
+
+        opened = session_factory(engine)()
+        try:
+            with pytest.raises(DatabaseError, match="append-only"):
+                execute_and_commit(opened, delete(SourceFactRow))
+            opened.rollback()
+        finally:
+            opened.close()
+            engine.dispose()
+
+    def test_setup_can_be_run_again_over_existing_protections(self, tmp_path: Path) -> None:
+        """The triggers are created idempotently, like the tables."""
+        database = tmp_path / "twice-protected.sqlite"
+        engine = create_database_engine(database_url_for(database))
+
+        create_schema(engine)
+        create_schema(engine)
+        create_schema(engine)
+
+        with session_scope(engine) as opened:
+            load(opened, "payment_events.csv", SourceRecordType.PAYMENT_EVENT)
+
+        opened = session_factory(engine)()
+        try:
+            with pytest.raises(DatabaseError, match="append-only"):
+                execute_and_commit(opened, update(SourceFactRow).values(payload_hash="a" * 64))
+            opened.rollback()
+            assert SourceFactRepository(opened).count() == 5
+        finally:
+            opened.close()
+            engine.dispose()
+
+    def test_both_append_only_tables_are_covered(self, tmp_path: Path) -> None:
+        """The declared list and the triggers actually present agree."""
+        database = tmp_path / "triggers.sqlite"
+        engine = create_database_engine(database_url_for(database))
+        create_schema(engine)
+
+        with engine.connect() as connection:
+            names = {
+                row[0]
+                for row in connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                )
+            }
+        engine.dispose()
+
+        expected = {
+            f"trg_{table}_no_{operation}"
+            for table in APPEND_ONLY_TABLES
+            for operation in ("update", "delete")
+        }
+        assert names == expected

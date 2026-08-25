@@ -1,4 +1,4 @@
-# Ingestion contract, parser version 1.0.0
+# Ingestion contract, parser version 2.0.0
 
 This describes the CSV documents Settlement Witness accepts and what it does
 with them. The code in `backend/app/ingestion/` is the definition; this page
@@ -12,10 +12,10 @@ reconciliation, and it never edits a fact that is already stored.
 A document is read as exactly one record type, declared by the caller. It is
 never guessed from the file name or the contents.
 
-Headers must match exactly, including order. A missing column and an unexpected
-column are both refusals. A file that is nearly right is more dangerous than one
-that is obviously wrong, because a silently ignored column is a field that
-quietly stopped being reconciled.
+Headers must match exactly, including order and whitespace. A missing column, an
+unexpected column, and a padded column name are all refusals. A file that is
+nearly right is more dangerous than one that is obviously wrong, because a
+silently ignored column is a field that quietly stopped being reconciled.
 
 ### Payment events
 
@@ -55,15 +55,37 @@ document was produced. Every other column is required.
 
 ## Column rules
 
+Every cell is read exactly as the document wrote it. Nothing is trimmed.
+
 | Kind | Accepts | Refuses |
 | --- | --- | --- |
-| Identifier | Non-empty text, surrounding whitespace trimmed | Empty |
+| Identifier | Non-empty text | Empty, or any surrounding whitespace |
 | Amount, minor units | A whole number, optionally signed | `12.5`, `12.0`, `1e3`, `"1,000"`, `NaN` |
 | Amount, magnitude | The same, and not below zero | Anything negative |
 | Currency | ISO 4217 alpha-3, upper case | `inr`, `rupees`, `IN` |
 | Timestamp | ISO 8601 with an offset | Anything naive, anything unparseable |
 | Enum | A value the contract defines | Anything else |
-| Optional identifier | Text, or empty meaning absent | Nothing |
+| Optional identifier | Text, or exactly empty meaning absent | Whitespace-only |
+
+### Whitespace is refused, never trimmed
+
+A cell with leading or trailing whitespace is rejected with
+`SURROUNDING_WHITESPACE`. This applies to every column: identifiers, amounts,
+currency, enums and timestamps alike.
+
+Trimming is a guess about what the producer meant, and this parser refuses
+ambiguous input rather than guessing. It also hides a real class of defect. A
+padded identifier usually means an export template is broken, and silently
+accepting it lets one file produce two different identities depending on which
+system read it.
+
+Whitespace inside a value is left alone. A merchant name of `acme retail` is a
+real value; ` acme retail` is a defect.
+
+A whitespace-only cell is refused too, including in the optional `utr` column.
+It is not the same as an empty cell, and quietly treating it as one would make a
+blank column and a space-filled column mean the same thing, so one of them would
+be a defect nobody ever saw. `utr` may be exactly empty, and nothing else.
 
 ### Money is never decimal
 
@@ -158,6 +180,15 @@ On a rejected import, no row is recorded as `ACCEPTED`. A row that was fine is
 recorded as `NOT_APPLIED`: it was acceptable, and it is not in the store.
 Recording it as accepted would claim a fact exists that does not.
 
+This holds for a refusal that comes from the database rather than from the
+preflight examination. Reaching the unique constraint means the two disagreed,
+and the receipt then describes the empty result rather than the optimistic one:
+every pending row is re-examined against the rolled-back database and against
+the rest of the import, rows that genuinely collided become
+`DUPLICATE_CONFLICT`, the rest become `NOT_APPLIED`, the counts are recomputed
+from the rewritten rows, and the failure detail names the colliding source
+records. A receipt whose counts contradict its rows is worse than no receipt.
+
 ## Outcomes
 
 Document level:
@@ -172,9 +203,9 @@ Document level:
 Row level: `ACCEPTED`, `DUPLICATE_NO_OP`, `DUPLICATE_CONFLICT`, `REJECTED`,
 `NOT_APPLIED`.
 
-Row refusal codes: `MISSING_VALUE`, `NOT_AN_INTEGER`, `NEGATIVE_AMOUNT`,
-`INVALID_CURRENCY`, `NAIVE_TIMESTAMP`, `INVALID_TIMESTAMP`, `INVALID_ENUM`,
-`WRONG_FIELD_COUNT`, `DOMAIN_VALIDATION_FAILED`.
+Row refusal codes: `MISSING_VALUE`, `SURROUNDING_WHITESPACE`, `NOT_AN_INTEGER`,
+`NEGATIVE_AMOUNT`, `INVALID_CURRENCY`, `NAIVE_TIMESTAMP`, `INVALID_TIMESTAMP`,
+`INVALID_ENUM`, `WRONG_FIELD_COUNT`, `DOMAIN_VALIDATION_FAILED`.
 
 Document refusal codes: `UNREADABLE_ENCODING`, `MISSING_HEADER`,
 `UNEXPECTED_COLUMNS`, `UNSUPPORTED_RECORD_TYPE`, `NO_ROWS`.
@@ -197,8 +228,19 @@ received-at time, the outcome, the row counts, one entry per row, and any
 failure detail. Ordering is by a database-assigned sequence, because an audit
 trail that reorders attempts is not an audit trail.
 
-Neither repository has an update method or a delete method. Append-only is
-enforced by the absence of a way to do otherwise.
+Neither repository has an update method or a delete method. That stops the
+application from rewriting history by mistake, and it does nothing about a
+migration script or a maintenance session holding a connection. So both tables
+also carry SQLite triggers that abort any `UPDATE` or `DELETE`:
+
+```text
+source_facts is append-only: UPDATE is not permitted
+import_receipts is append-only: DELETE is not permitted
+```
+
+`INSERT` is unaffected. The triggers are created by ordinary `make db-setup`,
+with `IF NOT EXISTS`, so a clean database is protected without a separate
+hardening step and setup stays safe to run again.
 
 ## The read path
 
@@ -270,6 +312,12 @@ that it handles them.
 
 ## Parser version
 
-`PARSER_VERSION` is `1.0.0` and is recorded on every receipt, so a fact can
+`PARSER_VERSION` is `2.0.0` and is recorded on every receipt, so a fact can
 always be traced to the rules that produced it. It changes when a header set, a
 coercion rule, or the source-record ID derivation changes.
+
+2.0.0 stopped trimming whitespace and started refusing it. Documents that 1.0.0
+accepted can be refused by 2.0.0, which is why this is a major step rather than
+a minor one. Facts already stored are unaffected: the change is to what is
+accepted, not to how an accepted row is represented. The domain contract version
+is untouched, and the generated domain schemas are byte identical.
