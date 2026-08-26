@@ -60,6 +60,32 @@ symbol. Inventing one would be inventing a fact.
 
 ## Architecture
 
+### A fragility CI caught that local verification could not
+
+The first version wrote the upstream host literally, as
+`proxy_pass http://backend:8000`. nginx resolves a literal upstream while it is
+starting and refuses to start when it cannot, so the frontend image would not
+run at all unless a host called `backend` already existed:
+
+```text
+nginx: [emerg] host not found in upstream "backend"
+```
+
+`make verify-containers` uses Compose, where that name always resolves, so it
+passed. The CI container job runs each image standalone with `docker run`, where
+it does not, and the frontend container never started.
+
+Local verification could not have found this, and the fix is worth having on its
+own terms: an image that will not start without an unrelated service is the
+wrong coupling. The upstream is now passed through a variable with a `resolver`
+declared, which defers resolution to request time. The image starts either way,
+and a request made with no backend behind it returns 502, which is the truthful
+answer. Verified both ways afterwards: standalone serves the index and the
+fallback and answers 502 on `/v1`, and under Compose every proxy check passes.
+
+Two tests hold it: the config must declare a resolver, and it must not contain a
+literal `proxy_pass http://backend`.
+
 ### Same-origin only
 
 The browser only ever asks for relative paths such as `/v1/imports`. Vite
@@ -127,7 +153,7 @@ and pressing Enter, and selecting a decision by focus and Enter.
 | `frontend/src/routes/*.tsx` | New. The four screens |
 | `frontend/src/{App,main}.tsx`, `frontend/src/styles.css` | The shell, the router, and one stylesheet |
 | `frontend/vite.config.ts` | The `/v1` development proxy |
-| `frontend/nginx.conf` | The `/v1` production proxy, the health passthrough, and a body limit above the nginx default |
+| `frontend/nginx.conf` | The `/v1` production proxy with a resolver and a variable upstream, the health passthrough, and a body limit above the nginx default |
 | `frontend/package.json` | `react-router-dom`, and `@testing-library/user-event` for tests |
 | `frontend/tsconfig.app.json` | Includes `vite.config.ts`, which the proxy test reads |
 | `scripts/verify-containers.sh` | Four new checks on the proxy |
@@ -144,17 +170,18 @@ and pressing Enter, and selecting a decision by focus and Enter.
 | `make ci` | 0 | All nine core checks passed |
 | `pnpm run lint` | 0 | Clean at `--max-warnings 0` |
 | `pnpm run typecheck` | 0 | Clean under the existing strict settings |
-| `pnpm run test` | 0 | `176 passed`, statements 98.5%, branches 92.1%, functions 98.3%, lines 98.8% |
+| `pnpm run test` | 0 | `177 passed`, statements 98.5%, branches 92.1%, functions 98.3%, lines 98.8% |
 | `pnpm run build` | 0 | Production bundle built |
 | `uv run pytest` | 0 | `990 passed`, backend unchanged |
 | `make schema` | 0 | Byte identical |
 | `make verify-containers` | 0 | Including four new proxy checks |
+| Frontend image standalone, as CI runs it | 0 | Starts with no backend, serves index and fallback, 502 on `/v1` |
 | Full flow in a browser against `make dev` | 0 | Upload through the form, run, certificate |
 | Full flow through the container frontend origin | 0 | Three documents, run with 10 facts and 3 decisions |
 
 ## Tests
 
-176 frontend tests, up from 2. The backend suite is unchanged at 990.
+177 frontend tests, up from 2. The backend suite is unchanged at 990.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -165,7 +192,7 @@ and pressing Enter, and selecting a decision by focus and Enter.
 | `src/format.test.ts` | 16 | Deterministic grouping and UTC timestamps, no currency symbol |
 | `src/routes/RunsPage.test.tsx` | 16 | New versus reused run, the 409 refusal, in-flight guard |
 | `src/routes/DashboardPage.test.tsx` | 14 | The empty state, real counts, no percentage anywhere |
-| `src/proxy.test.ts` | 11 | Both proxy configurations, including ordering against the fallback |
+| `src/proxy.test.ts` | 12 | Both proxy configurations, ordering against the fallback, and deferred upstream resolution |
 | `src/App.test.tsx` | 9 | Routing, the skip link, current-page marking |
 
 The fixtures are payloads copied from a running backend, not invented, so a test

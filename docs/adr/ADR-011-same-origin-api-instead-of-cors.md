@@ -74,3 +74,9 @@ unknown `/v1` path to return the backend's 404 rather than the shell.
   the backend's own upload limit is the one that decides. Otherwise a document
   the backend would accept could be refused by the proxy instead, with a
   different error and no receipt.
+- The upstream is passed through a variable with a `resolver` declared, so the
+  host is resolved per request rather than once at startup. Written literally,
+  nginx resolves it while starting and refuses to start when it cannot, which
+  made the frontend image unable to run unless a host called `backend` already
+  existed. The image now starts on its own, and a request made with no backend
+  behind it returns 502.

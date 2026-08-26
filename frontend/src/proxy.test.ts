@@ -46,12 +46,24 @@ describe('the nginx production proxy', () => {
     expect(nginx).toMatch(/location\s+\/v1\/\s*\{/);
   });
 
-  it('sends it to the backend service on the compose network', () => {
-    expect(nginx).toMatch(/proxy_pass\s+http:\/\/backend:8000;/);
+  it('sends it to the backend service on the Compose network', () => {
+    expect(nginx).toMatch(/set \$api_backend http:\/\/backend:8000;/);
+    expect(nginx).toMatch(/proxy_pass \$api_backend;/);
+  });
+
+  it('resolves the upstream per request rather than at startup', () => {
+    // With the host written literally, nginx resolves it while starting and
+    // refuses to start when it cannot, so the frontend image would not run
+    // unless a host called `backend` already existed. Passing it through a
+    // variable defers resolution, so the image starts either way and a request
+    // made with no backend behind it fails as a bad gateway.
+    expect(nginx).toMatch(/resolver 127\.0\.0\.11/);
+    expect(nginx).not.toMatch(/proxy_pass\s+http:\/\/backend/);
   });
 
   it('names no host the browser would have to know', () => {
-    expect(nginx).not.toMatch(/proxy_pass\s+http:\/\/(localhost|127\.0\.0\.1)/);
+    expect(nginx).not.toMatch(/http:\/\/localhost/);
+    expect(nginx).not.toMatch(/set \$\w+ http:\/\/127\.0\.0\.1/);
   });
 
   it('declares the API before the single page fallback', () => {
@@ -66,8 +78,11 @@ describe('the nginx production proxy', () => {
   });
 
   it('exposes the backend health endpoint, so the container can be checked end to end', () => {
+    // The backend serves health at /health, so the path is rewritten. A URI
+    // cannot ride on a variable upstream the way it can on a literal one.
     expect(nginx).toMatch(/location\s+=\s+\/v1\/health\s*\{/);
-    expect(nginx).toMatch(/proxy_pass\s+http:\/\/backend:8000\/health;/);
+    expect(nginx).toMatch(/rewrite \^ \/health break;/);
+    expect(nginx).toMatch(/proxy_pass \$health_backend;/);
   });
 
   it('raises the body limit above nginx default, so an upload is bounded by the backend', () => {
