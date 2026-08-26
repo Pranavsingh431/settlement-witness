@@ -20,3 +20,4 @@ so.
 | 4 | [phase-4.md](phase-4.md) | Passed |
 | 4.1 | [phase-4-1.md](phase-4-1.md) | Passed |
 | 5 | [phase-5.md](phase-5.md) | Passed |
+| 5.1 | [phase-5-1.md](phase-5-1.md) | Passed |

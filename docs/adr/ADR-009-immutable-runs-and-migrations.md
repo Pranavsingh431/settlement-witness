@@ -31,10 +31,36 @@ only be recreated, losing every fact and receipt in it. Adding the tool at the
 moment of the first data-preserving change, rather than earlier, means the first
 migration describes a schema that actually shipped.
 
-The initial revision recreates the Phase 2 schema exactly, so a database built
-by the old `create_all` path can be brought forward. A test builds the initial
-schema, imports the example documents into it, upgrades to head, and requires
-every source fact and receipt to be unchanged.
+The initial revision recreates the Phase 2 schema exactly. That is necessary for
+bringing an old database forward but not sufficient, because a database built by
+the old `create_all` path carries no revision stamp at all, and the migrations
+would try to create tables it already has. Such a database is adopted, on these
+terms:
+
+- **Empty:** migrate from zero, as any new database does.
+- **Recognisably Phase 2:** stamp it at the initial revision, then migrate
+  forward normally. Nothing is recreated and no existing row is touched.
+- **Anything else:** refuse, with one error naming what differed, and change
+  nothing.
+
+Recognising it means inspecting the live SQLite schema rather than trusting the
+table names: both Phase 2 tables present, each with exactly its expected columns,
+its primary key and its indexes, and all four original append-only triggers in
+place. The description lives in one module, `app/storage/legacy.py`, so startup
+and tests cannot come to different conclusions about the same database.
+
+The refusal is the part worth defending. Stamping a database because two tables
+happen to share a name would tell Alembic that revisions it never ran are
+already applied, and the next upgrade would then build on a schema that is not
+what it believes it to be. That failure would surface much later as wrong reads
+rather than as a clear stop, so an unexplained difference is a refusal and never
+a repair. Missing triggers are refused for a second reason: a database whose
+append-only protection was removed may already have had history rewritten, and
+adopting it would vouch for evidence this system cannot vouch for.
+
+Alembic's own `alembic_version` table is ignored when deciding, because it can
+exist holding no row after an interrupted first migration, and a database in
+that state is still unstamped.
 
 Not passing a URL through the ini file is deliberate. A stray connection string
 would let a migration run against a database the caller did not name, and in

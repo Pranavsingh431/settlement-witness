@@ -2,12 +2,19 @@
 
 Run it with ``make db-setup``. It is safe to run again: tables that already
 exist are left alone, and no data is touched.
+
+A database built before migrations existed is adopted rather than rebuilt. One
+that cannot be recognised is refused, and the refusal is reported the way this
+command reports any other operator error, because a person running a setup
+command needs to read what was wrong with their database rather than a stack.
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 from app.storage.database import create_database_engine, create_schema, database_url_for
+from app.storage.legacy import UnrecognisedSchemaError
 from app.storage.models import Base
 
 
@@ -29,6 +36,9 @@ def run(argv: list[str] | None = None) -> int:
     engine = create_database_engine(database_url_for(database))
     try:
         create_schema(engine)
+    except UnrecognisedSchemaError as refusal:
+        print(f"error: {refusal}", file=sys.stderr)
+        return 1
     finally:
         engine.dispose()
 

@@ -25,6 +25,25 @@ could only be recreated, losing every fact and receipt in it.
 | `0001_initial_schema` | The Phase 2 schema exactly: source facts, import receipts, and their four triggers |
 | `0002_reconciliation_runs` | Reconciliation runs and decisions, and their four triggers |
 
+### Corrected in Phase 5.1
+
+This phase claimed that because `0001_initial_schema` recreates the Phase 2
+schema exactly, a database built by the old `create_all` path could be brought
+forward, and offered as evidence a test that built the initial schema, imported
+the example documents, upgraded to head, and found every fact and receipt
+unchanged.
+
+That test does not show what it was said to show. It builds the older schema
+with `upgrade_to(engine, "0001_initial_schema")`, which stamps the database, and
+the real pre-migration database has no stamp at all. Run against a genuine
+`create_all`-era database, the upgrade failed immediately with `table
+source_facts already exists`, so the actual deployed upgrade path was broken and
+untested while this report described it as working.
+
+Phase 5.1 makes that path work and covers it. See
+[phase-5.1.md](phase-5-1.md) and the corrected decision 1 in
+[ADR-009](../adr/ADR-009-immutable-runs-and-migrations.md).
+
 The engine is passed in rather than read from a URL in the ini file. A stray
 connection string would let a migration run against a database the caller did
 not name, which in tests would mean quietly migrating a developer's own file.
@@ -135,7 +154,7 @@ Host: macOS on arm64, uv 0.12.5, Python 3.12.12, Node 24.19.0, pnpm 10.15.0.
 | `uv run ruff check .` | 0 | `All checks passed!` |
 | `uv run mypy` | 0 | `Success: no issues found in 86 source files` |
 | `uv run pytest` | 0 | `760 passed`, `Total coverage: 100.00%` |
-| Migration from `0001` with data to head | 0 | 10 facts and 3 receipts unchanged |
+| Migration from `0001` with data to head | 0 | 10 facts and 3 receipts unchanged. Does not cover an unstamped `create_all` database, which failed until Phase 5.1 |
 | `make db-setup`, `make import-fixtures`, `make api` | 0 | Every endpoint answered as above |
 | `make verify-containers` | 0 | Both images build, serve and run unprivileged |
 | API inside the container | 0 | Health 200, runs list 200, empty store 409, database at head |
@@ -149,14 +168,15 @@ Host: macOS on arm64, uv 0.12.5, Python 3.12.12, Node 24.19.0, pnpm 10.15.0.
 | --- | --- | --- |
 | `tests/api/test_endpoints.py` | 37 | Every route, pagination, filters, 404 and 422 paths, determinism, what is not exposed, and agreement with the CLI |
 | `tests/api/test_runs.py` | 25 | The run key, persistence, idempotency, round-tripping, replay, atomicity, listing |
-| `tests/api/test_migrations.py` | 15 | Upgrading from nothing and from the initial schema with data, and the new tables being append-only |
+| `tests/api/test_migrations.py` | 15 | Upgrading from nothing and from the stamped initial schema with data, and the new tables being append-only |
 
 Every required case is covered explicitly: a clean database through import, run
 creation and API read; re-running writing no duplicate rows; new facts producing
 a new run; every persisted decision round-tripping through the domain model;
 persisted evidence still verifying against stored facts; a failure mid-write
 leaving no partial run; direct SQL update and delete refused on both new tables;
-migration preserving imported facts and receipts; pagination, filters, unknown
+migration preserving imported facts and receipts, though only from a stamped
+starting point, corrected in Phase 5.1; pagination, filters, unknown
 IDs and deterministic ordering; and the CLI output agreeing with the persisted
 API output for the same snapshot.
 
@@ -199,7 +219,7 @@ Two further defects were found by tests rather than by inspection:
 | Requirement | Status | Evidence |
 | --- | --- | --- |
 | `git diff --check` | Passed | Exit 0 |
-| Migration upgrade from initial schema to head | Passed | 10 facts and 3 receipts unchanged |
+| Migration upgrade from initial schema to head | Passed | 10 facts and 3 receipts unchanged. The unstamped `create_all` starting point was not covered and did not work; corrected in Phase 5.1 |
 | `make ci` | Passed | Exit 0, all nine checks |
 | API integration tests against a temporary database | Passed | 37 endpoint tests, fresh database per test |
 | `make schema` if domain models change | Met | Run, byte identical, none changed |

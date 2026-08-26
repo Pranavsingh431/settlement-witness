@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, Executable, delete, update
+from sqlalchemy import Engine, Executable, delete, inspect, update
 from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -451,6 +451,50 @@ class TestDatabaseSetupCommand:
         with session_factory(engine)() as session:
             assert SourceFactRepository(session).count() == 5
         engine.dispose()
+
+    def test_setup_adopts_a_pre_migration_database(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The operator path for the case Phase 5.1 exists for."""
+        from app.db_setup import run as setup_run
+        from tests.api.test_legacy_adoption import build_loaded_phase_2_database
+
+        database = tmp_path / "legacy.sqlite"
+        build_loaded_phase_2_database(database).dispose()
+
+        status = setup_run(["--database", str(database)])
+
+        capsys.readouterr()
+        assert status == 0
+        engine = create_database_engine(database_url_for(database))
+        with session_factory(engine)() as session:
+            assert SourceFactRepository(session).count() == 10
+        engine.dispose()
+
+    def test_setup_refuses_an_unrecognised_database(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Reported as an operator error, not as a stack, and nothing written."""
+        from app.db_setup import run as setup_run
+
+        database = tmp_path / "unknown.sqlite"
+        engine = create_database_engine(database_url_for(database))
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE ledger_notes (id INTEGER PRIMARY KEY)")
+        engine.dispose()
+
+        status = setup_run(["--database", str(database)])
+
+        captured = capsys.readouterr()
+        assert status == 1
+        assert captured.err.startswith("error: ")
+        assert "ledger_notes" in captured.err
+        assert "Traceback" not in captured.err
+
+        engine = create_database_engine(database_url_for(database))
+        remaining = set(inspect(engine).get_table_names())
+        engine.dispose()
+        assert remaining == {"ledger_notes"}
 
     def test_setup_exits_with_its_status(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

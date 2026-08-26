@@ -4,6 +4,10 @@ The point of migrations is that an existing database can be brought forward
 without losing rows. So the tests build the older schema, put data in it, and
 then upgrade, because that is the case a migration exists for. Creating the
 latest schema from nothing would not exercise anything.
+
+These cover databases that carry a revision stamp. A database built before
+migrations existed carries none, and adopting one is a separate problem covered
+in test_legacy_adoption.py.
 """
 
 from pathlib import Path
@@ -90,7 +94,12 @@ class TestUpgradingFromNothing:
 
 
 class TestUpgradingAnExistingDatabase:
-    """The case migrations exist for: data already in the older schema."""
+    """The case migrations exist for: data already in the older schema.
+
+    The starting point here is stamped at the initial revision, which is what a
+    database built by an earlier migration looks like. A database built before
+    migrations existed is unstamped and is handled in test_legacy_adoption.py.
+    """
 
     @staticmethod
     def _initial_with_data(path: Path) -> Engine:
