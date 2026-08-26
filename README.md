@@ -107,7 +107,8 @@ Run `make help` to see this list in your terminal.
 | `make schema` | Regenerate the published JSON Schema from the domain models |
 | `make db-setup` | Migrate the SQLite schema to head. Safe to run again. |
 | `make api` | Run the backend API at `http://127.0.0.1:8000` |
-| `make import-fixtures` | Import the documented example CSV documents |
+| `make import-fixtures` | Import the documented example CSV documents through the command line |
+| `make import-fixtures-http` | Import the same documents through the running API, then reconcile them |
 | `make reconcile-fixtures` | Reconcile the imported facts and print JSON |
 | `make benchmark-generate` | Write the public synthetic corpus and its manifest |
 | `make benchmark-evaluate` | Score the baseline against the public corpus |
@@ -152,6 +153,7 @@ file.
 | `SW_LOG_LEVEL` | `INFO` | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `SW_API_HOST` | `127.0.0.1` | Address the backend binds to. |
 | `SW_API_PORT` | `8000` | Port the backend binds to. |
+| `SW_MAX_UPLOAD_BYTES` | `8388608` | Largest CSV document `POST /v1/imports` accepts. Anything larger is refused with 413 before it is parsed, so it leaves no receipt. |
 
 An invalid value stops the service at startup instead of failing later.
 

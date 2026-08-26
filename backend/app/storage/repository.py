@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.evidence import SourceFactIndex, build_fact_index
@@ -25,7 +25,15 @@ from app.domain.facts import (
     SourceSystem,
 )
 from app.domain.primitives import CanonicalPayload
+from app.ingestion.receipts import ImportOutcome, ImportReceipt, RowResult
 from app.storage.models import ImportReceiptRow, SourceFactRow
+
+_ROW_OUTCOMES_ADAPTER: TypeAdapter[tuple[RowResult, ...]] = TypeAdapter(tuple[RowResult, ...])
+"""Revalidates the row outcomes read back from a receipt.
+
+Same reasoning as the payload adapter below. A stored outcome that is no longer
+a member of the enum, or a row result that has grown a field, fails here rather
+than being served as though the audit trail still meant what it says."""
 
 _PAYLOAD_ADAPTER: TypeAdapter[CanonicalPayload] = TypeAdapter(CanonicalPayload)
 """Revalidates a payload read back from the database.
@@ -58,6 +66,34 @@ def _to_domain(row: SourceFactRow) -> SourceFact:
         occurred_at=_as_utc(row.occurred_at),
         payload_hash=row.payload_hash,
         canonical_payload=payload,
+    )
+
+
+def _receipt_to_domain(row: ImportReceiptRow) -> ImportReceipt:
+    """Rebuild an import receipt from its stored row.
+
+    Every stored value is put back through the model that wrote it: the two
+    enums, the outcome, and the row results held as JSON. A receipt that no
+    longer satisfies the contract therefore fails here rather than being served
+    as though it were sound, which is the same rule the fact and decision read
+    paths follow.
+    """
+    return ImportReceipt(
+        receipt_id=row.receipt_id,
+        document_hash=row.document_hash,
+        document_name=row.document_name,
+        source_system=SourceSystem(row.source_system),
+        source_record_type=SourceRecordType(row.source_record_type),
+        parser_version=row.parser_version,
+        received_at=_as_utc(row.received_at),
+        outcome=ImportOutcome(row.outcome),
+        row_count=row.row_count,
+        accepted_count=row.accepted_count,
+        duplicate_count=row.duplicate_count,
+        conflict_count=row.conflict_count,
+        rejected_count=row.rejected_count,
+        row_results=_ROW_OUTCOMES_ADAPTER.validate_python(row.row_outcomes),
+        failure_detail=row.failure_detail,
     )
 
 
@@ -183,3 +219,91 @@ class ImportReceiptRepository:
             .order_by(ImportReceiptRow.sequence)
         )
         return list(self._session.scalars(statement))
+
+    def find(self, receipt_id: str) -> ImportReceipt | None:
+        """Return one receipt as a typed record, revalidated on the way out."""
+        row = self.get(receipt_id)
+        return _receipt_to_domain(row) if row is not None else None
+
+    def page(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        outcome: ImportOutcome | None = None,
+        source_system: SourceSystem | None = None,
+        record_type: SourceRecordType | None = None,
+    ) -> tuple[ImportReceipt, ...]:
+        """Return one page of receipts, newest attempt first.
+
+        Ordered by the database assigned sequence descending. The sequence is
+        the primary key, so it is already a total order and no tie-breaker is
+        needed: two receipts cannot share one. Ordering by received-at would
+        need one, because two attempts can share a timestamp, and an audit trail
+        that reorders attempts between two identical calls is not an audit
+        trail.
+
+        Args:
+            limit: How many receipts to return.
+            offset: How many to skip.
+            outcome: Return only receipts with this document level outcome.
+            source_system: Return only receipts for this declared system.
+            record_type: Return only receipts read as this record type.
+
+        Returns:
+            The receipts on that page, revalidated on the way out.
+        """
+        statement = (
+            self._filtered(
+                select(ImportReceiptRow),
+                outcome=outcome,
+                source_system=source_system,
+                record_type=record_type,
+            )
+            .order_by(ImportReceiptRow.sequence.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return tuple(_receipt_to_domain(row) for row in self._session.scalars(statement))
+
+    def count(
+        self,
+        *,
+        outcome: ImportOutcome | None = None,
+        source_system: SourceSystem | None = None,
+        record_type: SourceRecordType | None = None,
+    ) -> int:
+        """Return how many receipts match these filters.
+
+        Counts the filtered query rather than the whole table, so a caller
+        paging through a filtered list is told how many pages that list has
+        rather than how many the unfiltered one would have had.
+        """
+        statement = self._filtered(
+            select(func.count()).select_from(ImportReceiptRow),
+            outcome=outcome,
+            source_system=source_system,
+            record_type=record_type,
+        )
+        return self._session.scalars(statement).one()
+
+    @staticmethod
+    def _filtered[T](
+        statement: Select[tuple[T]],
+        *,
+        outcome: ImportOutcome | None,
+        source_system: SourceSystem | None,
+        record_type: SourceRecordType | None,
+    ) -> Select[tuple[T]]:
+        """Apply the receipt filters to a select.
+
+        Shared by the page and the count so the two cannot drift apart, which
+        would show up as a total that does not match the list it describes.
+        """
+        if outcome is not None:
+            statement = statement.where(ImportReceiptRow.outcome == outcome.value)
+        if source_system is not None:
+            statement = statement.where(ImportReceiptRow.source_system == source_system.value)
+        if record_type is not None:
+            statement = statement.where(ImportReceiptRow.source_record_type == record_type.value)
+        return statement

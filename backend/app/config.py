@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     Relative paths are resolved against the process working directory, which
     is the backend directory when the service is started by `make api`."""
 
+    max_upload_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
+    """Largest CSV document the import endpoint will accept, in bytes.
+
+    An upload past this is refused with 413 before it is parsed, so it never
+    reaches the import service and leaves no receipt. The default holds a
+    document of roughly forty thousand settlement lines, which is far more than
+    the demonstration corpus and small enough that one request cannot exhaust a
+    laptop."""
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

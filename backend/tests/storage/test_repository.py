@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import Engine, Executable, delete, inspect, update
 from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session
@@ -21,7 +22,7 @@ from app.domain.invariants import (
     InvariantOutcome,
     InvariantResult,
 )
-from app.ingestion.service import ImportOutcome, ImportService
+from app.ingestion.service import ImportOutcome, ImportReceipt, ImportService
 from app.storage.database import (
     APPEND_ONLY_TABLES,
     create_database_engine,
@@ -43,9 +44,9 @@ def execute_and_commit(session: Session, statement: Executable) -> None:
     session.commit()
 
 
-def load(session: Session, fixture: str, record_type: SourceRecordType) -> None:
-    """Import one fixture document into the given session."""
-    ImportService(session, now=FIXED_NOW).import_document(
+def load(session: Session, fixture: str, record_type: SourceRecordType) -> ImportReceipt:
+    """Import one fixture document into the given session, returning its receipt."""
+    return ImportService(session, now=FIXED_NOW).import_document(
         read_fixture(fixture),
         source_system=PSP,
         record_type=record_type,
@@ -407,9 +408,170 @@ class TestImportReceiptRepository:
         }
 
     def test_the_repository_offers_no_way_to_change_a_receipt(self) -> None:
-        """Append-only, like the facts."""
+        """Append-only, like the facts.
+
+        Asserted as an exact set so that adding a method is a deliberate change
+        and an `update` or `delete` cannot arrive unnoticed.
+        """
         surface = {name for name in dir(ImportReceiptRepository) if not name.startswith("_")}
-        assert surface == {"add", "all_receipts", "for_document", "get"}
+        assert surface == {"add", "all_receipts", "count", "find", "for_document", "get", "page"}
+
+
+class TestReadingReceiptsBack:
+    """The typed read model the API serves from."""
+
+    @staticmethod
+    def _load_history(session: Session) -> None:
+        """Import four documents of three kinds, one of them unreadable."""
+        for fixture, record_type in [
+            ("payment_events.csv", SourceRecordType.PAYMENT_EVENT),
+            ("settlement_lines.csv", SourceRecordType.SETTLEMENT_LINE),
+            ("payouts.csv", SourceRecordType.PAYOUT),
+            ("invalid_headers.csv", SourceRecordType.PAYMENT_EVENT),
+        ]:
+            load(session, fixture, record_type)
+        session.flush()
+
+    def test_a_receipt_is_rebuilt_as_a_typed_record(self, session: Session) -> None:
+        """Not a row, so a caller cannot read a stored string as an outcome."""
+        written = load(session, "payment_events.csv", SourceRecordType.PAYMENT_EVENT)
+        session.flush()
+
+        found = ImportReceiptRepository(session).find(written.receipt_id)
+
+        assert found == written
+
+    def test_an_unknown_receipt_id_rebuilds_nothing(self, session: Session) -> None:
+        """Absence is a normal answer here too."""
+        assert ImportReceiptRepository(session).find("no-such-receipt") is None
+
+    @staticmethod
+    def _insert_receipt(session: Session, **overrides: object) -> str:
+        """Append one receipt row directly, bypassing the service.
+
+        Written as an insert rather than by editing a stored receipt, because
+        editing one is refused by the append-only triggers, which is the point
+        of them. A row like this is what an older writer or a future migration
+        could leave behind.
+        """
+        fields: dict[str, object] = {
+            "receipt_id": "receipt-under-test",
+            "document_hash": "a" * 64,
+            "document_name": "hand-written.csv",
+            "source_system": PSP.value,
+            "source_record_type": SourceRecordType.PAYOUT.value,
+            "parser_version": "3.0.0",
+            "received_at": FIXED_NOW,
+            "outcome": ImportOutcome.ACCEPTED.value,
+            "row_count": 0,
+            "accepted_count": 0,
+            "duplicate_count": 0,
+            "conflict_count": 0,
+            "rejected_count": 0,
+            "row_outcomes": [],
+            "failure_detail": None,
+        }
+        session.add(ImportReceiptRow(**(fields | overrides)))
+        session.flush()
+        return "receipt-under-test"
+
+    def test_stored_row_outcomes_are_revalidated(self, session: Session) -> None:
+        """Stored JSON is untrusted input like any other.
+
+        A row outcome that no longer satisfies the model fails on the way out
+        rather than being served as though the audit trail still meant what it
+        says.
+        """
+        receipt_id = self._insert_receipt(
+            session, row_outcomes=[{"row_number": 2, "outcome": "NOT_AN_OUTCOME"}]
+        )
+
+        with pytest.raises(ValidationError, match="outcome"):
+            ImportReceiptRepository(session).find(receipt_id)
+
+    def test_a_row_outcome_that_grew_a_field_is_refused(self, session: Session) -> None:
+        """The model forbids extras, so an unknown key is a difference."""
+        receipt_id = self._insert_receipt(
+            session,
+            row_outcomes=[{"row_number": 2, "outcome": "ACCEPTED", "surprise": True}],
+        )
+
+        with pytest.raises(ValidationError, match="surprise"):
+            ImportReceiptRepository(session).find(receipt_id)
+
+    def test_a_stored_outcome_that_is_not_in_the_enum_is_refused(self, session: Session) -> None:
+        """Same rule for the document level outcome."""
+        receipt_id = self._insert_receipt(session, outcome="PROBABLY_FINE")
+
+        with pytest.raises(ValueError, match="PROBABLY_FINE"):
+            ImportReceiptRepository(session).find(receipt_id)
+
+    def test_a_stored_source_system_that_is_not_in_the_enum_is_refused(
+        self, session: Session
+    ) -> None:
+        """And for the two declared fields."""
+        receipt_id = self._insert_receipt(session, source_system="SOMEWHERE_ELSE")
+
+        with pytest.raises(ValueError, match="SOMEWHERE_ELSE"):
+            ImportReceiptRepository(session).find(receipt_id)
+
+    def test_a_page_is_newest_first(self, session: Session) -> None:
+        """The order the attempts were made in, reversed."""
+        self._load_history(session)
+
+        page = ImportReceiptRepository(session).page(limit=10, offset=0)
+
+        assert [receipt.source_record_type for receipt in page] == [
+            SourceRecordType.PAYMENT_EVENT,
+            SourceRecordType.PAYOUT,
+            SourceRecordType.SETTLEMENT_LINE,
+            SourceRecordType.PAYMENT_EVENT,
+        ]
+
+    def test_a_page_is_limited_and_offset(self, session: Session) -> None:
+        """Paging covers every receipt exactly once."""
+        self._load_history(session)
+        repository = ImportReceiptRepository(session)
+
+        first = repository.page(limit=2, offset=0)
+        second = repository.page(limit=2, offset=2)
+
+        assert len(first) == len(second) == 2
+        assert len({receipt.receipt_id for receipt in first + second}) == 4
+
+    def test_counting_matches_the_whole_history(self, session: Session) -> None:
+        """With no filters, every attempt counts."""
+        self._load_history(session)
+
+        assert ImportReceiptRepository(session).count() == 4
+
+    @pytest.mark.parametrize(
+        ("filters", "expected"),
+        [
+            ({"outcome": ImportOutcome.ACCEPTED}, 3),
+            ({"outcome": ImportOutcome.REJECTED_INVALID}, 1),
+            ({"record_type": SourceRecordType.PAYMENT_EVENT}, 2),
+            ({"source_system": PSP}, 4),
+            ({"source_system": SourceSystem.BANK_STATEMENT}, 0),
+            ({"outcome": ImportOutcome.ACCEPTED, "record_type": SourceRecordType.PAYOUT}, 1),
+        ],
+    )
+    def test_filters_narrow_both_the_page_and_the_count(
+        self, session: Session, filters: dict[str, object], expected: int
+    ) -> None:
+        """The two share one filter builder, so they cannot disagree.
+
+        A count that described a different query from the list beneath it would
+        tell a caller paging through a filtered history how many pages the
+        unfiltered one had.
+        """
+        self._load_history(session)
+        repository = ImportReceiptRepository(session)
+
+        page = repository.page(limit=100, offset=0, **filters)  # type: ignore[arg-type]
+        count = repository.count(**filters)  # type: ignore[arg-type]
+
+        assert len(page) == count == expected
 
 
 class TestDatabaseSetupCommand:

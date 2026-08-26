@@ -19,7 +19,7 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build schema db-setup api import-fixtures reconcile-fixtures \
+        build schema db-setup api import-fixtures import-fixtures-http reconcile-fixtures \
         benchmark-generate benchmark-evaluate benchmark-evaluate-private audit ci \
         verify verify-containers clean \
         docker-build docker-up docker-down
@@ -102,6 +102,34 @@ import-fixtures: db-setup ## Import the documented example documents into $(DB)
 	cd $(BACKEND) && $(UV) run python -m app.ingest_cli --database ../$(DB) \
 		--source-system PSP_API --record-type PAYOUT \
 		../data/fixtures/ingestion/payouts.csv
+
+API_URL ?= http://127.0.0.1:8000
+
+import-fixtures-http: ## Import the example documents through the running API at $(API_URL)
+	@echo "==> Importing the three example documents through $(API_URL)"
+	@for pair in "PAYMENT_EVENT:payment_events.csv" \
+	             "SETTLEMENT_LINE:settlement_lines.csv" \
+	             "PAYOUT:payouts.csv"; do \
+		type=$${pair%%:*}; file=$${pair#*:}; \
+		curl --silent --show-error --fail-with-body \
+			--request POST "$(API_URL)/v1/imports" \
+			--form "file=@data/fixtures/ingestion/$$file;type=text/csv" \
+			--form "source_system=PSP_API" \
+			--form "record_type=$$type" \
+		| python3 -c "import json,sys; r=json.load(sys.stdin); \
+			print(f\"  {r['source_record_type']:16s} {r['outcome']:18s} \
+rows={r['row_count']} accepted={r['accepted_count']} receipt={r['receipt_id']}\")"; \
+	done
+	@echo "==> Import history"
+	@curl --silent --fail-with-body "$(API_URL)/v1/imports?limit=5" \
+		| python3 -c "import json,sys; p=json.load(sys.stdin); \
+			print(f\"  {p['total']} receipt(s)\"); \
+			[print(f\"  {r['received_at']}  {r['outcome']:18s} {r['document_name']}\") \
+			 for r in p['receipts']]"
+	@echo "==> Reconciling what was imported"
+	@curl --silent --show-error --fail-with-body --request POST "$(API_URL)/v1/reconciliation/runs" \
+		| python3 -c "import json,sys; r=json.load(sys.stdin); \
+			print(f\"  run {r['run_id']}  facts={r['fact_count']} decisions={r['decision_count']}\")"
 
 reconcile-fixtures: ## Reconcile the facts in $(DB) and print JSON
 	cd $(BACKEND) && $(UV) run python -m app.reconcile_cli --database ../$(DB)

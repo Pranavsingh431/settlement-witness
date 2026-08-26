@@ -16,7 +16,7 @@ from app.api.schemas import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     DecisionView,
-    ErrorResponse,
+    ErrorEnvelope,
     RunDetail,
     RunPage,
     RunSummary,
@@ -29,7 +29,7 @@ from app.storage.repository import SourceFactRepository
 router = APIRouter(prefix="/v1/reconciliation", tags=["reconciliation"])
 
 NOT_FOUND: dict[int | str, dict[str, object]] = {
-    404: {"model": ErrorResponse, "description": "No such run or decision"}
+    404: {"model": ErrorEnvelope, "description": "No such run or decision"}
 }
 
 
@@ -47,7 +47,7 @@ def _not_found(what: str, identifier: str) -> HTTPException:
     responses={
         200: {"model": RunSummary, "description": "An identical run already existed"},
         201: {"model": RunSummary, "description": "A new run was recorded"},
-        409: {"model": ErrorResponse, "description": "There is nothing to reconcile"},
+        409: {"model": ErrorEnvelope, "description": "There is nothing to reconcile"},
     },
     summary="Reconcile the accepted source facts and record the result",
 )

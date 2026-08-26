@@ -14,6 +14,7 @@ def test_settings_use_documented_defaults() -> None:
     assert settings.log_level == "INFO"
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port == 8000
+    assert settings.max_upload_bytes == 8 * 1024 * 1024
 
 
 def test_prefixed_environment_variables_override_defaults(
@@ -27,6 +28,21 @@ def test_prefixed_environment_variables_override_defaults(
 
     assert settings.app_env == "ci"
     assert settings.api_port == 9001
+
+
+def test_the_upload_limit_can_be_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An operator on a small machine can shrink what one request may cost."""
+    monkeypatch.setenv("SW_MAX_UPLOAD_BYTES", "65536")
+
+    assert Settings().max_upload_bytes == 65536
+
+
+def test_an_upload_limit_of_zero_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A limit no document can meet would refuse every import at startup instead."""
+    monkeypatch.setenv("SW_MAX_UPLOAD_BYTES", "0")
+
+    with pytest.raises(ValidationError, match="max_upload_bytes"):
+        Settings()
 
 
 def test_an_out_of_range_port_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

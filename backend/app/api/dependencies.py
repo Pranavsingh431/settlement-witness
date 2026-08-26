@@ -11,6 +11,7 @@ from fastapi import Request
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.storage.database import session_factory
 
 
@@ -21,6 +22,22 @@ def get_engine(request: Request) -> Engine:
         message = "the application was built without a database engine"
         raise RuntimeError(message)
     return engine
+
+
+def get_app_settings(request: Request) -> Settings:
+    """Return the settings this application was built with.
+
+    Read from the application rather than the process, so a test can build an
+    app with a different limit without changing the settings every other test
+    sees.
+    """
+    settings: object = getattr(request.app.state, "settings", None)
+    return settings if isinstance(settings, Settings) else get_settings()
+
+
+def get_upload_limit(request: Request) -> int:
+    """Return the largest document an upload endpoint will read, in bytes."""
+    return get_app_settings(request).max_upload_bytes
 
 
 def get_session(request: Request) -> Iterator[Session]:
