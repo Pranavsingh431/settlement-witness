@@ -26,3 +26,4 @@ so.
 | 6.1 | [phase-6-1.md](phase-6-1.md) | Passed |
 | 7 | [phase-7.md](phase-7.md) | Passed |
 | 7.1 | [phase-7-1.md](phase-7-1.md) | Passed |
+| 7.2 | [phase-7-2.md](phase-7-2.md) | Passed |

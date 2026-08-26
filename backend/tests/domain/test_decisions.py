@@ -361,6 +361,96 @@ class TestDeriveStatus:
         assert set(STATUS_BY_EXCEPTION_CODE.values()) <= set(DecisionStatus)
 
 
+class TestExceptionDoesNotImplyCompleteBacking:
+    """What EXCEPTION does and does not tell a reader.
+
+    A code is read before the evidence is, so a candidate that cites nothing at
+    all still derives EXCEPTION when it carries one ordinary code. That is the
+    current contract, and these tests pin it so that any change to the
+    precedence is a deliberate one with a failing test attached.
+
+    They also exist because the interface twice described this status as proof
+    that the records needed to judge the line were present. It is not, and a
+    test is a better guard against that than a careful reader.
+    """
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            ExceptionCode.AMOUNT_MISMATCH,
+            ExceptionCode.MISSING_PAYMENT,
+            ExceptionCode.PARTIAL_REFUND,
+            ExceptionCode.UNSUPPORTED_STATE,
+            ExceptionCode.CURRENCY_MISMATCH,
+        ],
+    )
+    def test_a_bare_code_with_no_citations_derives_exception(self, code: ExceptionCode) -> None:
+        """No evidence, no invariant results, one reported finding."""
+        status = derive_status(
+            evidence=(),
+            invariant_results=(),
+            exception_codes=(code,),
+            evidence_verification=(),
+        )
+
+        assert status is DecisionStatus.EXCEPTION
+
+    def test_the_two_codes_that_do_not_derive_exception_still_do_not(self) -> None:
+        """The precedence map is what makes those two different, not the evidence."""
+        for code, expected in (
+            (ExceptionCode.TIMING_PENDING, DecisionStatus.PENDING),
+            (ExceptionCode.INSUFFICIENT_EVIDENCE, DecisionStatus.INSUFFICIENT_EVIDENCE),
+        ):
+            status = derive_status(
+                evidence=(),
+                invariant_results=(),
+                exception_codes=(code,),
+                evidence_verification=(),
+            )
+            assert status is expected
+
+    def test_the_code_is_read_before_the_evidence(self) -> None:
+        """The same empty backing goes two ways, decided only by the code.
+
+        This is the ordering the interface has to describe honestly: with no
+        code it is INSUFFICIENT_EVIDENCE, and adding one ordinary code makes it
+        EXCEPTION without adding a single citation.
+        """
+        without_code = derive_status(
+            evidence=(), invariant_results=(), exception_codes=(), evidence_verification=()
+        )
+        with_code = derive_status(
+            evidence=(),
+            invariant_results=(),
+            exception_codes=(ExceptionCode.AMOUNT_MISMATCH,),
+            evidence_verification=(),
+        )
+
+        assert without_code is DecisionStatus.INSUFFICIENT_EVIDENCE
+        assert with_code is DecisionStatus.EXCEPTION
+
+    def test_such_a_decision_is_constructible_and_records_the_gap(self) -> None:
+        """It is not only reachable in the function; a whole decision takes this shape.
+
+        The reason codes still say the evidence was missing, so a reader of the
+        certificate is told. The status on its own is what does not say it.
+        """
+        candidate = make_candidate(
+            linked_source_record_ids=(),
+            linked_event_ids=(),
+            evidence=(),
+            invariant_results=(),
+            exception_codes=(ExceptionCode.AMOUNT_MISMATCH,),
+        )
+
+        decision = verify_decision(candidate, facts={})
+
+        assert decision.status is DecisionStatus.EXCEPTION
+        assert decision.evidence == ()
+        assert decision.verified_evidence_count == 0
+        assert ReasonCode.EVIDENCE_MISSING in decision.reason_codes
+
+
 class TestRequiredSetIsNotEmpty:
     """A guard against the rule being weakened into nothing."""
 

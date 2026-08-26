@@ -75,6 +75,10 @@ with no input reaches it too.
 
 See [phase-7-1.md](phase-7-1.md).
 
+Phase 7.1's own replacement was wrong in a second way, corrected in
+[phase-7-2.md](phase-7-2.md): it asserted that the records needed to judge the
+line were present, which an `EXCEPTION` does not guarantee either.
+
 Money is shown only where the API sends it, which is the expected and observed
 values on an invariant result. Those are minor units and the API sends no
 currency with them, so they are grouped, labelled `minor units`, and given no

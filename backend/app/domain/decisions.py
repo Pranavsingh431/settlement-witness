@@ -68,8 +68,18 @@ class DecisionStatus(StrEnum):
     line is correctly settled."""
 
     EXCEPTION = "EXCEPTION"
-    """Something is demonstrably wrong, and the records needed to say so were
-    present."""
+    """The backing carries a reported finding or a failed invariant.
+
+    It does not assert that the records needed to judge the line were present.
+    `derive_status` reads the exception codes before it looks at the evidence,
+    so a candidate citing nothing at all and carrying one ordinary code derives
+    this status. The reason codes on such a decision still say `EVIDENCE_MISSING`,
+    so the gap is recorded rather than hidden, but the status alone is not proof
+    of a complete backing.
+
+    Whether a bare code with no citations should remain constructible is an open
+    question about this contract, not about any one caller. See "An open question
+    about bare exception codes" in `docs/domain-contract.md`."""
 
     PENDING = "PENDING"
     """Nothing is wrong yet. The case is inside its expected window and is

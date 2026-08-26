@@ -26,13 +26,23 @@ import {
 /**
  * The three answers, described as the contract actually defines them.
  *
- * The exception wording is deliberate. A failed invariant means an exception,
- * and an exception does not mean a failed invariant: the baseline also raises
- * one for a lifecycle state it recognises and will not resolve on, such as a
- * partial refund, with every check passing. Saying "a rule does not hold" would
- * describe a failure that did not happen, and the demo corpus contains exactly
- * that case. The certificate is where the difference is shown, so the card
- * points at it rather than guessing on its behalf.
+ * The exception wording has been wrong twice, in two different directions, so
+ * it is worth writing down what it may not say.
+ *
+ * It may not say a rule failed. A failed invariant means an exception, and an
+ * exception does not mean a failed invariant: the baseline also raises one for
+ * a lifecycle state it will not resolve on, such as a partial refund, with
+ * every check passing. `line-0001` of the demo corpus is that case.
+ *
+ * It may not say the evidence was there either. `derive_status` reads the
+ * exception codes before it looks at the citations, so a decision citing
+ * nothing at all and carrying one ordinary code is an `EXCEPTION`. A domain
+ * test pins that.
+ *
+ * What is true of every exception is that the backing carries a reported
+ * finding or a failed invariant, and that the baseline will not resolve the
+ * line. Everything else varies, which is what the certificate is for, so the
+ * card points at it rather than guessing on its behalf.
  */
 const STATES = [
   {
@@ -45,13 +55,13 @@ const STATES = [
     tone: 'exception',
     glyph: '!',
     name: 'Exception',
-    what: 'The records needed to judge this line were there, and the baseline reports a finding instead of resolving it. Its certificate says whether a required check failed or a lifecycle state was reported.',
+    what: 'The baseline reports a finding and does not resolve this line. Its certificate shows the citations and the checks recorded for that finding, including any that are missing.',
   },
   {
     tone: 'unknown',
     glyph: '?',
     name: 'Insufficient evidence',
-    what: 'The evidence needed to judge this line did not all resolve, so no judgement is possible. Not a failure, and not a pass either.',
+    what: 'The backing does not support a determinate judgement, so none was made. Not a failure, and not a pass either.',
   },
 ] as const;
 

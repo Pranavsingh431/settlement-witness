@@ -378,6 +378,45 @@ apply, the strongest decides the status. Three rules are encoded in it:
 Only two codes map to a status other than `EXCEPTION`: `TIMING_PENDING` gives
 `PENDING`, and `INSUFFICIENT_EVIDENCE` gives its own status.
 
+### An open question about bare exception codes
+
+The code is read before the evidence is. Rule 2 of the derivation decides on the
+highest precedence code, and rule 3, the one that answers `INSUFFICIENT_EVIDENCE`
+when nothing is cited, is only reached when there is no code at all.
+
+So a candidate that cites nothing, runs no invariant, and carries one ordinary
+code such as `AMOUNT_MISMATCH` derives `EXCEPTION`. That is not a corner of the
+function; the whole decision is constructible, and `verify_decision` returns it
+with `EVIDENCE_MISSING` among its reason codes. The gap is recorded. The status
+on its own does not express it.
+
+**Is that right?** There is an argument each way.
+
+For keeping it: an exception code is a finding the caller made while examining
+the case, and a finding can be real without the decision citing the records
+behind it. Demoting it to `INSUFFICIENT_EVIDENCE` would let a missing citation
+silence a mismatch somebody actually observed, which is the failure mode this
+contract works hardest to avoid.
+
+Against: `RESOLVED` is defined as the absence of any reason not to resolve, and
+every other status is earned from the backing. An exception that cites nothing
+is the one status a caller can reach by assertion alone, and the reason codes
+saying `EVIDENCE_MISSING` are a footnote on a headline that does not carry it.
+
+**This is deliberately not decided here, and it is not a question the interface
+can answer.** Changing it would change which status existing decisions derive,
+so it is a major contract version with a migration story, not a wording fix.
+Phase 7.2 corrected the descriptions to match what the code does; it did not
+touch `derive_status`, the precedence, or any stored decision.
+
+**It has to be decided before a model is allowed to propose exception codes.**
+Today every code comes from deterministic baseline code that cites what it
+looked at. A component that can emit a code without citing anything, against a
+contract that turns a bare code into an `EXCEPTION`, is a path from a generated
+assertion to a reported finding with no evidence behind it. That is the exact
+shape this system exists to make impossible, and the contract should close it
+before the component exists rather than after.
+
 ## Versioning
 
 `DOMAIN_SCHEMA_VERSION` is `2.0.0`. Every decision records the version it was

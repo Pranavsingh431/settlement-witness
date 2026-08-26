@@ -59,6 +59,34 @@ exception actually is, which matches the contract's own words for the status:
 present". And it points at the certificate rather than guessing on its behalf,
 because the certificate is where the two routes are distinguishable.
 
+#### Corrected in Phase 7.2
+
+The replacement above is itself false, in the opposite direction from the claim
+it removed, and so is the contract wording it was taken from.
+
+`derive_status` reads the exception codes before it looks at the citations, so a
+decision citing nothing at all and carrying one ordinary code derives
+`EXCEPTION`. Proved directly:
+
+```text
+no evidence at all, one reported finding:
+  AMOUNT_MISMATCH        -> EXCEPTION
+  MISSING_PAYMENT        -> EXCEPTION
+no evidence and no code, for contrast:
+  (nothing)              -> INSUFFICIENT_EVIDENCE
+```
+
+"The records needed to judge this line were there" is therefore not true of
+every exception. Worse, this phase wrote a test asserting that wording, so the
+suite defended the claim rather than catching it.
+
+The same assertion was in the domain source, in the `DecisionStatus.EXCEPTION`
+docstring, which is where this phase took its wording from. Both are corrected
+in Phase 7.2, and the underlying contract question is recorded as open in
+`docs/domain-contract.md` rather than patched in the interface.
+
+See [phase-7-2.md](phase-7-2.md).
+
 ### The insufficient-evidence card
 
 Tightened in the same pass, because it was narrower than the rule.
@@ -75,6 +103,10 @@ old wording described the first and read as a definition.
 The distinction from an exception is now carried by the two cards together: an
 exception is a finding made *because* the records were there, and insufficient
 evidence is an inability to judge because they were not.
+
+Phase 7.2 replaces that distinction too, for the same reason: it rests on the
+evidence claim above. The two are now told apart by what the backing carries,
+not by what was present.
 
 ### Markup
 
@@ -169,9 +201,9 @@ unchanged and still passing.
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Dashboard exception copy replaced with truthful language | Passed | Both routes to the status named, neither asserted |
+| Dashboard exception copy replaced with truthful language | Partly overclaimed | It stopped asserting a failed check and started asserting complete evidence. Corrected in Phase 7.2 |
 | Nothing says or implies every exception has a broken invariant | Passed | Regression test, checked against four assertive variants |
-| Exception and insufficient evidence stay distinct | Passed | A dedicated test over both cards |
+| Exception and insufficient evidence stay distinct | Passed | A dedicated test over both cards, rewritten in Phase 7.2 to stop asserting the evidence claim |
 | All active surfaces searched and corrected | Passed | Table above; one active instance found and fixed |
 | Historical phase reports preserved | Passed | Only Phase 7 changed, and only by adding a correction |
 | Regression test on the three-state explanation | Passed | Fails against the Phase 7 copy |

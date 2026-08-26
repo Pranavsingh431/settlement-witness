@@ -98,6 +98,22 @@ describe('the explanation of the three answers', () => {
     return card;
   }
 
+  /**
+   * Return the explanation inside one card, without its badge.
+   *
+   * The whole card's `textContent` runs the badge straight into the copy, as
+   * "ExceptionEvery citation resolved...", which silently defeats a pattern
+   * anchored with a word boundary at the start of the sentence. The wording
+   * under test is the paragraph, so that is what is read.
+   */
+  async function stateText(name: string): Promise<string> {
+    const paragraph = (await stateCard(name)).querySelector('p');
+    if (paragraph === null) {
+      throw new Error(`the "${name}" card has no explanation`);
+    }
+    return paragraph.textContent;
+  }
+
   it('describes all three, and only three', async () => {
     const cards = await screen.findAllByRole('listitem');
 
@@ -120,7 +136,7 @@ describe('the explanation of the three answers', () => {
     // not resolve on, with every check passing, and `line-0001` of the demo
     // corpus is exactly that. Wording that equates the two describes a failure
     // that did not happen.
-    const text = (await stateCard('Exception')).textContent;
+    const text = await stateText('Exception');
 
     // The exact claim this phase removed.
     expect(text).not.toMatch(/a rule about it (does|did) not hold/i);
@@ -135,23 +151,45 @@ describe('the explanation of the three answers', () => {
     expect(text).not.toMatch(/because (a|one) (rule|invariant|check)/i);
   });
 
+  it('does not claim the evidence was present, complete, resolved or verified', async () => {
+    // `derive_status` reads the exception codes before it looks at the
+    // citations, so a decision citing nothing at all and carrying one ordinary
+    // code is an EXCEPTION. A domain test pins that. Saying the records were
+    // there describes a backing this status does not guarantee, which is the
+    // second wrong thing this card has said about the same word.
+    const text = await stateText('Exception');
+
+    expect(text).not.toMatch(/records (needed|were|are)\b/i);
+    expect(text).not.toMatch(/evidence (is|was|were) (there|present|complete)/i);
+    expect(text).not.toMatch(
+      /\b(all|every|the) (records?|citations?|evidence)\b[^.]*\b(present|there|resolved|verified|complete)\b/i,
+    );
+    expect(text).not.toMatch(/needed to (judge|decide)[^.]*\b(were|was) (there|present)/i);
+  });
+
   it('says an exception is a reported non-resolution, and points at the certificate', async () => {
+    // The replacement has to still describe something. A card that avoided
+    // every false claim by saying nothing would pass the guards above and be
+    // useless.
     const card = await stateCard('Exception');
 
-    expect(card).toHaveTextContent(/reports a finding instead of resolving it/i);
+    expect(card).toHaveTextContent(/reports a finding/i);
+    expect(card).toHaveTextContent(/does not resolve this line/i);
     expect(card).toHaveTextContent(/certificate/i);
-    expect(card).toHaveTextContent(/whether a required check failed or a lifecycle state/i);
+    expect(card).toHaveTextContent(/citations and the checks recorded/i);
   });
 
   it('keeps an exception distinct from insufficient evidence', async () => {
-    // An exception is a finding made because the records were there. Insufficient
-    // evidence is an inability to judge because they were not.
+    // An exception is a backing carrying a reported finding or a failed
+    // invariant. Insufficient evidence is a backing that does not support a
+    // determinate judgement. Neither is stated in terms of what evidence was
+    // present, because the status does not tell you that.
     const exception = await stateCard('Exception');
     const unknown = await stateCard('Insufficient evidence');
 
-    expect(exception).toHaveTextContent(/the records needed to judge this line were there/i);
-    expect(unknown).toHaveTextContent(/did not all resolve/i);
-    expect(unknown).toHaveTextContent(/no judgement is possible/i);
+    expect(exception).toHaveTextContent(/reports a finding/i);
+    expect(unknown).toHaveTextContent(/does not support a determinate judgement/i);
+    expect(unknown).not.toHaveTextContent(/reports a finding/i);
   });
 
   it('does not call insufficient evidence a failure or a pass', async () => {
