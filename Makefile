@@ -19,7 +19,7 @@ PNPM     ?= pnpm
         lint lint-backend lint-frontend \
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
-        build schema db-setup import-fixtures reconcile-fixtures \
+        build schema db-setup api import-fixtures reconcile-fixtures \
         benchmark-generate benchmark-evaluate benchmark-evaluate-private audit ci \
         verify verify-containers clean \
         docker-build docker-up docker-down
@@ -86,8 +86,11 @@ schema: ## Regenerate the published JSON Schema from the domain models
 
 DB ?= data/generated/settlement.sqlite
 
-db-setup: ## Create the SQLite schema at $(DB), safe to run again
+db-setup: ## Migrate the SQLite schema at $(DB) to head, safe to run again
 	cd $(BACKEND) && $(UV) run python -m app.db_setup --database ../$(DB)
+
+api: ## Run the backend API against $(DB) at http://127.0.0.1:8000
+	cd $(BACKEND) && SW_DATABASE_PATH=../$(DB) $(UV) run python -m app
 
 import-fixtures: db-setup ## Import the documented example documents into $(DB)
 	cd $(BACKEND) && $(UV) run python -m app.ingest_cli --database ../$(DB) \

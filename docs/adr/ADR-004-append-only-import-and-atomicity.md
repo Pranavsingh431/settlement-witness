@@ -5,6 +5,8 @@
 - Supersedes: none
 - Superseded by: none
 - Amended: 2026-08-25, see "Amendment" below
+- Followed by: [ADR-009](ADR-009-immutable-runs-and-migrations.md), which replaced
+  `create_all` with migrations, as decision 5 anticipated
 - Related: [ADR-001](ADR-001-stack-and-modular-monolith.md),
   [ADR-002](ADR-002-domain-contract-and-verifier-authority.md),
   [ADR-003](ADR-003-derived-status-and-source-fact-verification.md)

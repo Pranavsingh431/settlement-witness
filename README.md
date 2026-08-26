@@ -36,7 +36,13 @@ synthetic cases, runs them through the real ingestion and reconciliation paths, 
 result against an oracle reasoned from the contract rather than read off a run. That gives the
 baseline a measured floor for a later AI-assisted method to beat.
 
-There is still no model call, no decision persistence and no user interface.
+Phase 5 made reconciliation durable and queryable. Runs are persisted immutably, re-running the
+same facts returns the run already recorded rather than writing a duplicate, and a typed HTTP API
+serves runs and decisions with their evidence certificates. Schema changes now go through real
+migrations, so an existing database can be brought forward without losing a row.
+
+There is still no model call and no user interface. There is also no authentication: this is a
+local and demonstration backend, and it must not be exposed to a network.
 
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract says, and the
 [phase reports](docs/phase-reports/) for exactly what was built and verified in each phase.
@@ -99,7 +105,8 @@ Run `make help` to see this list in your terminal.
 | `make typecheck` | Type check the backend and the frontend |
 | `make build` | Produce the frontend production bundle |
 | `make schema` | Regenerate the published JSON Schema from the domain models |
-| `make db-setup` | Create the SQLite schema. Safe to run again. |
+| `make db-setup` | Migrate the SQLite schema to head. Safe to run again. |
+| `make api` | Run the backend API at `http://127.0.0.1:8000` |
 | `make import-fixtures` | Import the documented example CSV documents |
 | `make reconcile-fixtures` | Reconcile the imported facts and print JSON |
 | `make benchmark-generate` | Write the public synthetic corpus and its manifest |
@@ -225,6 +232,8 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   matches, what it refuses to match, and what a result does and does not mean.
 - [docs/evaluation-harness.md](docs/evaluation-harness.md) explains the seeded generator, the
   independent oracle, and the public and private evaluation boundary.
+- [docs/api.md](docs/api.md) documents the backend API, with real example responses and what it
+  deliberately does not expose.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
 - [docs/schema/v5/](docs/schema/v5/) holds JSON Schema generated from the models by

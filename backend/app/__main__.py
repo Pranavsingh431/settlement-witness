@@ -1,5 +1,9 @@
 """Start the backend service using the settings from the environment.
 
+The database is migrated to head before the server binds. A service that
+started against an out of date schema would fail on its first real request
+rather than on start, which is the harder failure to diagnose.
+
 Run it with ``uv run python -m app`` from the backend directory, or with
 ``make dev-backend`` from the repository root. Reload is switched on only in the
 local environment.
@@ -8,11 +12,23 @@ local environment.
 import uvicorn
 
 from app.config import get_settings
+from app.storage.database import (
+    create_database_engine,
+    create_schema,
+    database_url_for,
+)
 
 
 def main() -> None:
-    """Start the API server on the configured host and port."""
+    """Migrate the database, then start the API server."""
     settings = get_settings()
+
+    engine = create_database_engine(database_url_for(settings.database_path))
+    try:
+        create_schema(engine)
+    finally:
+        engine.dispose()
+
     uvicorn.run(
         "app.main:app",
         host=settings.api_host,

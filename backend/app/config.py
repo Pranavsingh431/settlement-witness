@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     log_level: LogLevel = "INFO"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    database_path: Path = Path("../data/generated/settlement.sqlite")
+    """SQLite file the API reads and writes.
+
+    Relative paths are resolved against the process working directory, which
+    is the backend directory when the service is started by `make api`."""
 
 
 @lru_cache(maxsize=1)

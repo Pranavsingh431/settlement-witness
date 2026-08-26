@@ -16,8 +16,6 @@ from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
-from app.storage.models import Base
-
 IN_MEMORY_URL = "sqlite+pysqlite:///:memory:"
 """A database that exists only for the life of one engine. Used by tests."""
 
@@ -63,43 +61,32 @@ def create_database_engine(url: str, *, echo: bool = False) -> Engine:
 
 
 #: Tables that may only ever be inserted into.
-APPEND_ONLY_TABLES: tuple[str, ...] = ("source_facts", "import_receipts")
-
-
-def _immutability_triggers() -> tuple[str, ...]:
-    """Return the DDL that makes the append-only tables reject changes.
-
-    The repositories have no update or delete method, which stops the
-    application from rewriting history by mistake. It does nothing about a
-    migration script, a maintenance session, or anything else holding a
-    connection. Append-only is a property of the data, so it is enforced where
-    the data lives.
-
-    ``IF NOT EXISTS`` makes this safe to run again, which is what lets ordinary
-    setup create the protections rather than needing a separate step.
-    """
-    statements: list[str] = []
-    for table in APPEND_ONLY_TABLES:
-        for operation in ("UPDATE", "DELETE"):
-            statements.append(
-                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_{operation.lower()} "
-                f"BEFORE {operation} ON {table} "
-                "BEGIN "
-                f"SELECT RAISE(ABORT, '{table} is append-only: {operation} is not permitted'); "
-                "END;"
-            )
-    return tuple(statements)
+#:
+#: The triggers enforcing that live in the migrations, which own the schema.
+#: A second copy of the DDL here would be a place for the two to disagree.
+APPEND_ONLY_TABLES: tuple[str, ...] = (
+    "source_facts",
+    "import_receipts",
+    "reconciliation_runs",
+    "reconciliation_decisions",
+)
 
 
 def create_schema(engine: Engine) -> None:
-    """Create every table and protection that is not already there.
+    """Bring a database to the latest schema. Safe to run again.
 
-    Safe to run again. Existing tables are left alone and no data is touched.
+    This runs the migrations rather than `create_all`. A schema built by
+    `create_all` carries no revision stamp, so the next change would have
+    nothing to migrate from and an existing database could not be brought
+    forward without losing its rows. ADR-004 recorded that `create_all` would
+    only hold until the first change that had to preserve data; ADR-009 records
+    the move.
+
+    Existing tables are left alone and no data is touched.
     """
-    Base.metadata.create_all(engine)
-    with engine.begin() as connection:
-        for statement in _immutability_triggers():
-            connection.exec_driver_sql(statement)
+    from app.storage.migrations import upgrade_to_head
+
+    upgrade_to_head(engine)
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:

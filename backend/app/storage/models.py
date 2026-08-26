@@ -1,12 +1,20 @@
 """Database tables.
 
-Two tables, and the difference between them is the point of this phase.
+Four tables, all append-only, in two pairs.
 
 ``source_facts`` holds what the system believes. It is append-only: a row is
 inserted once and never updated or deleted. ``import_receipts`` holds what the
 system was told and what it did about it, including the attempts it refused.
 An import that is rejected writes nothing to the first table and always writes
 to the second, so a refusal leaves a trace rather than a silence.
+
+``reconciliation_runs`` and ``reconciliation_decisions`` hold what the system
+concluded. A run is a statement about one snapshot of facts under one set of
+rule versions, and it is never revised. New facts, or a new rule version,
+produce a new run beside the old one, so the history of what was concluded and
+on what evidence stays intact.
+
+Every table here is protected by triggers that abort UPDATE and DELETE.
 """
 
 from datetime import datetime
@@ -15,6 +23,7 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     DateTime,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -100,3 +109,88 @@ class ImportReceiptRow(Base):
 
     failure_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Why a whole document was refused, when it was."""
+
+
+class ReconciliationRunRow(Base):
+    """One complete reconciliation over one snapshot of facts.
+
+    Immutable. A run records what the baseline concluded about a specific set of
+    source facts under a specific set of rule versions, and nothing revises it.
+    When the facts change or a rule version moves, the next reconciliation is a
+    new run, and the old one remains readable exactly as it was.
+    """
+
+    __tablename__ = "reconciliation_runs"
+    __table_args__ = (
+        # The idempotency identity of a run. Two reconciliations over the same
+        # snapshot under the same rules are the same run, and the database
+        # enforces that rather than trusting the code that writes to it.
+        UniqueConstraint("run_key", name="uq_reconciliation_runs_run_key"),
+        CheckConstraint(
+            "length(snapshot_fingerprint) = 64", name="ck_reconciliation_runs_fingerprint"
+        ),
+        CheckConstraint("fact_count >= 0", name="ck_reconciliation_runs_fact_count"),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    """Digest of the snapshot fingerprint and every rule version behind the run.
+
+    A changed fact set changes it, and so does a changed baseline, parser or
+    domain contract version. That is deliberate: the same facts under different
+    rules are a different conclusion and deserve a separate record."""
+
+    snapshot_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    baseline_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    domain_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    """When the run was persisted. Wall clock, unlike as_of."""
+
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    """The snapshot time the decisions describe, from the latest observed fact."""
+
+    fact_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    settlement_line_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+    exception_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+
+
+class ReconciliationDecisionRow(Base):
+    """One decision within one run.
+
+    The columns that are queried are stored as columns, and the complete
+    decision is stored as canonical JSON beside them. The JSON is the record:
+    it round-trips through the domain model exactly, so a stored decision can be
+    replayed and re-verified rather than merely summarised.
+    """
+
+    __tablename__ = "reconciliation_decisions"
+    __table_args__ = (
+        UniqueConstraint("run_id", "decision_id", name="uq_reconciliation_decisions_identity"),
+        UniqueConstraint(
+            "run_id", "subject_settlement_line_id", name="uq_reconciliation_decisions_subject"
+        ),
+        ForeignKeyConstraint(
+            ["run_id"], ["reconciliation_runs.run_id"], name="fk_reconciliation_decisions_run"
+        ),
+    )
+
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    decision_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    subject_settlement_line_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    exception_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    evidence_verification: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    invariant_results: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    decision_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    """The complete decision, exactly as the domain model serialises it.
+
+    Kept whole rather than reassembled from the columns above, so replay uses
+    what was decided rather than a reconstruction of it."""

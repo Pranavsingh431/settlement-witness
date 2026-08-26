@@ -20,3 +20,4 @@ Rules:
 | [ADR-006](ADR-006-settlement-gross-must-match-its-capture.md) | A settled gross must equal the capture it settles | Accepted |
 | [ADR-007](ADR-007-payment-event-amounts-are-strictly-positive.md) | Payment event amounts are strictly positive | Accepted |
 | [ADR-008](ADR-008-seeded-generation-and-independent-oracle.md) | Seeded generation, paired controls and an independent oracle | Accepted |
+| [ADR-009](ADR-009-immutable-runs-and-migrations.md) | Immutable reconciliation runs, idempotent run keys and real migrations | Accepted |
