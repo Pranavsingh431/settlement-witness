@@ -153,7 +153,7 @@ file.
 | `SW_LOG_LEVEL` | `INFO` | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `SW_API_HOST` | `127.0.0.1` | Address the backend binds to. |
 | `SW_API_PORT` | `8000` | Port the backend binds to. |
-| `SW_MAX_UPLOAD_BYTES` | `8388608` | Largest CSV document `POST /v1/imports` accepts. Anything larger is refused with 413 before it is parsed, so it leaves no receipt. |
+| `SW_MAX_UPLOAD_BYTES` | `8388608` | Largest CSV document `POST /v1/imports` accepts. The request carrying it is bounded at this plus 8 KiB, counted before anything parses it, so a client that sends no `Content-Length` or a false one is refused the same way. Either refusal is a 413 that leaves no receipt. |
 
 An invalid value stops the service at startup instead of failing later.
 

@@ -38,7 +38,10 @@ from app.ingestion.schemas import SUPPORTED_RECORD_TYPES
 from app.ingestion.service import ImportService
 from app.storage.repository import ImportReceiptRepository
 
-router = APIRouter(prefix="/v1/imports", tags=["imports"])
+IMPORTS_PATH = "/v1/imports"
+"""Published so the request body limiter can be scoped to this one route."""
+
+router = APIRouter(prefix=IMPORTS_PATH, tags=["imports"])
 
 
 @router.post(

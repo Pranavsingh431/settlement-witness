@@ -68,6 +68,41 @@ An oversized upload is refused before it is parsed, so it never reaches the
 service and no receipt is written for it. That is deliberate: the receipt
 records what the parser made of a document, and nothing was made of this one.
 
+## Two limits, doing two jobs
+
+"Over the size limit" is two separate checks, and conflating them is how the
+first version of this got it wrong.
+
+**Bounded request handling.** The whole multipart body is bounded at
+`SW_MAX_UPLOAD_BYTES` plus a small envelope allowance, counted at the ASGI layer
+before anything parses the request. The count is over the bytes that actually
+arrive. `Content-Length` does not decide it, because the client controls that
+header and a client that omits it or lies about it is precisely the one this has
+to stop. An honest oversized length is still refused without reading, but as an
+optimisation on top of the count rather than as the check.
+
+This has to happen before the application is called. FastAPI reads a multipart
+body while resolving an endpoint's arguments, so a check written inside the
+endpoint runs after the parser has already consumed and spooled the upload. It
+also cannot be done by raising from the stream: Starlette catches an error
+raised while it is reading and answers `400 There was an error parsing the
+body`, which is the wrong status and a description of the wrong problem. So the
+body is counted and held until it is known to fit, and only then handed on. That
+bounds one request at the budget plus the chunk that crossed it, and it means a
+permitted upload is buffered rather than streamed. At these sizes that is the
+cheaper half of the trade.
+
+**Exact file validation.** The document inside the envelope is then checked
+against `SW_MAX_UPLOAD_BYTES` exactly. The budget must be the larger number, or
+a document of exactly the permitted size could not be sent, so a document in the
+gap between them passes the budget and is refused here.
+
+Both are 413 and neither leaves a receipt. Both say `no import was processed and
+no receipt was written`. Neither says nothing was received, because by the time
+an absent or false length is caught, some of the body has been read, and a
+message claiming otherwise would be the same kind of false boundary claim in
+smaller print.
+
 ## Consequences
 
 - A caller must read `outcome`, not the status code, to know whether facts were

@@ -215,12 +215,32 @@ These leave no receipt, because no import was attempted.
 }
 ```
 
-### The size limit
+### The size limits
 
-`SW_MAX_UPLOAD_BYTES` defaults to 8 MiB and is enforced twice. A request whose
-declared `Content-Length` cannot hold an allowed document is turned away before
-the server reads it. The document itself is then read in 64 KiB pieces and
-abandoned one piece past the limit, so an oversized upload is never held whole.
+There are two, and they are different numbers doing different jobs.
+
+**The request budget** bounds the whole multipart body at `SW_MAX_UPLOAD_BYTES`
+plus 8 KiB for the envelope. It is enforced at the ASGI layer, before anything
+parses the request, by counting the bytes that actually arrive. `Content-Length`
+is not what decides: a request that declares nothing, or declares a false
+figure, is counted the same way as an honest one. A body past the budget is
+refused as `request_too_large` after at most the budget plus one chunk has been
+read, so the multipart parser never sees it and it is never spooled.
+
+An honest oversized `Content-Length` is still turned away without reading
+anything. That is an optimisation on top of the count, not the check itself.
+
+**The file limit** bounds the document inside at `SW_MAX_UPLOAD_BYTES` exactly.
+The budget has to be the larger of the two, because a multipart body carries
+boundaries and part headers as well as the file, and a document of exactly the
+permitted size has to be sendable. A document in the gap between the two passes
+the budget and is refused here as `document_too_large`, read in 64 KiB pieces
+and abandoned one piece past the limit.
+
+Neither refusal reaches the import service, writes a fact, or leaves a receipt.
+Both say so in the same words: `no import was processed and no receipt was
+written`. Neither claims that nothing was received, because by the time an
+absent or false length is caught, some of the body has been.
 
 ## `GET /v1/imports`
 

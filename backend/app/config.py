@@ -49,11 +49,16 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
     """Largest CSV document the import endpoint will accept, in bytes.
 
-    An upload past this is refused with 413 before it is parsed, so it never
-    reaches the import service and leaves no receipt. The default holds a
-    document of roughly forty thousand settlement lines, which is far more than
-    the demonstration corpus and small enough that one request cannot exhaust a
-    laptop."""
+    Two limits derive from this one. The request body that carries the document
+    is bounded at this value plus a small allowance for the multipart envelope,
+    counted before anything parses it, so an oversized request cannot be spooled
+    whatever its `Content-Length` claims. The document inside is then checked
+    against this value exactly. Either refusal is a 413, and neither reaches the
+    import service or leaves a receipt.
+
+    The default holds a document of roughly forty thousand settlement lines,
+    which is far more than the demonstration corpus and small enough that one
+    request cannot exhaust a laptop."""
 
 
 @lru_cache(maxsize=1)

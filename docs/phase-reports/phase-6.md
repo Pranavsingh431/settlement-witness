@@ -83,6 +83,34 @@ piece past the limit, which is the exact check and covers a client that sends no
 Both were verified against the running container, not only in tests: a 9 MB
 upload returned 413 and the receipt count did not move.
 
+#### Corrected in Phase 6.1
+
+The second paragraph above is false, and so is the 413 message it describes.
+
+`read_bounded` runs inside the endpoint, and FastAPI reads a multipart body
+while resolving an endpoint's arguments. So the parser had already consumed and
+spooled the whole upload by the time that check ran. It bounded what the
+endpoint held, not what the server accepted. The `Content-Length` middleware was
+the only thing that stopped a body early, and it stopped only a body whose
+client honestly declared it.
+
+Measured against the Phase 6 code with a 64 KiB limit and a 4 MB body:
+
+```text
+no Content-Length (chunked):   413, but 4,194,590 of 4,194,590 bytes delivered
+forged Content-Length: 100:    413, but 4,194,590 of 4,194,590 bytes delivered
+honest Content-Length:         413, 0 bytes delivered
+```
+
+The 413 text also said the body "was not read" and "nothing was read", which was
+untrue in the first two cases.
+
+The container check that was cited as verification used curl, which sends an
+honest `Content-Length`, so it exercised only the case that already worked.
+
+Phase 6.1 counts the body at the ASGI layer before anything parses it. See
+[phase-6-1.md](phase-6-1.md) and the corrected ADR-010.
+
 ### Naming the document
 
 The uploaded file name is used as `document_name` and nothing else. It is a label
@@ -196,10 +224,9 @@ receipt where the service was never reached" is checked rather than assumed.
    refused document is a deliberate trade recorded in ADR-010, and this is its
    cost. The endpoint documentation and the OpenAPI 201 description both say the
    receipt is the created resource and not the acceptance of the document.
-2. **The multipart overhead allowance is approximate.** The early guard compares
-   `Content-Length` against the limit plus 8 KiB, so a request between the limit
-   and that margin passes the guard and is then refused exactly while being read.
-   The document limit itself is exact.
+2. **The multipart overhead allowance is approximate.** The request budget is the
+   file limit plus 8 KiB, so a body between the two passes the budget and is then
+   refused exactly by the file check. The document limit itself is exact.
 3. **One document per request.** No batch upload, because a batch would need its
    own atomicity rule across documents and Phase 2's rule is per document.
 4. **No upload progress or resumption.** A large document is one request that
@@ -222,7 +249,7 @@ receipt where the service was never reached" is checked rather than assumed.
 | Invalid document returns `REJECTED_INVALID`, writes no facts | Passed | Bad headers, bad encoding, blank, and mixed rows |
 | Each parser-supported record type imports through HTTP | Passed | Parametrized over `SUPPORTED_RECORD_TYPES` |
 | Unsupported type, missing fields, wrong media type, invalid enums, oversized body | Passed | Correct 4xx and receipt count zero for each |
-| Bounded chunked read, one configured limit, 413 before parsing | Passed | Two layers, both verified in the container |
+| Bounded chunked read, one configured limit, 413 before parsing | Overclaimed | True only for an honest `Content-Length`. Corrected in Phase 6.1 |
 | Safe deterministic document-name fallback | Passed | Traversal, escapes, length, and four unusable names |
 | Counts exactly equal the returned row outcomes | Passed | Validated on the model, tested per count |
 | No success boolean contradicting the outcome | Passed | `wrote_facts` derived and validated against `accepted_count` |

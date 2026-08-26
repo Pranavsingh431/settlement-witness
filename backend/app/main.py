@@ -2,6 +2,12 @@
 
 Exposes a health endpoint, the CSV import API and the reconciliation run API.
 
+Uploads are bounded twice. `RequestBodyLimit` counts the bytes of an import
+request before anything parses them, which is what stops a client that sends no
+`Content-Length` or a false one. `read_bounded` then checks the document itself
+against the exact configured limit. The first bounds what the server accepts,
+the second decides what it will import.
+
 There is no authentication and no multi-tenancy. This is a local and
 demonstration backend: it assumes one merchant's data and one trusted operator,
 and it must not be exposed to a network where either assumption fails. Adding
@@ -13,16 +19,17 @@ need and is deferred deliberately: the contract rests on conclusions being
 immutable and replayable, and a mutable resolve endpoint would end that.
 """
 
-from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine
 
 from app import __version__
+from app.api.body_limit import RequestBodyLimit, post_to
+from app.api.imports import IMPORTS_PATH
 from app.api.imports import router as imports_router
 from app.api.reconciliation import router as reconciliation_router
 from app.config import AppEnv, Settings, get_settings
@@ -31,11 +38,11 @@ from app.storage.database import create_database_engine, database_url_for
 MULTIPART_OVERHEAD_BYTES = 8 * 1024
 """How much a multipart envelope may add on top of the document itself.
 
-The early size guard reads `Content-Length`, which covers the boundaries, the
-part headers and the two declared form fields as well as the file. Allowing for
-that means the guard refuses a request only when the document inside it cannot
-fit under the limit, and the exact check on the document is done later while
-reading it."""
+A request carries boundaries, part headers and the two declared form fields as
+well as the file, so the request budget has to be a little larger than the file
+limit or a document of exactly the permitted size could not be sent. The budget
+is therefore approximate by design, and it is not the file limit: a document
+between the two is refused by the exact byte count in `read_bounded`."""
 
 
 class HealthResponse(BaseModel):
@@ -75,35 +82,11 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     application.state.engine = engine
     application.state.settings = resolved
 
-    max_body = resolved.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
-
-    @application.middleware("http")
-    async def refuse_oversized_bodies(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        """Refuse a request whose declared length cannot hold an allowed document.
-
-        Checked here because this is the last point before the server reads the
-        body. Past it, an oversized upload is spooled to disk before any
-        endpoint sees it, and the endpoint refusing it then has already paid for
-        it. A client that sends no `Content-Length`, or lies about it, is caught
-        by the exact check while the document is read.
-        """
-        declared = request.headers.get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > max_body:
-            return JSONResponse(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                content={
-                    "detail": {
-                        "error": "request_too_large",
-                        "detail": (
-                            f"the request body is larger than the {max_body} byte limit; "
-                            "it was not read and no receipt was written"
-                        ),
-                    }
-                },
-            )
-        return await call_next(request)
+    application.add_middleware(
+        RequestBodyLimit,
+        max_bytes=resolved.max_upload_bytes + MULTIPART_OVERHEAD_BYTES,
+        applies_to=post_to(IMPORTS_PATH),
+    )
 
     @application.get("/health", response_model=HealthResponse, tags=["ops"])
     def health() -> HealthResponse:

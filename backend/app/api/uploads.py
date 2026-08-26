@@ -63,7 +63,15 @@ def safe_document_name(raw: str | None) -> str:
 def read_bounded(upload: UploadFile, limit: int) -> bytes:
     """Read an upload in chunks, refusing it once it passes a limit.
 
-    Read a piece at a time so that an oversized upload is refused after one
+    This is the exact check on the document, and it is the second of two. The
+    request as a whole was already bounded by `RequestBodyLimit` before the
+    multipart parser ran, so by the time this is reached the body is known to
+    fit the request budget. That budget is deliberately a little larger than
+    this limit, because a multipart envelope carries boundaries and part
+    headers as well as the file, and a document of exactly the permitted size
+    has to be sendable. A document in the gap between the two is refused here.
+
+    Read a piece at a time so that an oversized document is refused after one
     chunk past the limit rather than after all of it is in memory. The bytes
     returned are exactly the bytes received: nothing is decoded, trimmed or
     normalised, because the document hash on the receipt has to describe what
@@ -77,8 +85,8 @@ def read_bounded(upload: UploadFile, limit: int) -> bytes:
         The complete document.
 
     Raises:
-        HTTPException: 413 when the upload is larger than the limit. Raised
-            before any parsing, so an oversized document never reaches the
+        HTTPException: 413 when the document is larger than the limit. Raised
+            before the document is read as CSV, so it never reaches the import
             service and never leaves a receipt.
     """
     chunks: list[bytes] = []
@@ -92,7 +100,7 @@ def read_bounded(upload: UploadFile, limit: int) -> bytes:
                     "error": "document_too_large",
                     "detail": (
                         f"the uploaded document is larger than the {limit} byte limit; "
-                        "nothing was read and no receipt was written"
+                        "no import was processed and no receipt was written"
                     ),
                 },
             )
