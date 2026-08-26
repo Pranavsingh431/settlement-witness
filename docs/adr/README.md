@@ -22,3 +22,4 @@ Rules:
 | [ADR-008](ADR-008-seeded-generation-and-independent-oracle.md) | Seeded generation, paired controls and an independent oracle | Accepted |
 | [ADR-009](ADR-009-immutable-runs-and-migrations.md) | Immutable reconciliation runs, idempotent run keys and real migrations | Accepted |
 | [ADR-010](ADR-010-import-receipts-are-the-created-resource.md) | A processed upload returns 201, whatever the document turned out to be | Accepted |
+| [ADR-011](ADR-011-same-origin-api-instead-of-cors.md) | The browser reaches the API through its own origin, not through CORS | Accepted |

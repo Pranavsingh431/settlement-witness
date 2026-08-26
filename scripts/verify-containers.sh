@@ -3,13 +3,19 @@
 # Build both container images, start them, and check that they actually work.
 #
 # This is the part of the pipeline that needs Docker, so it is kept out of
-# `make ci` and run by `make verify` instead. It checks four things that a
+# `make ci` and run by `make verify` instead. It checks six things that a
 # successful image build on its own does not prove:
 #
 #   1. the backend answers its health endpoint;
 #   2. the frontend serves the bundle on the published host port;
 #   3. the frontend still serves unknown paths, so client side routing works;
-#   4. neither container runs as root.
+#   4. the frontend proxies /v1 to the backend, which is the only way the
+#      browser reaches the API: the bundle asks for same-origin relative paths
+#      and names no host, so without this proxy every screen would receive the
+#      app shell instead of data;
+#   5. an unknown /v1 path returns the backend's own 404 rather than that shell,
+#      which is what proves the proxy is matched before the fallback;
+#   6. neither container runs as root.
 #
 # The stack is stopped on the way out, including when a check fails.
 #
@@ -86,6 +92,34 @@ case "${health_body}" in
   *'"status":"ok"'*) pass "backend health payload is ${health_body}" ;;
   *) fail "backend health payload was unexpected: ${health_body}" ;;
 esac
+
+info "Checking that the frontend reaches the backend through its own origin."
+check_http "frontend proxy to the backend health endpoint" "${FRONTEND_URL}/v1/health"
+
+proxied_health="$(curl --silent --fail "${FRONTEND_URL}/v1/health")"
+case "${proxied_health}" in
+  *'"status":"ok"'*) pass "frontend proxied the health payload: ${proxied_health}" ;;
+  *) fail "frontend did not proxy the health payload. Got: ${proxied_health}" ;;
+esac
+
+# The API itself, not only the health endpoint. This is the shape every screen
+# reads, so a proxy that carried /v1/health and nothing else would still leave
+# the interface empty.
+proxied_imports="$(curl --silent --fail "${FRONTEND_URL}/v1/imports")"
+case "${proxied_imports}" in
+  *'"receipts"'*) pass "frontend proxied the import history from the backend" ;;
+  *) fail "frontend did not proxy /v1/imports. Got: ${proxied_imports}" ;;
+esac
+
+# An unknown API path must come back as the backend's 404, not as the app shell
+# with status 200. If the single page fallback matched first, the client would
+# report a malformed response instead of a missing resource.
+api_404="$(curl --silent --output /dev/null --write-out '%{http_code}' "${FRONTEND_URL}/v1/no-such-endpoint")"
+if [ "${api_404}" = "404" ]; then
+  pass "an unknown /v1 path returns the backend 404, so the proxy wins over the fallback"
+else
+  fail "an unknown /v1 path returned ${api_404}, so the single page fallback is matching first."
+fi
 
 info "Checking that neither container runs as root."
 check_non_root backend

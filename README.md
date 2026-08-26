@@ -123,6 +123,48 @@ Run `make help` to see this list in your terminal.
 Each of `test`, `lint`, `format` and `typecheck` also has a `-backend` and a `-frontend` variant,
 for example `make test-backend`.
 
+## Try it in a browser
+
+Two terminals, then one page. No command line after the first step.
+
+```bash
+make db-setup
+```
+
+```bash
+make dev
+```
+
+`make dev` starts the backend on `http://127.0.0.1:8000` and the interface on
+`http://127.0.0.1:5173`. Open the second address.
+
+The browser only ever asks for same-origin paths such as `/v1/imports`. Vite
+carries those to the backend in development and nginx does the same job in the
+container, so nothing in the bundle names a host and the backend needs no CORS
+policy.
+
+Then follow the evidence from a CSV file to a decision:
+
+1. **Import evidence.** Go to *Import evidence* and upload the three documents
+   in `data/fixtures/ingestion/`, declaring the record type for each:
+   `payment_events.csv` as `PAYMENT_EVENT`, `settlement_lines.csv` as
+   `SETTLEMENT_LINE`, `payouts.csv` as `PAYOUT`. The record type and the source
+   system are declared, never guessed from the file.
+2. **Read the receipts.** Each upload returns the receipt the server recorded,
+   showing what happened to every row. Upload the same file twice to see a
+   `DUPLICATE_NO_OP` that writes nothing, or upload
+   `data/fixtures/ingestion/invalid_mixed_rows.csv` to see a rejection whose
+   receipt is kept even though no facts were written.
+3. **Create a run.** Go to *Runs* and reconcile. Do it twice: the second attempt
+   says the snapshot already had a run rather than writing a duplicate.
+4. **Read a certificate.** Open the run and select a settlement line. The panel
+   shows every invariant that held, broke or could not be checked, and every
+   source record the decision cited with the hash of its payload.
+
+A line is resolved only when its citations resolved and its required invariants
+held. Exceptions and insufficient evidence are shown as what they are, not
+folded into a success rate.
+
 ## Repository layout
 
 ```text
