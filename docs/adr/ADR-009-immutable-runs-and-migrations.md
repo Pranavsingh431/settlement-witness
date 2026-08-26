@@ -38,16 +38,47 @@ would try to create tables it already has. Such a database is adopted, on these
 terms:
 
 - **Empty:** migrate from zero, as any new database does.
-- **Recognisably Phase 2:** stamp it at the initial revision, then migrate
+- **Exactly the Phase 2 schema:** stamp it at the initial revision, then migrate
   forward normally. Nothing is recreated and no existing row is touched.
-- **Anything else:** refuse, with one error naming what differed, and change
+- **Anything else:** refuse, with one error naming every difference, and change
   nothing.
 
-Recognising it means inspecting the live SQLite schema rather than trusting the
-table names: both Phase 2 tables present, each with exactly its expected columns,
-its primary key and its indexes, and all four original append-only triggers in
-place. The description lives in one module, `app/storage/legacy.py`, so startup
-and tests cannot come to different conclusions about the same database.
+The second case is decided by comparing the live SQLite schema against a written
+record of what Phase 2 shipped, held in one module, `app/storage/legacy.py`, so
+startup and tests cannot come to different conclusions about the same database.
+
+Names are not the guarantees, so names are not what is compared. A table called
+`source_facts` with the right eleven column names but no
+`uq_source_facts_idempotency` cannot promise that one provider event was
+imported once, and a trigger called `trg_source_facts_no_update` with an empty
+body refuses nothing. Either would be carried forward under a promise it does
+not keep, and every later run would cite it as evidence. So the comparison
+covers, for both tables:
+
+- the exact set of user tables;
+- every column, in order, with its declared SQLite type and its nullability;
+- the primary key, including column order;
+- every unique identity, by name where it has one and by the columns it spans;
+- every named CHECK constraint, by the rule it expresses;
+- every index, by name, indexed column order and uniqueness;
+- every trigger, by its full definition, so timing, event, table and abort
+  message are all checked together.
+
+Each of those is compared for equality, not containment, which is a deliberate
+choice about unexpected objects. An extra index takes no guarantee away, and the
+check could have allowed it and been described as a set of required guarantees
+rather than an exact schema. Refusing keeps one rule across the whole check, the
+same rule that already refuses an unexpected table, and an object this code did
+not put there means somebody changed the schema, which says nothing about what
+else they changed. Refusing costs an operator one deliberate decision. Adopting
+wrongly costs the audit trail its meaning.
+
+Case, spacing around operators and one enclosing pair of parentheses are treated
+as formatting when comparing a CHECK, because they are. Nothing else is
+rewritten, so a check loosened from `= 64` to `>= 32` is a difference. Trigger
+definitions are compared with their case intact, because the abort message is
+part of what a trigger promises and every genuine Phase 2 trigger was written by
+one piece of code.
 
 The refusal is the part worth defending. Stamping a database because two tables
 happen to share a name would tell Alembic that revisions it never ran are
@@ -57,6 +88,11 @@ rather than as a clear stop, so an unexplained difference is a refusal and never
 a repair. Missing triggers are refused for a second reason: a database whose
 append-only protection was removed may already have had history rewritten, and
 adopting it would vouch for evidence this system cannot vouch for.
+
+The written record is itself a claim, so a test holds it to reality: it builds a
+database the way Phase 2 built one and requires the record to equal what that
+database reports, field by field. A record that drifted from the schema it
+describes would fail there rather than in a deployment.
 
 Alembic's own `alembic_version` table is ignored when deciding, because it can
 exist holding no row after an interrupted first migration, and a database in

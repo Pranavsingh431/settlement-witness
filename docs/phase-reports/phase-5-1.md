@@ -55,21 +55,42 @@ An unstamped database is classified into exactly one of three states.
 | State | Test | Action |
 | --- | --- | --- |
 | Empty | No user tables | Migrate from zero, as before |
-| Phase 2 | Matches the fingerprint exactly | Stamp `0001_initial_schema`, then migrate to head |
+| Phase 2 | Matches the fingerprint | Stamp `0001_initial_schema`, then migrate to head |
 | Anything else | Any difference at all | Refuse, change nothing |
 
 The fingerprint is checked against the live SQLite schema, not against table
 names:
 
 - both tables present, `source_facts` and `import_receipts`, and no others;
-- every expected column on each, with no extra columns;
+- every expected column name on each, with no extra columns;
 - the expected primary key on each;
-- the three expected indexes on each;
-- all four original append-only triggers.
+- the expected index names on each;
+- the four original append-only trigger names.
 
 `alembic_version` is ignored when deciding. It can exist holding no row after an
 interrupted first migration, and a database in that state is still unstamped, so
 counting it as user data would refuse an otherwise empty database.
+
+### Corrected in Phase 5.2
+
+This phase described the check above as matching the Phase 2 schema "exactly".
+It did not. It compared object names, and names are not guarantees. Every one of
+these would have been adopted:
+
+- `source_facts` without `uq_source_facts_idempotency`;
+- `import_receipts` without the unique identity on `receipt_id`;
+- either table with a CHECK constraint dropped or loosened;
+- a column whose type or nullability had changed;
+- an index of the right name over the wrong columns, or made unique;
+- a trigger of the right name whose body did nothing at all.
+
+The last one is the worst: a database with four correctly named triggers and no
+append-only behaviour would have been adopted and then cited as evidence.
+
+Phase 5.2 compares the guarantees themselves and the wording above is left in
+place only to show what was actually enforced at the time. See
+[phase-5-2.md](phase-5-2.md) and the corrected decision 1 in
+[ADR-009](../adr/ADR-009-immutable-runs-and-migrations.md).
 
 ### Why the refusal is strict
 
@@ -206,6 +227,7 @@ and a table rebuilt with the wrong primary key.
 | Already-head database unchanged on another setup run | Passed | Stamp and rows identical |
 | Malformed shapes fail closed, writing no `alembic_version` | Passed | Five shapes, table set unchanged after each |
 | Legacy check centralized, not duplicated | Passed | One module read by startup and tests |
+| Fingerprint matches the schema "exactly" | Overclaimed | Names only. Corrected in Phase 5.2 |
 | Engine-passed migration model kept | Passed | No URL in `alembic.ini`, no CLI use |
 | `make ci` | Passed | Exit 0, all nine checks |
 | `make schema` | Met | Run, byte identical, no domain model changed |
