@@ -53,6 +53,28 @@ demo corpus is an exception where every invariant held: the baseline reported
 `PARTIAL_REFUND` on its own. The headline is now derived from the decision's own
 invariant results, and a test holds it there.
 
+#### Corrected in Phase 7.1
+
+That fix was applied to the certificate and not to the dashboard, which went on
+saying the same false thing about the same decision:
+
+> The evidence is there and a rule about it does not hold.
+
+A failed invariant means an exception. An exception does not mean a failed
+invariant, and `line-0001` is the case that proves it. Fixing the detailed view
+while leaving the summary wrong is arguably worse than leaving both: a reader
+who takes the overview at its word never opens the certificate that contradicts
+it.
+
+The card now says the records needed to judge the line were there, that the
+baseline reports a finding instead of resolving it, and that the certificate is
+where you find out whether a required check failed or a lifecycle state was
+reported. The insufficient-evidence card was tightened in the same pass: it
+described only the missing-fact route to that status, and a required invariant
+with no input reaches it too.
+
+See [phase-7-1.md](phase-7-1.md).
+
 Money is shown only where the API sends it, which is the expected and observed
 values on an invariant result. Those are minor units and the API sends no
 currency with them, so they are grouped, labelled `minor units`, and given no
@@ -234,7 +256,7 @@ that passes is a test against a shape the server actually sends.
 | Typed client, no unchecked casts, errors parsed from the envelope | Passed | 49 client and validator tests |
 | Backend-unavailable state with retry | Passed | On all four screens |
 | No fake data, metrics or frontend-only decisions | Passed | No percentage or accuracy figure anywhere, asserted |
-| Dashboard: claim, three states, latest run, recent imports, honest empty state | Passed | 14 tests |
+| Dashboard: claim, three states, latest run, recent imports, honest empty state | Partly overclaimed | The exception card equated an exception with a failed rule. Corrected in Phase 7.1 |
 | Import: declared type and system, expected files, in-flight guard, receipt shown | Passed | 33 tests |
 | Four import outcomes distinguished, rejections say no facts were written | Passed | One test each |
 | Row outcomes shown, no raw CSV rendered | Passed | Asserted against real document bytes |

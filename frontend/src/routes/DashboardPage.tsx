@@ -23,6 +23,17 @@ import {
   Stats,
 } from '../components/ui';
 
+/**
+ * The three answers, described as the contract actually defines them.
+ *
+ * The exception wording is deliberate. A failed invariant means an exception,
+ * and an exception does not mean a failed invariant: the baseline also raises
+ * one for a lifecycle state it recognises and will not resolve on, such as a
+ * partial refund, with every check passing. Saying "a rule does not hold" would
+ * describe a failure that did not happen, and the demo corpus contains exactly
+ * that case. The certificate is where the difference is shown, so the card
+ * points at it rather than guessing on its behalf.
+ */
 const STATES = [
   {
     tone: 'resolved',
@@ -34,13 +45,13 @@ const STATES = [
     tone: 'exception',
     glyph: '!',
     name: 'Exception',
-    what: 'The evidence is there and a rule about it does not hold. A real finding, reported rather than smoothed away.',
+    what: 'The records needed to judge this line were there, and the baseline reports a finding instead of resolving it. Its certificate says whether a required check failed or a lifecycle state was reported.',
   },
   {
     tone: 'unknown',
     glyph: '?',
     name: 'Insufficient evidence',
-    what: 'The line cites something that is not in the store, so no judgement is possible. Not a failure, and not a pass either.',
+    what: 'The evidence needed to judge this line did not all resolve, so no judgement is possible. Not a failure, and not a pass either.',
   },
 ] as const;
 
@@ -67,9 +78,9 @@ export function DashboardPage() {
       </div>
 
       <Panel title="The three answers a line can get">
-        <div className="states">
+        <ul className="states">
           {STATES.map((state) => (
-            <div key={state.name} className="state-card">
+            <li key={state.name} className="state-card">
               <span className={`badge badge--${state.tone}`}>
                 <span className="badge__glyph" aria-hidden="true">
                   {state.glyph}
@@ -77,9 +88,9 @@ export function DashboardPage() {
                 {state.name}
               </span>
               <p className="state-card__what">{state.what}</p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </Panel>
 
       <Panel

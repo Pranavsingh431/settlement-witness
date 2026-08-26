@@ -76,6 +76,91 @@ describe('an empty store', () => {
   });
 });
 
+describe('the explanation of the three answers', () => {
+  beforeEach(() => {
+    client.listRuns.mockResolvedValue(NO_RUNS);
+    client.listImports.mockResolvedValue(NO_IMPORTS);
+    renderScreen(<DashboardPage />);
+  });
+
+  /**
+   * Return the card explaining one of the three answers.
+   *
+   * Found by its badge rather than by the start of its text, because the badge
+   * carries a decorative glyph before the word.
+   */
+  async function stateCard(name: string): Promise<HTMLElement> {
+    const cards = await screen.findAllByRole('listitem');
+    const card = cards.find((item) => within(item).queryByText(name) !== null);
+    if (card === undefined) {
+      throw new Error(`no card explains "${name}"`);
+    }
+    return card;
+  }
+
+  it('describes all three, and only three', async () => {
+    const cards = await screen.findAllByRole('listitem');
+
+    expect(cards).toHaveLength(3);
+    expect(await stateCard('Resolved')).toBeInTheDocument();
+    expect(await stateCard('Exception')).toBeInTheDocument();
+    expect(await stateCard('Insufficient evidence')).toBeInTheDocument();
+  });
+
+  it('says a resolved line needs both its citations and its invariants', async () => {
+    const card = await stateCard('Resolved');
+
+    expect(card).toHaveTextContent(/every citation resolved/i);
+    expect(card).toHaveTextContent(/every required invariant held/i);
+  });
+
+  it('does not claim that every exception has a broken rule', async () => {
+    // A failed invariant means an exception. An exception does not mean a
+    // failed invariant: the baseline raises one for a lifecycle state it will
+    // not resolve on, with every check passing, and `line-0001` of the demo
+    // corpus is exactly that. Wording that equates the two describes a failure
+    // that did not happen.
+    const text = (await stateCard('Exception')).textContent;
+
+    // The exact claim this phase removed.
+    expect(text).not.toMatch(/a rule about it (does|did) not hold/i);
+    // And the shapes it could come back as. Each of these asserts a failure
+    // rather than naming it as one of two possibilities, which is the
+    // difference that matters: "whether a check failed" is true of every
+    // exception, "a check failed" is not.
+    expect(text).not.toMatch(
+      /\band (a|one|some) (rule|invariant|check)\b[^.]*?(does not hold|did not hold|fail)/i,
+    );
+    expect(text).not.toMatch(/at least one (required )?(rule|invariant|check)/i);
+    expect(text).not.toMatch(/because (a|one) (rule|invariant|check)/i);
+  });
+
+  it('says an exception is a reported non-resolution, and points at the certificate', async () => {
+    const card = await stateCard('Exception');
+
+    expect(card).toHaveTextContent(/reports a finding instead of resolving it/i);
+    expect(card).toHaveTextContent(/certificate/i);
+    expect(card).toHaveTextContent(/whether a required check failed or a lifecycle state/i);
+  });
+
+  it('keeps an exception distinct from insufficient evidence', async () => {
+    // An exception is a finding made because the records were there. Insufficient
+    // evidence is an inability to judge because they were not.
+    const exception = await stateCard('Exception');
+    const unknown = await stateCard('Insufficient evidence');
+
+    expect(exception).toHaveTextContent(/the records needed to judge this line were there/i);
+    expect(unknown).toHaveTextContent(/did not all resolve/i);
+    expect(unknown).toHaveTextContent(/no judgement is possible/i);
+  });
+
+  it('does not call insufficient evidence a failure or a pass', async () => {
+    const card = await stateCard('Insufficient evidence');
+
+    expect(card).toHaveTextContent(/not a failure, and not a pass either/i);
+  });
+});
+
 describe('a store with a run', () => {
   beforeEach(() => {
     client.listRuns.mockResolvedValue({ runs: [RUN], total: 1, limit: 1, offset: 0 });
