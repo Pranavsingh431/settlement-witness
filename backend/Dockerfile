@@ -16,7 +16,8 @@ ENV PYTHONUNBUFFERED=1 \
     SW_APP_ENV=production \
     SW_LOG_LEVEL=INFO \
     SW_API_HOST=0.0.0.0 \
-    SW_API_PORT=8000
+    SW_API_PORT=8000 \
+    SW_DATABASE_PATH=/srv/data/settlement.sqlite
 
 WORKDIR /srv/backend
 
@@ -26,10 +27,21 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# The migrations travel with the image. The entry point brings the database to
+# head before the server binds, so an image without them starts and then fails
+# on its first request, which is the harder failure to diagnose.
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 COPY app ./app
+
+# Runtime state lives here. Created and owned before the user is dropped,
+# because the container runs unprivileged and cannot create it later.
+RUN mkdir -p /srv/data
 
 RUN chown -R app:app /srv
 USER app
+
+VOLUME ["/srv/data"]
 
 EXPOSE 8000
 

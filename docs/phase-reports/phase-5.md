@@ -137,6 +137,8 @@ Host: macOS on arm64, uv 0.12.5, Python 3.12.12, Node 24.19.0, pnpm 10.15.0.
 | `uv run pytest` | 0 | `760 passed`, `Total coverage: 100.00%` |
 | Migration from `0001` with data to head | 0 | 10 facts and 3 receipts unchanged |
 | `make db-setup`, `make import-fixtures`, `make api` | 0 | Every endpoint answered as above |
+| `make verify-containers` | 0 | Both images build, serve and run unprivileged |
+| API inside the container | 0 | Health 200, runs list 200, empty store 409, database at head |
 | `make schema` | 0 | Byte identical, no domain model touched |
 
 ## Tests
@@ -158,7 +160,18 @@ migration preserving imported facts and receipts; pagination, filters, unknown
 IDs and deterministic ordering; and the CLI output agreeing with the persisted
 API output for the same snapshot.
 
-Two defects were found by tests rather than by inspection:
+A third was found by the container job in CI, which is exactly what Phase 0.2
+added it for. The backend image copied only `app/`, so the migrations were not
+in it, and the entry point that now migrates on start failed with
+`Path doesn't exist: /srv/backend/migrations`. Local testing missed it because
+it ran from the source tree. Fixed by carrying `alembic.ini` and `migrations/`
+into the image, which then surfaced a second layer: the default database path
+resolved outside the image to a directory the unprivileged user could not
+create. The image now declares a writable `/srv/data`, owned before the user is
+dropped, and the entry point creates its database directory the way the setup
+command already did.
+
+Two further defects were found by tests rather than by inspection:
 
 1. Decisions were inserted before the run row they reference, so SQLite rejected
    them on the foreign key. Without a mapper relationship, SQLAlchemy is free to

@@ -23,6 +23,7 @@ def main() -> None:
     """Migrate the database, then start the API server."""
     settings = get_settings()
 
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_database_engine(database_url_for(settings.database_path))
     try:
         create_schema(engine)
