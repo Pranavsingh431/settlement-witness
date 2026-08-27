@@ -7,12 +7,19 @@ database identical, and a test holds that.
 
 ## Why the metrics are separate
 
-A single number would hide the two ways of being wrong. Selecting every
-candidate scores perfect recall while linking records that do not belong;
-abstaining on everything scores no false links while answering nothing. Both are
-useless and each looks good under one metric, so precision, recall, exact-set
-accuracy, abstention rate, invalid-output rate and false-link rate are reported
-side by side and never averaged.
+A single number would hide the ways of being wrong. Selecting every candidate
+scores perfect recall while linking records that do not belong; abstaining on
+everything scores no false links while answering nothing. Both are useless and
+each looks good under one metric, so every rate is reported side by side and
+none is averaged with another.
+
+`link_recall` is measured over every true link in the corpus, not over the lines
+that happened to produce a selection. A line the provider abstained on, failed
+on, or answered invalidly returned none of its true links, and a recall that
+skipped those lines would let a provider raise its score by declining to answer.
+`answered_link_recall` is the conditional measure, reported separately and never
+called recall on its own, because it answers a different question: how well the
+provider did when it did answer.
 
 **None of these is a reconciliation accuracy.** They measure whether a provider
 picked the records the deterministic linker already picks. Reconciliation
@@ -39,11 +46,17 @@ from app.ai.validation import (
 from app.benchmark.metrics import Rate
 from app.reconciliation.snapshot import FactSnapshot
 
-SHADOW_HARNESS_VERSION = "1.0.0"
+SHADOW_HARNESS_VERSION = "2.0.0"
 """Version of these definitions.
 
 Changes when a metric's meaning changes, so two reports carrying different
-versions are not compared as though they measured the same thing."""
+versions are not compared as though they measured the same thing.
+
+2.0.0 redefined `link_recall`. In 1.0.0 it was measured over the lines that
+produced a selection, so a provider that abstained on half a corpus and was
+right about the other half reported perfect recall while half the true links
+were never returned. It is now measured over every true link in the corpus, and
+the old measure is reported separately as `answered_link_recall`."""
 
 
 class LineOutcome(BaseModel):
@@ -106,7 +119,21 @@ class ShadowReport(BaseModel):
     The metric that catches selecting everything."""
 
     link_recall: Rate
-    """Of the records the baseline links, how many were selected."""
+    """Of every true link in the corpus, how many were selected.
+
+    The denominator is every line asked about, whatever became of it. Abstaining,
+    failing and returning something invalid all return none of that line's true
+    links, and all count against this. Null only when the corpus contains no true
+    link at all, which is not measurable rather than perfect."""
+
+    answered_link_recall: Rate
+    """The same ratio over the lines that produced a selection.
+
+    How well the provider did when it answered, which is a real question and a
+    different one. Reported under a name that says which lines it covers, never
+    as recall alone: in the version before this one, the unqualified name meant
+    this measure and a provider that abstained on half a corpus reported perfect
+    recall."""
 
     exact_set_accuracy: Rate
     """Lines where the selection was exactly the linked set.
@@ -140,6 +167,9 @@ def _evaluate_one(
     truth = tuple(sorted(truth_for(request, snapshot)))
     result = provider.propose(request)
 
+    # A failure's identity is read from the provider object too. Taking it from
+    # the failure payload would let a provider that failed report the failure
+    # against somebody else's name.
     if isinstance(result, ProviderFailure):
         return LineOutcome(
             subject_settlement_line_id=request.subject_settlement_line_id,
@@ -149,7 +179,7 @@ def _evaluate_one(
             rejection=RejectionCode.PROVIDER_FAILED,
         )
 
-    validated = parse_proposal(result, request)
+    validated = parse_proposal(result, request, provider.identity)
     if isinstance(validated, RejectedProposal):
         return LineOutcome(
             subject_settlement_line_id=request.subject_settlement_line_id,
@@ -193,12 +223,14 @@ def _report(
     true_positives = sum(outcome.true_positives for outcome in outcomes)
     false_links = sum(outcome.false_links for outcome in outcomes)
 
-    # Recall is measured over the lines that produced a selection. A line the
-    # provider abstained on or got refused on has no selection to have missed a
-    # record from, and counting its truth in the denominator would make
-    # abstaining look like missing.
+    # Every true link in the corpus, whatever became of the line carrying it. A
+    # line that was abstained on returned none of its true links, and so did one
+    # that failed, so both count against recall. The conditional measure below
+    # covers only the lines that answered.
+    linkable = sum(len(outcome.truth) for outcome in outcomes)
     answered = [outcome for outcome in outcomes if outcome.answered]
-    linkable = sum(len(outcome.truth) for outcome in answered)
+    answered_linkable = sum(len(outcome.truth) for outcome in answered)
+    answered_true_positives = sum(outcome.true_positives for outcome in answered)
 
     return ShadowReport(
         harness_version=SHADOW_HARNESS_VERSION,
@@ -207,6 +239,7 @@ def _report(
         line_count=len(outcomes),
         link_precision=Rate.of(true_positives, selected_total),
         link_recall=Rate.of(true_positives, linkable),
+        answered_link_recall=Rate.of(answered_true_positives, answered_linkable),
         exact_set_accuracy=Rate.of(sum(1 for outcome in outcomes if outcome.exact), len(outcomes)),
         abstention_rate=Rate.of(sum(1 for outcome in outcomes if outcome.abstained), len(outcomes)),
         invalid_output_rate=Rate.of(

@@ -1,36 +1,48 @@
 """Tests for the deterministic validator: the adversarial cases.
 
-Each of these is a way a provider could produce something that parses and is
-still not an answer to the question it was asked. They are the reason the
-boundary is code and not a convention.
+Each of these is a way a provider could produce something that is not an answer
+to the question it was asked. They are the reason the boundary is code and not a
+convention.
 
-Every rejection here is an AI-proposal failure. None of them is a reconciliation
-exception, and `tests/ai/test_isolation.py` proves none of them changes a fact,
-a receipt, a run or a decision.
+Two of the cases from the previous design are gone as checks and appear here as
+impossibilities. A provider returns an outcome and a list of IDs, and the server
+writes the subject and the snapshot fingerprint from the request it holds, so a
+response cannot be about the wrong line or the wrong snapshot. Attempting either
+is refused as a malformed selection, because a field the contract does not have
+is an extra.
+
+Every rejection here is an AI-proposal failure. None is a reconciliation
+exception, and `tests/ai/test_isolation.py` proves none changes a fact, a
+receipt, a run or a decision.
 """
 
 import pytest
 
 from app.ai.candidates import LinkProposalRequest, build_request
-from app.ai.proposals import LinkProposal, ProposalOutcome
+from app.ai.proposals import LinkProposal, ProposalOutcome, ProviderIdentity, RawLinkSelection
 from app.ai.validation import (
     RejectedProposal,
     RejectionCode,
     ValidProposal,
     evidence_for,
     parse_proposal,
-    validate_proposal,
+    validate_selection,
 )
 from app.reconciliation.snapshot import FactSnapshot
-from tests.ai.conftest import correct_selection, payload_for
-
-STALE = "f" * 64
+from tests.ai.conftest import FIXTURE, correct_selection, payload_for
 
 
 def rejection(payload: object, request: LinkProposalRequest) -> RejectedProposal:
     """Parse a payload and require it to have been refused."""
-    result = parse_proposal(payload, request)
+    result = parse_proposal(payload, request, FIXTURE)
     assert isinstance(result, RejectedProposal), f"expected a rejection, got {result}"
+    return result
+
+
+def accepted(payload: object, request: LinkProposalRequest) -> ValidProposal:
+    """Parse a payload and require it to have been accepted."""
+    result = parse_proposal(payload, request, FIXTURE)
+    assert isinstance(result, ValidProposal), f"expected acceptance, got {result}"
     return result
 
 
@@ -43,9 +55,8 @@ class TestAValidSelectionIsAccepted:
         """Nothing exotic: this is what a working provider returns."""
         selected = correct_selection(request_for_line_one, snapshot)
 
-        result = parse_proposal(payload_for(request_for_line_one, selected), request_for_line_one)
+        result = accepted(payload_for(selected), request_for_line_one)
 
-        assert isinstance(result, ValidProposal)
         assert result.selected == set(selected)
         assert not result.abstained
 
@@ -58,22 +69,78 @@ class TestAValidSelectionIsAccepted:
         question badly, and that is for the evaluator to score. The validator's
         job is whether it answered the question at all.
         """
-        result = parse_proposal(
-            payload_for(request_for_line_one, ("PAYMENT_EVENT:pe-2",)), request_for_line_one
-        )
-
-        assert isinstance(result, ValidProposal)
+        accepted(payload_for(("PAYMENT_EVENT:pe-2",)), request_for_line_one)
 
     def test_an_abstention_passes(self, request_for_line_one: LinkProposalRequest) -> None:
         """Declining is an answer, not a malformed one."""
-        result = parse_proposal(payload_for(request_for_line_one, ()), request_for_line_one)
+        assert accepted(payload_for(()), request_for_line_one).abstained
+
+
+class TestTheMetadataIsBoundNotAccepted:
+    """The second defect this phase fixed, tested at the seam."""
+
+    def test_a_valid_proposal_carries_the_request_subject_and_snapshot(
+        self, request_for_line_one: LinkProposalRequest, snapshot: FactSnapshot
+    ) -> None:
+        """Written from the request, because the response carries neither."""
+        result = accepted(
+            payload_for(correct_selection(request_for_line_one, snapshot)), request_for_line_one
+        )
+
+        assert result.proposal.subject_settlement_line_id == "line-sl-1"
+        assert result.proposal.snapshot_fingerprint == request_for_line_one.snapshot_fingerprint
+
+    def test_a_valid_proposal_carries_the_actual_provider_identity(
+        self, request_for_line_one: LinkProposalRequest
+    ) -> None:
+        """Read from the provider object that was called."""
+        real = ProviderIdentity(name="the-real-provider", version="7")
+
+        result = parse_proposal(payload_for(("PAYMENT_EVENT:pe-1",)), request_for_line_one, real)
 
         assert isinstance(result, ValidProposal)
-        assert result.abstained
+        assert result.proposal.provider == real
+
+    def test_the_proposal_id_is_the_derived_one(
+        self, request_for_line_one: LinkProposalRequest
+    ) -> None:
+        """Not anything the provider chose, because it cannot choose."""
+        from app.ai.proposals import proposal_id_for
+
+        real = ProviderIdentity(name="custom", version="3")
+        result = parse_proposal(payload_for(("PAYMENT_EVENT:pe-1",)), request_for_line_one, real)
+
+        assert isinstance(result, ValidProposal)
+        assert result.proposal.proposal_id == proposal_id_for(
+            snapshot_fingerprint=request_for_line_one.snapshot_fingerprint,
+            subject_settlement_line_id="line-sl-1",
+            provider=real,
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("provider", {"name": "attacker", "version": "999"}),
+            ("proposal_id", "anything-i-like"),
+            ("subject_settlement_line_id", "line-sl-2"),
+            ("snapshot_fingerprint", "f" * 64),
+        ],
+    )
+    def test_supplying_metadata_is_refused(
+        self, request_for_line_one: LinkProposalRequest, field: str, value: object
+    ) -> None:
+        """The forged-identity case, and the three beside it.
+
+        Before the split, a response carrying a provider and an arbitrary ID
+        validated and the forged values were recorded.
+        """
+        payload = payload_for(("PAYMENT_EVENT:pe-1",), **{field: value})
+
+        assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
 
 
 class TestTheAdversarialCases:
-    """Each way a proposal can fail to answer its own question."""
+    """Each way a selection can fail to answer its own question."""
 
     def test_a_record_outside_the_candidate_environment_is_refused(
         self, request_for_line_one: LinkProposalRequest
@@ -83,10 +150,7 @@ class TestTheAdversarialCases:
         Not merely unlikely. The membership check is against the same set the
         request carried, so an unknown ID is a rejection whatever it names.
         """
-        refused = rejection(
-            payload_for(request_for_line_one, ("PAYMENT_EVENT:never-offered",)),
-            request_for_line_one,
-        )
+        refused = rejection(payload_for(("PAYMENT_EVENT:never-offered",)), request_for_line_one)
 
         assert refused.code is RejectionCode.OUT_OF_CANDIDATE_SET
         assert "never-offered" in refused.detail
@@ -95,47 +159,36 @@ class TestTheAdversarialCases:
         self, request_for_line_one: LinkProposalRequest
     ) -> None:
         """It exists as a fact and was never a candidate."""
-        refused = rejection(
-            payload_for(request_for_line_one, ("SETTLEMENT_LINE:sl-1",)), request_for_line_one
-        )
+        refused = rejection(payload_for(("SETTLEMENT_LINE:sl-1",)), request_for_line_one)
 
         assert refused.code is RejectionCode.OUT_OF_CANDIDATE_SET
 
-    def test_an_answer_about_another_line_is_refused(
+    def test_another_line_s_records_are_refused_when_out_of_set(
         self, snapshot: FactSnapshot, request_for_line_one: LinkProposalRequest
     ) -> None:
-        """A well-formed proposal answering the wrong question."""
-        other = build_request("line-sl-2", snapshot)
-        payload = payload_for(other, correct_selection(other, snapshot))
+        """A cross-line answer cannot be expressed, only a wrong selection.
 
-        refused = rejection(payload, request_for_line_one)
-
-        assert refused.code is RejectionCode.WRONG_SUBJECT
-        assert "line-sl-2" in refused.detail
-
-    def test_an_answer_about_another_snapshot_is_refused(
-        self, request_for_line_one: LinkProposalRequest, snapshot: FactSnapshot
-    ) -> None:
-        """Stale: the facts have changed since the question was asked.
-
-        Applying it anyway would link records chosen against one set of facts to
-        a different set, which is the quiet way a stale answer becomes wrong.
+        The response names no line, so the closest a provider can come is
+        selecting records the other line links. Those are in this line's
+        candidate set, so the selection is valid and simply wrong, which is what
+        the evaluator scores. Anything genuinely outside the set is refused.
         """
-        payload = payload_for(
-            request_for_line_one,
-            correct_selection(request_for_line_one, snapshot),
-            snapshot_fingerprint=STALE,
+        other = build_request("line-sl-2", snapshot)
+        their_records = correct_selection(other, snapshot)
+
+        accepted(payload_for(their_records), request_for_line_one)
+        assert (
+            rejection(
+                payload_for(("PAYMENT_EVENT:not-in-this-snapshot",)), request_for_line_one
+            ).code
+            is RejectionCode.OUT_OF_CANDIDATE_SET
         )
-
-        refused = rejection(payload, request_for_line_one)
-
-        assert refused.code is RejectionCode.WRONG_SNAPSHOT
 
     def test_a_duplicate_selection_is_refused(
         self, request_for_line_one: LinkProposalRequest
     ) -> None:
         """Caught at the shape, so it never reaches the membership check."""
-        payload = payload_for(request_for_line_one, ("PAYMENT_EVENT:pe-1", "PAYMENT_EVENT:pe-1"))
+        payload = payload_for(("PAYMENT_EVENT:pe-1", "PAYMENT_EVENT:pe-1"))
 
         assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
 
@@ -143,9 +196,7 @@ class TestTheAdversarialCases:
         self, request_for_line_one: LinkProposalRequest
     ) -> None:
         """A contradiction, not something to resolve one way or the other."""
-        payload = payload_for(
-            request_for_line_one, ("PAYMENT_EVENT:pe-1",), ProposalOutcome.ABSTAIN
-        )
+        payload = payload_for(("PAYMENT_EVENT:pe-1",), ProposalOutcome.ABSTAIN)
 
         assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
 
@@ -153,14 +204,14 @@ class TestTheAdversarialCases:
         self, request_for_line_one: LinkProposalRequest
     ) -> None:
         """The other half of the same contradiction."""
-        payload = payload_for(request_for_line_one, (), ProposalOutcome.PROPOSE)
+        payload = payload_for((), ProposalOutcome.PROPOSE)
 
         assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
 
     @pytest.mark.parametrize(
         "field", ["status", "exception_codes", "reason_codes", "confidence", "explanation"]
     )
-    def test_an_unknown_field_is_refused(
+    def test_an_asserting_field_is_refused(
         self, request_for_line_one: LinkProposalRequest, field: str
     ) -> None:
         """Not trimmed and not ignored.
@@ -169,7 +220,7 @@ class TestTheAdversarialCases:
         accepting the rest of its answer would mean quietly discarding the part
         that showed the misunderstanding.
         """
-        payload = payload_for(request_for_line_one, ("PAYMENT_EVENT:pe-1",), **{field: "x"})
+        payload = payload_for(("PAYMENT_EVENT:pe-1",), **{field: "x"})
 
         assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
 
@@ -196,11 +247,19 @@ class TestTheAdversarialCases:
         self, request_for_line_one: LinkProposalRequest
     ) -> None:
         """Bounded before the membership check does work proportional to it."""
-        payload = payload_for(
-            request_for_line_one, tuple(f"PAYMENT_EVENT:pe-{index}" for index in range(200))
-        )
+        payload = payload_for(tuple(f"PAYMENT_EVENT:pe-{index}" for index in range(200)))
 
         assert rejection(payload, request_for_line_one).code is RejectionCode.MALFORMED
+
+    def test_there_is_no_code_for_a_wrong_line_or_snapshot(self) -> None:
+        """Those failures are structurally impossible, so they are not checked.
+
+        Asserted so that reintroducing either field on the response would have
+        to reintroduce a code too, which is a visible change.
+        """
+        codes = {member.value for member in RejectionCode}
+
+        assert codes == {"MALFORMED", "OUT_OF_CANDIDATE_SET", "PROVIDER_FAILED"}
 
 
 class TestPromptInjectionInASourceField:
@@ -283,8 +342,7 @@ class TestEvidenceIsBuiltHereNotSupplied:
     ) -> None:
         """Read from the fact, not from anything the provider said."""
         selected = correct_selection(request_for_line_one, snapshot)
-        result = parse_proposal(payload_for(request_for_line_one, selected), request_for_line_one)
-        assert isinstance(result, ValidProposal)
+        result = accepted(payload_for(selected), request_for_line_one)
 
         references = evidence_for(result, snapshot)
 
@@ -299,26 +357,22 @@ class TestEvidenceIsBuiltHereNotSupplied:
     ) -> None:
         """So the same selection always builds the same references."""
         selected = correct_selection(request_for_line_one, snapshot)
-        reversed_order = tuple(reversed(selected))
-        result = parse_proposal(
-            payload_for(request_for_line_one, reversed_order), request_for_line_one
-        )
-        assert isinstance(result, ValidProposal)
+        result = accepted(payload_for(tuple(reversed(selected))), request_for_line_one)
 
         references = evidence_for(result, snapshot)
 
         assert [one.source_record_id for one in references] == sorted(selected)
 
     def test_there_is_no_way_to_supply_a_hash(self) -> None:
-        """The field does not exist on the proposal, so it cannot be sent."""
+        """The field does not exist on either layer, so it cannot be sent."""
+        assert "payload_hash" not in RawLinkSelection.model_fields
         assert "payload_hash" not in LinkProposal.model_fields
 
     def test_an_abstention_builds_no_references(
         self, request_for_line_one: LinkProposalRequest, snapshot: FactSnapshot
     ) -> None:
         """Nothing was selected, so nothing is cited."""
-        result = parse_proposal(payload_for(request_for_line_one, ()), request_for_line_one)
-        assert isinstance(result, ValidProposal)
+        result = accepted(payload_for(()), request_for_line_one)
 
         assert evidence_for(result, snapshot) == ()
 
@@ -330,13 +384,12 @@ class TestValidationIsPureAndDeterministic:
         self, request_for_line_one: LinkProposalRequest, snapshot: FactSnapshot
     ) -> None:
         """No hidden state between calls."""
-        payload = payload_for(
-            request_for_line_one, correct_selection(request_for_line_one, snapshot)
+        raw = RawLinkSelection.model_validate(
+            payload_for(correct_selection(request_for_line_one, snapshot))
         )
-        proposal = LinkProposal.model_validate(payload)
 
-        first = validate_proposal(proposal, request_for_line_one)
-        second = validate_proposal(proposal, request_for_line_one)
+        first = validate_selection(raw, request_for_line_one, FIXTURE)
+        second = validate_selection(raw, request_for_line_one, FIXTURE)
 
         assert first == second
 

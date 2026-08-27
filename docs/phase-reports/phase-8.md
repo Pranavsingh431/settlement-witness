@@ -37,6 +37,43 @@ Those fields do not exist on `LinkProposal`. `extra="forbid"` means a provider
 that sends one is rejected rather than trimmed, and a test asserts the declared
 field set so one cannot be added unnoticed.
 
+### Corrected in Phase 8.1
+
+Two claims in this report were wrong, and both are fixed in
+[phase-8-1.md](phase-8-1.md).
+
+**The recall figures below are not recall.** `link_recall` was measured over the
+lines that produced a selection, so a line the provider abstained on, failed on,
+or answered invalidly was removed from the denominator instead of counting
+against it. A provider that was perfect on half a corpus and returned nothing
+usable for the other half reported perfect recall:
+
+```text
+perfect on line 1 + ABSTAIN on line 2:
+  link_recall = 1.0  (2/2)
+  true links in corpus = 4, true links actually returned = 2
+```
+
+It is now measured over every true link in the corpus, and the old measure is
+reported separately as `answered_link_recall`. The shadow harness version is
+`2.0.0` for that reason, so a report written under `1.0.0` is not compared with
+one written after as though the word meant the same thing.
+
+**The proposal metadata was not server-owned.** This report describes a single
+`LinkProposal` returned by a provider, and a provider could therefore supply its
+own identity and its own proposal ID:
+
+```text
+forged payload validates today: True
+  recorded provider   : attacker v999
+  recorded proposal id: anything-i-like
+```
+
+Phase 8.1 splits the type in two. A provider returns a `RawLinkSelection` of an
+outcome and a list of IDs; the server writes the subject, the fingerprint, the
+identity and the derived ID itself. Where this report says a provider returns a
+proposal, read a selection.
+
 ### Why a separate type
 
 `DecisionCandidate` was not reused. It carries exception codes, invariant
@@ -81,7 +118,7 @@ request carried, so an unknown ID is an invalid proposal rather than a discovery
 
 Run against the two-payment fixture snapshot:
 
-| Provider | Precision | Recall | Exact set | False link | Abstention | Invalid |
+| Provider | Precision | Recall (as defined then) | Exact set | False link | Abstention | Invalid |
 | --- | --- | --- | --- | --- | --- | --- |
 | Selects the linked set | 1.000 | 1.000 | 1.000 | 0.000 | 0.000 | 0.000 |
 | Selects everything | 0.381 | **1.000** | **0.000** | 0.619 | 0.000 | 0.000 |
@@ -225,7 +262,7 @@ resists persuasion, and it is labelled as such in the test.
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Separate strict model-output type, not `DecisionCandidate` | Passed | `LinkProposal`, declared field set asserted |
+| Separate strict model-output type, not `DecisionCandidate` | Partly | Separate, but it carried metadata a provider could supply. Split in Phase 8.1 |
 | Required fields present, extras forbidden | Passed | 34 contract tests |
 | `ABSTAIN` carries no IDs, `PROPOSE` carries at least one and no duplicates | Passed | One test each |
 | No status, code, hash, invariant, confidence, text, money or lifecycle claim | Passed | Twelve forbidden fields, parametrised |
@@ -244,7 +281,7 @@ resists persuasion, and it is labelled as such in the test.
 | Typed failures, never repaired or retried | Passed | Three failure kinds, each recorded as invalid |
 | Nothing persisted, no endpoint | Passed | Asserted over the schema and the module source |
 | Shadow evaluator over the deterministic oracle | Passed | Oracle derived from the baseline linker |
-| Six metrics reported separately | Passed | And none called reconciliation accuracy |
+| Six metrics reported separately | Overclaimed | One of them was not recall. Corrected in Phase 8.1 |
 | pass@1 only | Passed | Asserted; no pass field on the report |
 | Paired control against broad guessing | Passed | Perfect recall, 0.000 exact set, 0.619 false link |
 | Every adversarial case proved harmless | Passed | Facts, receipts, runs, decisions, fingerprint |

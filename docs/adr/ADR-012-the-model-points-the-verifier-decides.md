@@ -29,18 +29,39 @@ assert anything about them.**
 
 Concretely, in four parts.
 
-### 1. A separate contract, not `DecisionCandidate`
+### 1. A separate contract, not `DecisionCandidate`, in two layers
 
-`LinkProposal` is its own type. `DecisionCandidate` carries exception codes,
-invariant results and evidence references with payload hashes, and every one of
-those is something the verifier derives or deterministic code constructs from
-real facts. Reusing it would put a generated value one `model_validate` away
-from a stored conclusion.
+`DecisionCandidate` is not reused. It carries exception codes, invariant results
+and evidence references with payload hashes, and every one of those is something
+the verifier derives or deterministic code constructs from real facts. Reusing
+it would put a generated value one `model_validate` away from a stored
+conclusion.
 
-The new type has no status, no exception code, no reason code, no payload hash,
-no invariant result, no confidence and no free text. Those fields do not exist
-to be filled in, and `extra="forbid"` means a provider that sends one is
-rejected rather than trimmed.
+**`RawLinkSelection` is what a provider returns.** Two fields: an outcome, and a
+list of source record IDs. It has no status, no exception code, no reason code,
+no payload hash, no invariant result, no confidence and no free text. Those
+fields do not exist to be filled in, and `extra="forbid"` means a provider that
+sends one is rejected rather than trimmed.
+
+**`LinkProposal` is the envelope the server builds.** It carries the proposal
+ID, the subject line, the snapshot fingerprint and the provider identity
+alongside the selection, and `bind` is the only thing that makes one.
+
+The split matters because those four fields all have correct values that the
+provider does not own. Which line was asked about, which snapshot the question
+was against, and which provider answered are things the caller knew before it
+called anything. Taking them from the response instead would let a provider name
+a different line, claim a different snapshot, sign the answer as somebody else,
+or choose what its answer is filed under. An audit trail assembled partly from
+the thing being audited is not one.
+
+Two consequences follow from that, and both are improvements over checking:
+
+- A response cannot be about the wrong line or the wrong snapshot, because it
+  carries neither. There is no check for those failures because they cannot be
+  expressed; a payload carrying either field is refused as an extra.
+- The proposal ID is derived by the server from the question and the provider
+  identity, so the same question asked of the same provider is the same record.
 
 **The model is forbidden from proposing exception codes.** That is the specific
 prohibition this design turns on, and the reason is in ADR-009's successor
@@ -101,8 +122,11 @@ number in the shadow report measures the boundary and the harness.
 
 ## Consequences
 
-- Widening what a model may say means changing `LinkProposal`, which is a small
-  file that exists to be read. It cannot be widened by accident.
+- Widening what a model may say means changing `RawLinkSelection`, which has two
+  fields and exists to be read. It cannot be widened by accident.
+- Anything a proposal records beyond the selection is the server's to write. A
+  later phase that wants a new piece of metadata on a proposal should add it to
+  the envelope and to `bind`, not to what a provider may return.
 - A useful model must be good at selecting from a set. If that turns out to be
   the wrong shape for a real task, the answer is a new proposal type with its
   own validator, not a loosened one.
@@ -111,3 +135,7 @@ number in the shadow report measures the boundary and the harness.
 - Shadow metrics measure linking against what the deterministic linker already
   does. None of them is a reconciliation accuracy, and calling one that would be
   the same category error this ADR exists to prevent.
+- A metric that skips the lines a provider did not answer is not recall, whatever
+  it is called. `link_recall` is measured over every true link in the corpus, so
+  declining to answer costs the same as answering wrongly, and the conditional
+  measure is reported separately as `answered_link_recall`.

@@ -39,7 +39,7 @@ from app.storage.database import (
     session_scope,
 )
 from app.storage.repository import SourceFactRepository
-from tests.ai.conftest import payload_for, store_state
+from tests.ai.conftest import FIXTURE, payload_for, store_state
 from tests.api.conftest import FIXTURE_DOCUMENTS, import_fixtures
 
 
@@ -73,23 +73,34 @@ def baseline_decisions(engine: Engine) -> list[str]:
 
 
 def providers(snapshot: FactSnapshot) -> dict[str, FixtureProvider]:
-    """Return one provider per behaviour worth proving harmless."""
-    request = build_request("line-0001", snapshot)
+    """Return one provider per behaviour worth proving harmless.
+
+    Two of the old behaviours are gone because they became inexpressible. A
+    response carries no subject and no snapshot fingerprint, so answering about
+    another line or against stale facts is not something a provider can do; the
+    nearest attempt is a payload carrying one of those fields, which is refused
+    as an extra and is covered by "supplies metadata" below.
+    """
     return {
         "perfect": FixtureProvider(selecting(lambda one: tuple(sorted(truth_for(one, snapshot))))),
         "selects everything": FixtureProvider(selects_everything()),
         "abstains": FixtureProvider(always_abstains()),
         "malformed": FixtureProvider(returns("not a proposal at all")),
-        "out of set": FixtureProvider(
-            returns(payload_for(request, ("PAYMENT_EVENT:never-offered",)))
+        "out of set": FixtureProvider(returns(payload_for(("PAYMENT_EVENT:never-offered",)))),
+        "supplies a forged identity": FixtureProvider(
+            returns(
+                payload_for(
+                    ("PAYMENT_EVENT:pe-1",), provider={"name": "attacker", "version": "999"}
+                )
+            )
         ),
-        "another line": FixtureProvider(
-            returns(payload_for(build_request("line-0002", snapshot), ("x",)))
+        "supplies another subject": FixtureProvider(
+            returns(payload_for(("a",), subject_settlement_line_id="line-0002"))
         ),
-        "stale snapshot": FixtureProvider(
-            returns(payload_for(request, ("a",), snapshot_fingerprint="f" * 64))
+        "supplies a stale fingerprint": FixtureProvider(
+            returns(payload_for(("a",), snapshot_fingerprint="f" * 64))
         ),
-        "unknown field": FixtureProvider(returns(payload_for(request, ("a",), status="RESOLVED"))),
+        "unknown field": FixtureProvider(returns(payload_for(("a",), status="RESOLVED"))),
         "timed out": FixtureProvider(fails_with(FailureKind.TIMED_OUT)),
         "raised": FixtureProvider(fails_with(FailureKind.RAISED)),
         "returned nothing": FixtureProvider(fails_with(FailureKind.RETURNED_NOTHING)),
@@ -135,7 +146,7 @@ class TestNoProposalChangesTheStore:
         """The one path that touches facts reads them and stops."""
         request = build_request("line-0001", live_snapshot)
         result = parse_proposal(
-            payload_for(request, tuple(sorted(truth_for(request, live_snapshot)))), request
+            payload_for(tuple(sorted(truth_for(request, live_snapshot)))), request, FIXTURE
         )
         before = store_state(loaded_engine)
 

@@ -24,7 +24,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.candidates import LinkProposalRequest
-from app.ai.proposals import ProposalOutcome, ProviderIdentity, proposal_id_for
+from app.ai.proposals import ProposalOutcome, ProviderIdentity
 
 
 class FailureKind(StrEnum):
@@ -38,15 +38,16 @@ class FailureKind(StrEnum):
 class ProviderFailure(BaseModel):
     """A provider that did not answer, and how.
 
-    Carries no provider text. A failure message composed by the thing that
-    failed is not something to store or display next to a reconciliation
-    result.
+    Carries the kind and nothing else. No provider text, because a message
+    composed by the thing that failed is not something to store or display next
+    to a reconciliation result. No identity either: which provider failed is
+    something the caller knows, and reading it from the failure would let a
+    provider report its own failure against another name.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: FailureKind
-    provider: ProviderIdentity
 
 
 type ProviderResult = object | ProviderFailure
@@ -101,25 +102,14 @@ class FixtureProvider:
         return self._behaviour(request)
 
 
-def _payload(
-    request: LinkProposalRequest,
-    identity: ProviderIdentity,
-    outcome: ProposalOutcome,
-    selected: tuple[str, ...],
-) -> Mapping[str, object]:
-    """Return a well-formed payload for one request."""
-    return {
-        "proposal_id": proposal_id_for(
-            snapshot_fingerprint=request.snapshot_fingerprint,
-            subject_settlement_line_id=request.subject_settlement_line_id,
-            provider=identity,
-        ),
-        "subject_settlement_line_id": request.subject_settlement_line_id,
-        "snapshot_fingerprint": request.snapshot_fingerprint,
-        "outcome": outcome.value,
-        "selected_source_record_ids": list(selected),
-        "provider": identity.model_dump(),
-    }
+def _payload(outcome: ProposalOutcome, selected: tuple[str, ...]) -> Mapping[str, object]:
+    """Return a well-formed selection payload.
+
+    Two keys, because that is the whole of what a provider may return. It names
+    no line, no snapshot and no identity: the server writes those from what it
+    already knows when it binds the answer to the question.
+    """
+    return {"outcome": outcome.value, "selected_source_record_ids": list(selected)}
 
 
 def selecting(chooser: Callable[[LinkProposalRequest], tuple[str, ...]]) -> Behaviour:
@@ -129,12 +119,11 @@ def selecting(chooser: Callable[[LinkProposalRequest], tuple[str, ...]]) -> Beha
     is a contradiction and the honest way to say "none of these" is an
     abstention.
     """
-    identity = ProviderIdentity(name="fixture", version="1")
 
     def behave(request: LinkProposalRequest) -> ProviderResult:
         selected = chooser(request)
         outcome = ProposalOutcome.PROPOSE if selected else ProposalOutcome.ABSTAIN
-        return _payload(request, identity, outcome, selected)
+        return _payload(outcome, selected)
 
     return behave
 
@@ -159,13 +148,13 @@ def selects_everything() -> Behaviour:
 
 
 def fails_with(kind: FailureKind) -> Behaviour:
-    """Return a behaviour that reports a typed failure."""
-    identity = ProviderIdentity(name="fixture", version="1")
+    """Return a behaviour that reports a typed failure.
 
-    def behave(_request: LinkProposalRequest) -> ProviderResult:
-        return ProviderFailure(kind=kind, provider=identity)
-
-    return behave
+    The failure carries only its kind. Which provider failed is read from the
+    provider object by whatever is recording the failure, not taken from the
+    failure itself.
+    """
+    return lambda _request: ProviderFailure(kind=kind)
 
 
 def returns(payload: object) -> Behaviour:

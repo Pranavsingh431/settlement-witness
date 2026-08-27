@@ -435,8 +435,9 @@ contract version because it changes which status existing decisions derive.
 
 ## Versioning
 
-`DOMAIN_SCHEMA_VERSION` is `2.0.0`. Every decision records the version it was
-made under, so a stored decision stays readable after the contract moves on.
+`DOMAIN_SCHEMA_VERSION` is `5.0.0`, matching the table below and the heading of
+this document. Every decision records the version it was made under, so a stored
+decision stays readable after the contract moves on.
 
 - Patch: wording and non-behavioural fixes.
 - Minor: additions that leave existing decisions readable, such as a new

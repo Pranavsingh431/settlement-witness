@@ -25,6 +25,20 @@ What is absent is the design:
 
 `extra="forbid"` on every model here means a provider that returns any of those
 is rejected rather than silently trimmed.
+
+## Two layers, because metadata is not the provider's to give
+
+A provider returns a `RawLinkSelection`: an outcome and a list of record IDs.
+That is the whole of what it may say.
+
+Everything else on a proposal is written by the server from what it already
+knows. Which line was asked about, which snapshot the question was against, and
+which provider answered are all facts the caller holds before it calls anything,
+and taking them from the response instead would mean a provider could name a
+different line, claim a different snapshot, or sign the answer as somebody else.
+An audit trail assembled partly from the thing being audited is not one.
+
+`bind` is where that happens, and it is the only way to make a `LinkProposal`.
 """
 
 import hashlib
@@ -56,6 +70,58 @@ class ProposalOutcome(StrEnum):
     reported honestly is worth more than a guess that has to be caught later."""
 
 
+class RawLinkSelection(BaseModel):
+    """Everything a provider is allowed to return.
+
+    Two fields. Not the subject line, not the snapshot, not its own identity and
+    not a proposal ID: those are the caller's knowledge, not the provider's, and
+    a field here for any of them would be a field a provider could get wrong or
+    lie about.
+
+    `extra="forbid"` therefore refuses more than the obviously dangerous keys. A
+    response carrying `provider` or `snapshot_fingerprint` is refused too, even
+    though a correct value for each exists, because a provider supplying one has
+    misunderstood what it is being asked and the rest of its answer is not worth
+    salvaging.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: ProposalOutcome
+    selected_source_record_ids: tuple[str, ...] = ()
+    """Ordered, because the order a provider returned is part of what it said."""
+
+    @model_validator(mode="after")
+    def _outcome_matches_selection(self) -> Self:
+        """Refuse a selection whose outcome and contents disagree.
+
+        An abstention carrying records and a proposal carrying none are both
+        contradictions, and either would leave a reader to guess which half was
+        meant. A duplicate is refused because a set of records has no room for
+        one twice, and accepting it would make the selection's length mean two
+        different things.
+        """
+        selected = self.selected_source_record_ids
+        if self.outcome is ProposalOutcome.ABSTAIN and selected:
+            message = f"an abstention selected {len(selected)} record(s); it must select none"
+            raise ValueError(message)
+        if self.outcome is ProposalOutcome.PROPOSE:
+            if not selected:
+                message = "a proposal selected no records; it must select at least one"
+                raise ValueError(message)
+            if len(set(selected)) != len(selected):
+                repeated = sorted({one for one in selected if selected.count(one) > 1})
+                message = f"a proposal selected the same record more than once: {repeated}"
+                raise ValueError(message)
+            if len(selected) > MAX_SELECTED_RECORDS:
+                message = (
+                    f"a proposal selected {len(selected)} records, "
+                    f"more than the {MAX_SELECTED_RECORDS} allowed"
+                )
+                raise ValueError(message)
+        return self
+
+
 class ProviderIdentity(BaseModel):
     """Which provider produced a proposal, for the audit trail.
 
@@ -72,12 +138,12 @@ class ProviderIdentity(BaseModel):
 
 
 class LinkProposal(BaseModel):
-    """One provider's answer for one settlement line, in one snapshot.
+    """One provider's answer, bound to the question that produced it.
 
-    Carries an ordered selection of source record IDs and nothing else. The IDs
-    are checked against the candidate set by `app.ai.validation`; this type
-    enforces only the shape, because a well-formed proposal that names a record
-    from another line is still well-formed.
+    Assembled by `bind` from a raw selection, the request it answers and the
+    provider object that was called. Every field except the selection is the
+    server's own knowledge, so a proposal cannot name the wrong line, claim the
+    wrong snapshot, or carry an identity the provider chose for itself.
 
     A valid proposal is a proposal. It does not become evidence, does not reach
     `verify_decision`, and does not create a run. Deterministic code turns a
@@ -101,13 +167,13 @@ class LinkProposal(BaseModel):
 
     @model_validator(mode="after")
     def _outcome_matches_selection(self) -> Self:
-        """Refuse a proposal whose outcome and selection disagree.
+        """Refuse an envelope whose outcome and selection disagree.
 
-        An abstention carrying records and a proposal carrying none are both
-        contradictions, and either would leave a reader to guess which half was
-        meant. A duplicate is refused because a set of records has no room for
-        one twice, and accepting it would make the selection's length mean two
-        different things.
+        The same rules `RawLinkSelection` enforces, applied again on the way
+        out. `bind` only ever builds this from a selection that has already
+        passed them, so nothing in the normal path can reach these branches.
+        They are kept because this type is the one that would be handed onward,
+        and a check that costs nothing on a boundary is worth having twice.
         """
         selected = self.selected_source_record_ids
         if self.outcome is ProposalOutcome.ABSTAIN and selected:
@@ -145,3 +211,43 @@ def proposal_id_for(
         digest.update(part.encode("utf-8"))
         digest.update(b"\x00")
     return digest.hexdigest()[:32]
+
+
+def bind(
+    selection: RawLinkSelection,
+    *,
+    subject_settlement_line_id: str,
+    snapshot_fingerprint: str,
+    provider: ProviderIdentity,
+) -> LinkProposal:
+    """Attach a raw selection to the question and the provider it came from.
+
+    The only way a `LinkProposal` is made. Every field but the selection comes
+    from the caller's own knowledge: the line it asked about, the snapshot it
+    asked against, and the provider object it called. The proposal ID is derived
+    here rather than accepted, so two records of the same question by the same
+    provider are the same record and a provider cannot choose what its answer is
+    filed under.
+
+    Args:
+        selection: What the provider returned, already parsed.
+        subject_settlement_line_id: The line the request was about.
+        snapshot_fingerprint: The snapshot the request was against.
+        provider: The identity read from the provider object that was called,
+            never from its response.
+
+    Returns:
+        The bound proposal.
+    """
+    return LinkProposal(
+        proposal_id=proposal_id_for(
+            snapshot_fingerprint=snapshot_fingerprint,
+            subject_settlement_line_id=subject_settlement_line_id,
+            provider=provider,
+        ),
+        subject_settlement_line_id=subject_settlement_line_id,
+        snapshot_fingerprint=snapshot_fingerprint,
+        outcome=selection.outcome,
+        selected_source_record_ids=selection.selected_source_record_ids,
+        provider=provider,
+    )

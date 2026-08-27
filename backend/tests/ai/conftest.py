@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from app.ai.candidates import LinkProposalRequest, build_request, truth_for
-from app.ai.proposals import ProposalOutcome, ProviderIdentity, proposal_id_for
+from app.ai.proposals import ProposalOutcome, ProviderIdentity
 from app.reconciliation.snapshot import FactSnapshot
 from tests.reconciliation.conftest import index_of, payment_event, payout, settlement_line
 
@@ -52,30 +52,22 @@ def request_for_line_one(snapshot: FactSnapshot) -> LinkProposalRequest:
 
 
 def payload_for(
-    request: LinkProposalRequest,
     selected: tuple[str, ...],
     outcome: ProposalOutcome | None = None,
     /,
     **overrides: Any,
 ) -> dict[str, Any]:
-    """Return a well-formed proposal payload, before any override.
+    """Return a well-formed selection payload, before any override.
 
-    Built as a plain dict rather than as a model, because what a provider
-    returns is untrusted data and the tests need to hand the validator shapes a
-    model would refuse to construct.
+    Two keys, because that is the whole of what a provider may return. Built as
+    a plain dict rather than as a model, because what a provider returns is
+    untrusted data and the tests need to hand the validator shapes a model would
+    refuse to construct.
     """
     decided = outcome or (ProposalOutcome.PROPOSE if selected else ProposalOutcome.ABSTAIN)
     payload: dict[str, Any] = {
-        "proposal_id": proposal_id_for(
-            snapshot_fingerprint=request.snapshot_fingerprint,
-            subject_settlement_line_id=request.subject_settlement_line_id,
-            provider=FIXTURE,
-        ),
-        "subject_settlement_line_id": request.subject_settlement_line_id,
-        "snapshot_fingerprint": request.snapshot_fingerprint,
         "outcome": decided.value,
         "selected_source_record_ids": list(selected),
-        "provider": FIXTURE.model_dump(),
     }
     payload.update(overrides)
     return payload

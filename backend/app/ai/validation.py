@@ -13,6 +13,12 @@ failure rather than a quietly corrected answer. Repairing model output would
 mean the thing finally used was partly composed here and partly there, and
 nobody could say which.
 
+A provider supplies an outcome and a list of IDs. Which line was asked about,
+which snapshot the question was against, and which provider answered are written
+by the server from what it already holds. So a response cannot name a different
+line, claim a different snapshot, or sign itself as another provider: there is no
+field for any of it, and one that appears is refused as an extra.
+
 When a selection is valid, `evidence_for` builds the evidence references by
 loading each selected fact and reading its real record ID, source system and
 payload hash. The provider never supplies a hash and never chooses one. It named
@@ -28,22 +34,30 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.ai.candidates import LinkProposalRequest
-from app.ai.proposals import LinkProposal, ProposalOutcome
+from app.ai.proposals import (
+    LinkProposal,
+    ProposalOutcome,
+    ProviderIdentity,
+    RawLinkSelection,
+    bind,
+)
 from app.domain.evidence import EvidenceRef
 from app.reconciliation.snapshot import FactSnapshot
 
 
 class RejectionCode(StrEnum):
-    """Why a proposal was refused. One code per way of being wrong."""
+    """Why a proposal was refused. One code per way of being wrong.
+
+    There is no code for answering about the wrong line or the wrong snapshot.
+    A provider returns an outcome and a list of IDs, and the server writes the
+    subject and the fingerprint from the request it holds, so those two failures
+    are not checked for; they cannot be expressed. A response that tries to
+    carry either is refused as `MALFORMED`, because a field the contract does
+    not have is an extra.
+    """
 
     MALFORMED = "MALFORMED"
-    """It did not parse as a proposal at all."""
-
-    WRONG_SNAPSHOT = "WRONG_SNAPSHOT"
-    """It answers a question about a different set of facts."""
-
-    WRONG_SUBJECT = "WRONG_SUBJECT"
-    """It answers about a different settlement line."""
+    """It did not parse as a selection at all, or carried a field it may not."""
 
     OUT_OF_CANDIDATE_SET = "OUT_OF_CANDIDATE_SET"
     """It selected a record that was never offered."""
@@ -90,68 +104,70 @@ class RejectedProposal(BaseModel):
 type ValidationResult = ValidProposal | RejectedProposal
 
 
-def validate_proposal(proposal: LinkProposal, request: LinkProposalRequest) -> ValidationResult:
-    """Check one parsed proposal against the request it answers.
+def validate_selection(
+    selection: RawLinkSelection,
+    request: LinkProposalRequest,
+    provider: ProviderIdentity,
+) -> ValidationResult:
+    """Check one parsed selection against the request, then bind it.
+
+    Membership is the only thing left to check. The selection carries no subject
+    and no fingerprint, so it cannot be about the wrong line or the wrong
+    snapshot; the server writes both from the request when it binds.
 
     Args:
-        proposal: What the provider returned, already parsed.
-        request: The exact question it was asked, carrying the candidate set and
-            the snapshot fingerprint.
+        selection: What the provider returned, already parsed.
+        request: The exact question it was asked, carrying the candidate set.
+        provider: The identity of the provider object that was called.
 
     Returns:
-        The proposal, or a rejection naming the first rule it broke.
+        A bound proposal, or a rejection naming what was wrong.
     """
-    if proposal.snapshot_fingerprint != request.snapshot_fingerprint:
-        return RejectedProposal(
-            code=RejectionCode.WRONG_SNAPSHOT,
-            detail=(
-                "the proposal answers snapshot "
-                f"{proposal.snapshot_fingerprint[:12]}… while the request was for "
-                f"{request.snapshot_fingerprint[:12]}…"
-            ),
-        )
-
-    if proposal.subject_settlement_line_id != request.subject_settlement_line_id:
-        return RejectedProposal(
-            code=RejectionCode.WRONG_SUBJECT,
-            detail=(
-                f"the proposal answers line {proposal.subject_settlement_line_id!r} "
-                f"while the request was for {request.subject_settlement_line_id!r}"
-            ),
-        )
-
-    unknown = sorted(set(proposal.selected_source_record_ids) - request.candidate_ids)
+    unknown = sorted(set(selection.selected_source_record_ids) - request.candidate_ids)
     if unknown:
         return RejectedProposal(
             code=RejectionCode.OUT_OF_CANDIDATE_SET,
             detail=f"the proposal selected records that were not offered: {unknown}",
         )
 
-    return ValidProposal(proposal=proposal)
+    return ValidProposal(
+        proposal=bind(
+            selection,
+            subject_settlement_line_id=request.subject_settlement_line_id,
+            snapshot_fingerprint=request.snapshot_fingerprint,
+            provider=provider,
+        )
+    )
 
 
-def parse_proposal(payload: object, request: LinkProposalRequest) -> ValidationResult:
-    """Parse whatever a provider returned, then validate it.
+def parse_proposal(
+    payload: object, request: LinkProposalRequest, provider: ProviderIdentity
+) -> ValidationResult:
+    """Parse whatever a provider returned, check it, and bind it.
 
-    The parse and the check are one call because a caller has no use for a
-    proposal that parsed and was never checked, and offering that as a separate
-    step would make it possible to forget the second one.
+    One call because a caller has no use for a selection that parsed and was
+    never checked, and no use for one that was checked and never bound to the
+    question it answers. Offering those as separate steps would make it possible
+    to forget one.
 
     Args:
         payload: The raw provider output.
         request: The question it answers.
+        provider: The identity of the provider object that was called. Read from
+            the object, never from the payload, so a response cannot sign itself
+            as somebody else.
 
     Returns:
-        A validated proposal, or a rejection.
+        A bound proposal, or a rejection.
     """
     try:
-        proposal = LinkProposal.model_validate(payload)
+        selection = RawLinkSelection.model_validate(payload)
     except ValidationError as error:
         return RejectedProposal(
             code=RejectionCode.MALFORMED,
-            detail=f"the provider output is not a proposal: {error.error_count()} problem(s)",
+            detail=f"the provider output is not a selection: {error.error_count()} problem(s)",
         )
-    return validate_proposal(proposal, request)
+    return validate_selection(selection, request, provider)
 
 
 def evidence_for(valid: ValidProposal, snapshot: FactSnapshot) -> tuple[EvidenceRef, ...]:

@@ -1,8 +1,13 @@
-"""Tests for the model output contract.
+"""Tests for the model output contract and the envelope built around it.
 
-Most of these check that a field is absent. That reads oddly until you see what
-they are for: the contract's value is what a provider cannot say through it, and
-a field added later would silently make one of these claims possible again.
+Two layers, tested as two things. `RawLinkSelection` is what a provider may
+return, and most of these tests check that a field is absent from it. That reads
+oddly until you see what they are for: the contract's value is what a provider
+cannot say through it.
+
+`LinkProposal` is the envelope the server builds. Its tests check the opposite
+property, that every field except the selection came from the caller's own
+knowledge rather than from the response.
 """
 
 import pytest
@@ -13,6 +18,8 @@ from app.ai.proposals import (
     LinkProposal,
     ProposalOutcome,
     ProviderIdentity,
+    RawLinkSelection,
+    bind,
     proposal_id_for,
 )
 from tests.ai.conftest import FIXTURE
@@ -20,29 +27,25 @@ from tests.ai.conftest import FIXTURE
 FINGERPRINT = "a" * 64
 
 
-def build(**overrides: object) -> LinkProposal:
-    """Return a valid proposal unless an override makes it otherwise."""
+def selection(**overrides: object) -> RawLinkSelection:
+    """Return a valid raw selection unless an override makes it otherwise."""
     fields: dict[str, object] = {
-        "proposal_id": "p-1",
-        "subject_settlement_line_id": "line-1",
-        "snapshot_fingerprint": FINGERPRINT,
         "outcome": ProposalOutcome.PROPOSE,
         "selected_source_record_ids": ("rec-1",),
-        "provider": FIXTURE,
     }
     fields.update(overrides)
-    return LinkProposal(**fields)  # type: ignore[arg-type]
+    return RawLinkSelection(**fields)  # type: ignore[arg-type]
 
 
-class TestWhatAProposalMaySay:
-    """The shape a provider is allowed to return."""
+class TestWhatAProviderMaySay:
+    """The two fields, and the shapes they may take."""
 
     def test_a_selection_is_accepted(self) -> None:
         """The ordinary case."""
-        proposal = build(selected_source_record_ids=("rec-1", "rec-2"))
+        raw = selection(selected_source_record_ids=("rec-1", "rec-2"))
 
-        assert proposal.outcome is ProposalOutcome.PROPOSE
-        assert proposal.selected_source_record_ids == ("rec-1", "rec-2")
+        assert raw.outcome is ProposalOutcome.PROPOSE
+        assert raw.selected_source_record_ids == ("rec-1", "rec-2")
 
     def test_the_order_a_provider_returned_is_kept(self) -> None:
         """Not sorted on the way in.
@@ -51,28 +54,44 @@ class TestWhatAProposalMaySay:
         duplicate at position three indistinguishable from one at position one,
         and would quietly rewrite the answer before anyone checked it.
         """
-        assert build(selected_source_record_ids=("rec-9", "rec-1")).selected_source_record_ids == (
+        assert selection(
+            selected_source_record_ids=("rec-9", "rec-1")
+        ).selected_source_record_ids == (
             "rec-9",
             "rec-1",
         )
 
     def test_an_abstention_is_accepted(self) -> None:
         """Declining is a first-class answer, not a failure."""
-        proposal = build(outcome=ProposalOutcome.ABSTAIN, selected_source_record_ids=())
+        raw = selection(outcome=ProposalOutcome.ABSTAIN, selected_source_record_ids=())
 
-        assert proposal.outcome is ProposalOutcome.ABSTAIN
-        assert proposal.selected_source_record_ids == ()
+        assert raw.outcome is ProposalOutcome.ABSTAIN
+        assert raw.selected_source_record_ids == ()
 
-    def test_a_proposal_is_frozen(self) -> None:
+    def test_a_selection_is_frozen(self) -> None:
         """What a provider said cannot be edited after the fact."""
-        proposal = build()
+        raw = selection()
 
         with pytest.raises(ValidationError):
-            proposal.outcome = ProposalOutcome.ABSTAIN
+            raw.outcome = ProposalOutcome.ABSTAIN
+
+    def test_it_declares_exactly_two_fields(self) -> None:
+        """Asserted over the schema, so a third cannot be added unnoticed."""
+        assert set(RawLinkSelection.model_fields) == {"outcome", "selected_source_record_ids"}
+
+    def test_there_are_exactly_two_outcomes(self) -> None:
+        """No third answer, so nothing sits between proposing and declining."""
+        assert {member.value for member in ProposalOutcome} == {"PROPOSE", "ABSTAIN"}
 
 
-class TestWhatAProposalMayNotSay:
-    """The fields that do not exist, and the ones a provider cannot invent."""
+class TestWhatAProviderMayNotSay:
+    """The fields that do not exist, in two groups.
+
+    The first group would let model output assert something. The second is
+    metadata that has a correct value the provider does not own: which line was
+    asked about, which snapshot, and who is answering are all things the caller
+    knew before it called anything.
+    """
 
     @pytest.mark.parametrize(
         "field",
@@ -91,8 +110,8 @@ class TestWhatAProposalMayNotSay:
             "event_type",
         ],
     )
-    def test_a_forbidden_field_is_refused(self, field: str) -> None:
-        """Each of these would let model output assert something.
+    def test_an_asserting_field_is_refused(self, field: str) -> None:
+        """Each of these would let model output claim something.
 
         A status or a reason code would be a conclusion. An exception code would
         be a reported finding. A payload hash would let a provider say which
@@ -102,24 +121,40 @@ class TestWhatAProposalMayNotSay:
         let a provider restate the money.
         """
         with pytest.raises(ValidationError, match="extra"):
-            build(**{field: "anything"})
+            selection(**{field: "anything"})
 
-    def test_the_type_declares_none_of_them(self) -> None:
-        """Asserted over the schema, so a field cannot be added unnoticed."""
-        declared = set(LinkProposal.model_fields)
+    @pytest.mark.parametrize(
+        "field",
+        ["proposal_id", "provider", "subject_settlement_line_id", "snapshot_fingerprint"],
+    )
+    def test_a_metadata_field_is_refused(self, field: str) -> None:
+        """Refused even though a correct value exists.
 
-        assert declared == {
-            "proposal_id",
-            "subject_settlement_line_id",
-            "snapshot_fingerprint",
-            "outcome",
-            "selected_source_record_ids",
-            "provider",
-        }
+        A provider supplying its own identity could sign an answer as another
+        provider. One supplying a subject or a fingerprint could answer about a
+        different line or a different set of facts. And one choosing a proposal
+        ID could decide what its answer is filed under. None of it is the
+        provider's to give, so none of it has a field.
+        """
+        with pytest.raises(ValidationError, match="extra"):
+            selection(**{field: "anything"})
 
-    def test_there_are_exactly_two_outcomes(self) -> None:
-        """No third answer, so nothing sits between proposing and declining."""
-        assert {member.value for member in ProposalOutcome} == {"PROPOSE", "ABSTAIN"}
+    def test_a_forged_identity_cannot_be_smuggled_in(self) -> None:
+        """The concrete attack, written out.
+
+        Before this was split into two layers, a response carrying
+        `provider: {name: "attacker"}` and an arbitrary ID validated, and the
+        forged values were what got recorded.
+        """
+        with pytest.raises(ValidationError, match="extra"):
+            RawLinkSelection.model_validate(
+                {
+                    "outcome": "PROPOSE",
+                    "selected_source_record_ids": ["rec-1"],
+                    "provider": {"name": "attacker", "version": "999"},
+                    "proposal_id": "anything-i-like",
+                }
+            )
 
 
 class TestTheOutcomeMustMatchTheSelection:
@@ -128,50 +163,132 @@ class TestTheOutcomeMustMatchTheSelection:
     def test_an_abstention_carrying_records_is_refused(self) -> None:
         """Which half was meant is not something to guess at."""
         with pytest.raises(ValidationError, match="abstention selected 1 record"):
-            build(outcome=ProposalOutcome.ABSTAIN, selected_source_record_ids=("rec-1",))
+            selection(outcome=ProposalOutcome.ABSTAIN, selected_source_record_ids=("rec-1",))
 
     def test_a_proposal_selecting_nothing_is_refused(self) -> None:
         """The way to say none of these is to abstain."""
         with pytest.raises(ValidationError, match="selected no records"):
-            build(outcome=ProposalOutcome.PROPOSE, selected_source_record_ids=())
+            selection(outcome=ProposalOutcome.PROPOSE, selected_source_record_ids=())
 
     def test_a_duplicate_selection_is_refused(self) -> None:
         """A set of records has no room for one twice."""
         with pytest.raises(ValidationError, match="more than once"):
-            build(selected_source_record_ids=("rec-1", "rec-2", "rec-1"))
+            selection(selected_source_record_ids=("rec-1", "rec-2", "rec-1"))
 
     def test_the_refusal_names_the_repeated_record(self) -> None:
         """So a shadow report says what was wrong, not that something was."""
         with pytest.raises(ValidationError, match="rec-1"):
-            build(selected_source_record_ids=("rec-1", "rec-1"))
+            selection(selected_source_record_ids=("rec-1", "rec-1"))
 
     def test_an_overlong_selection_is_refused(self) -> None:
         """A bound on cost, not a policy about linking."""
         too_many = tuple(f"rec-{index}" for index in range(MAX_SELECTED_RECORDS + 1))
 
         with pytest.raises(ValidationError, match="more than the 64 allowed"):
-            build(selected_source_record_ids=too_many)
+            selection(selected_source_record_ids=too_many)
 
     def test_a_selection_at_the_limit_is_accepted(self) -> None:
         """The limit is a limit, not an off-by-one."""
         exactly = tuple(f"rec-{index}" for index in range(MAX_SELECTED_RECORDS))
 
-        assert len(build(selected_source_record_ids=exactly).selected_source_record_ids) == 64
+        assert len(selection(selected_source_record_ids=exactly).selected_source_record_ids) == 64
 
 
-class TestTheFingerprintIsRequired:
-    """A proposal that names no snapshot could be applied to any facts."""
+class TestBindingIsWhereMetadataComesFrom:
+    """Every field but the selection is written by the server."""
 
-    def test_a_missing_fingerprint_is_refused(self) -> None:
-        """There would be nothing to check staleness against."""
-        with pytest.raises(ValidationError):
-            build(snapshot_fingerprint=None)
+    def test_the_subject_and_snapshot_come_from_the_caller(self) -> None:
+        """Not from the response, which carries neither."""
+        proposal = bind(
+            selection(),
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=FIXTURE,
+        )
 
-    @pytest.mark.parametrize("wrong", ["", "a" * 63, "a" * 65])
-    def test_a_fingerprint_of_the_wrong_length_is_refused(self, wrong: str) -> None:
-        """A digest has one length, and a truncated one would still compare."""
-        with pytest.raises(ValidationError):
-            build(snapshot_fingerprint=wrong)
+        assert proposal.subject_settlement_line_id == "line-7"
+        assert proposal.snapshot_fingerprint == FINGERPRINT
+
+    def test_the_provider_identity_comes_from_the_provider_object(self) -> None:
+        """Whatever the response said, which is nothing."""
+        real = ProviderIdentity(name="the-real-provider", version="7")
+
+        proposal = bind(
+            selection(),
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=real,
+        )
+
+        assert proposal.provider == real
+
+    def test_the_proposal_id_is_derived_not_accepted(self) -> None:
+        """So a provider cannot choose what its answer is filed under."""
+        real = ProviderIdentity(name="custom", version="3")
+
+        proposal = bind(
+            selection(),
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=real,
+        )
+
+        assert proposal.proposal_id == proposal_id_for(
+            snapshot_fingerprint=FINGERPRINT,
+            subject_settlement_line_id="line-7",
+            provider=real,
+        )
+
+    def test_the_selection_is_carried_through_unchanged(self) -> None:
+        """The one part that is the provider's."""
+        raw = selection(selected_source_record_ids=("rec-9", "rec-1"))
+
+        proposal = bind(
+            raw,
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=FIXTURE,
+        )
+
+        assert proposal.selected_source_record_ids == ("rec-9", "rec-1")
+        assert proposal.outcome is raw.outcome
+
+    def test_two_providers_bind_the_same_selection_differently(self) -> None:
+        """The identity is part of what a proposal is filed under."""
+        raw = selection()
+        first = bind(
+            raw,
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=ProviderIdentity(name="one", version="1"),
+        )
+        second = bind(
+            raw,
+            subject_settlement_line_id="line-7",
+            snapshot_fingerprint=FINGERPRINT,
+            provider=ProviderIdentity(name="two", version="1"),
+        )
+
+        assert first.proposal_id != second.proposal_id
+        assert first.provider != second.provider
+
+    def test_the_envelope_declares_what_it_should(self) -> None:
+        """Asserted over the schema, so a field cannot appear unnoticed."""
+        assert set(LinkProposal.model_fields) == {
+            "proposal_id",
+            "subject_settlement_line_id",
+            "snapshot_fingerprint",
+            "outcome",
+            "selected_source_record_ids",
+            "provider",
+        }
+
+    def test_the_envelope_carries_no_asserting_field(self) -> None:
+        """The server builds it, and the server has nothing to assert either."""
+        declared = set(LinkProposal.model_fields)
+
+        for forbidden in ("status", "exception_codes", "reason_codes", "payload_hash"):
+            assert forbidden not in declared
 
 
 class TestProviderIdentity:
@@ -222,3 +339,64 @@ class TestProposalIdentity:
         }
 
         assert proposal_id_for(**base) != proposal_id_for(**{**base, field: value})  # type: ignore[arg-type]
+
+
+class TestTheEnvelopeChecksItselfToo:
+    """The same rules again, on the type that gets handed onward.
+
+    `bind` only ever builds an envelope from a selection that already passed
+    these, so nothing in the normal path reaches them. They are tested by
+    constructing the envelope directly, which is what a future caller that
+    forgot to go through `bind` would do.
+    """
+
+    def envelope(self, **overrides: object) -> LinkProposal:
+        """Return an envelope built directly, bypassing the binder."""
+        fields: dict[str, object] = {
+            "proposal_id": "p-1",
+            "subject_settlement_line_id": "line-1",
+            "snapshot_fingerprint": FINGERPRINT,
+            "outcome": ProposalOutcome.PROPOSE,
+            "selected_source_record_ids": ("rec-1",),
+            "provider": FIXTURE,
+        }
+        fields.update(overrides)
+        return LinkProposal(**fields)  # type: ignore[arg-type]
+
+    def test_a_well_formed_envelope_is_accepted(self) -> None:
+        """The baseline the rest of these change one field of."""
+        assert self.envelope().outcome is ProposalOutcome.PROPOSE
+
+    def test_an_abstention_carrying_records_is_refused(self) -> None:
+        """Caught here as well as at the raw layer."""
+        with pytest.raises(ValidationError, match="abstention selected 1 record"):
+            self.envelope(outcome=ProposalOutcome.ABSTAIN)
+
+    def test_a_proposal_carrying_no_records_is_refused(self) -> None:
+        """The other half of the same contradiction."""
+        with pytest.raises(ValidationError, match="selected no records"):
+            self.envelope(selected_source_record_ids=())
+
+    def test_a_duplicate_selection_is_refused(self) -> None:
+        """A set of records has no room for one twice."""
+        with pytest.raises(ValidationError, match="more than once"):
+            self.envelope(selected_source_record_ids=("rec-1", "rec-1"))
+
+    def test_an_overlong_selection_is_refused(self) -> None:
+        """The bound applies to whatever is handed onward, not only to input."""
+        too_many = tuple(f"rec-{index}" for index in range(MAX_SELECTED_RECORDS + 1))
+
+        with pytest.raises(ValidationError, match="more than the 64 allowed"):
+            self.envelope(selected_source_record_ids=too_many)
+
+    def test_an_abstaining_envelope_with_no_records_is_accepted(self) -> None:
+        """The coherent abstention, so the rule is not simply refusing both."""
+        proposal = self.envelope(outcome=ProposalOutcome.ABSTAIN, selected_source_record_ids=())
+
+        assert proposal.selected_source_record_ids == ()
+
+    @pytest.mark.parametrize("wrong", ["", "a" * 63, "a" * 65])
+    def test_a_fingerprint_of_the_wrong_length_is_refused(self, wrong: str) -> None:
+        """A digest has one length, and a truncated one would still compare."""
+        with pytest.raises(ValidationError):
+            self.envelope(snapshot_fingerprint=wrong)
