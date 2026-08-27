@@ -417,6 +417,22 @@ assertion to a reported finding with no evidence behind it. That is the exact
 shape this system exists to make impossible, and the contract should close it
 before the component exists rather than after.
 
+### How Phase 8 stands on it
+
+Phase 8 introduced an AI component and did not answer this question.
+
+It avoids the unsafe path instead: a model in this system may propose links
+among source records the application explicitly supplied, and it is forbidden
+from proposing exception codes. `LinkProposal` has no field for one, so the path
+from a generated assertion to a reported finding does not exist to be walked.
+See [ADR-012](adr/ADR-012-the-model-points-the-verifier-decides.md).
+
+That is a narrower and stricter rule than any answer to this question would
+need, which is the right way round while it is open. It is not a settlement of
+it. If a later phase wants a model to report findings rather than point at
+records, this question has to be answered first, and answering it means a major
+contract version because it changes which status existing decisions derive.
+
 ## Versioning
 
 `DOMAIN_SCHEMA_VERSION` is `2.0.0`. Every decision records the version it was

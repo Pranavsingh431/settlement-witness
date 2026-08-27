@@ -94,4 +94,7 @@ show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
+    # A Protocol's method bodies are never executed. The type exists so an
+    # implementation can be checked against it, not to be called.
+    "^\\s*\\.\\.\\.$",
 ]
