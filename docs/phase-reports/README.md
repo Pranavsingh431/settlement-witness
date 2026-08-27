@@ -29,3 +29,4 @@ so.
 | 7.2 | [phase-7-2.md](phase-7-2.md) | Passed |
 | 8 | [phase-8.md](phase-8.md) | Passed |
 | 8.1 | [phase-8-1.md](phase-8-1.md) | Passed |
+| 9 | [phase-9.md](phase-9.md) | Passed |

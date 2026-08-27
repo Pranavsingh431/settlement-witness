@@ -41,15 +41,15 @@ class TestAPerfectProvider:
         assert report.answered_link_recall.value == 1.0
         assert report.exact_set_accuracy.value == 1.0
         assert report.false_link_rate.value == 0.0
-        assert report.abstention_rate.value == 0.0
-        assert report.invalid_output_rate.value == 0.0
+        assert report.abstention_page_rate.value == 0.0
+        assert report.invalid_page_rate.value == 0.0
 
     def test_it_reports_one_outcome_per_line(self, snapshot: FactSnapshot) -> None:
         """In settlement line order, so a number traces to the lines behind it."""
         report = evaluate(snapshot, perfect(snapshot))
 
         assert report.line_count == 2
-        assert [one.subject_settlement_line_id for one in report.outcomes] == [
+        assert [one.subject_settlement_line_id for one in report.line_outcomes] == [
             "line-sl-1",
             "line-sl-2",
         ]
@@ -259,14 +259,14 @@ class TestTheAbstainingControl:
         """Which is the metric that stops silence looking like success."""
         report = evaluate(snapshot, FixtureProvider(always_abstains()))
 
-        assert report.abstention_rate.value == 1.0
+        assert report.abstention_page_rate.value == 1.0
         assert report.exact_set_accuracy.value == 0.0
 
     def test_an_abstention_is_not_an_invalid_output(self, snapshot: FactSnapshot) -> None:
         """Declining is an answer. The two are counted separately."""
         report = evaluate(snapshot, FixtureProvider(always_abstains()))
 
-        assert report.invalid_output_rate.value == 0.0
+        assert report.invalid_page_rate.value == 0.0
 
     def test_the_conditional_measure_is_null_rather_than_zero(self, snapshot: FactSnapshot) -> None:
         """No line answered, so there is no answered-line ratio to report."""
@@ -299,14 +299,14 @@ class TestInvalidOutput:
         """With the code that says which rule it broke."""
         report = evaluate(snapshot, FixtureProvider(returns(payload)))
 
-        assert report.invalid_output_rate.numerator >= 1
-        assert any(one.rejection is expected for one in report.outcomes)
+        assert report.invalid_page_rate.numerator >= 1
+        assert any(one.rejection is expected for one in report.page_outcomes)
 
     def test_an_invalid_output_selects_nothing(self, snapshot: FactSnapshot) -> None:
         """A refused proposal contributes no links, right or wrong."""
         report = evaluate(snapshot, FixtureProvider(returns("not a proposal")))
 
-        assert all(one.selected == () for one in report.outcomes)
+        assert all(one.selected == () for one in report.line_outcomes)
         assert report.link_precision.value is None
         assert report.false_link_rate.value is None
 
@@ -325,14 +325,14 @@ class TestInvalidOutput:
         """A provider that failed did not decline; it did not answer."""
         report = evaluate(snapshot, FixtureProvider(returns("not a proposal")))
 
-        assert report.invalid_output_rate.value == 1.0
-        assert report.abstention_rate.value == 0.0
+        assert report.invalid_page_rate.value == 1.0
+        assert report.abstention_page_rate.value == 0.0
 
     def test_the_rate_is_over_every_line_asked(self, snapshot: FactSnapshot) -> None:
         """So it cannot be diluted by counting only the lines that answered."""
         report = evaluate(snapshot, FixtureProvider(returns("not a proposal")))
 
-        assert report.invalid_output_rate.denominator == report.line_count
+        assert report.invalid_page_rate.denominator == report.line_count
 
 
 class TestProviderFailure:
@@ -345,15 +345,15 @@ class TestProviderFailure:
         """Every way of failing, each as a typed outcome."""
         report = evaluate(snapshot, FixtureProvider(fails_with(kind)))
 
-        assert report.invalid_output_rate.value == 1.0
-        assert all(one.rejection is RejectionCode.PROVIDER_FAILED for one in report.outcomes)
+        assert report.invalid_page_rate.value == 1.0
+        assert all(one.rejection is RejectionCode.PROVIDER_FAILED for one in report.page_outcomes)
 
     def test_a_failure_produces_no_selection(self, snapshot: FactSnapshot) -> None:
         """Nothing is invented to stand in for the answer that did not arrive."""
         report = evaluate(snapshot, FixtureProvider(fails_with(FailureKind.TIMED_OUT)))
 
-        assert all(one.selected == () for one in report.outcomes)
-        assert all(not one.answered for one in report.outcomes)
+        assert all(one.selected == () for one in report.page_outcomes)
+        assert all(not one.answered for one in report.page_outcomes)
 
 
 class TestTheReportIsReproducible:

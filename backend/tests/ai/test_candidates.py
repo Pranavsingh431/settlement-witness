@@ -10,8 +10,10 @@ import pytest
 
 from app.ai.candidates import (
     CandidateRecord,
+    build_pages,
     build_request,
     build_requests,
+    candidate_universe,
     selectable_records,
     truth_for,
 )
@@ -65,7 +67,14 @@ class TestWhatIsOffered:
     def test_an_unknown_line_is_refused(self, snapshot: FactSnapshot) -> None:
         """Rather than returning an empty environment that looks answerable."""
         with pytest.raises(ValueError, match="no settlement line"):
-            build_request("line-nope", snapshot)
+            build_pages("line-nope", snapshot)
+
+    def test_an_unknown_line_is_refused_by_the_universe_builder(
+        self, snapshot: FactSnapshot
+    ) -> None:
+        """Where the check is written, with a message that names the line."""
+        with pytest.raises(ValueError, match="no settlement line"):
+            candidate_universe("line-nope", snapshot)
 
 
 class TestWhatACandidateCarries:

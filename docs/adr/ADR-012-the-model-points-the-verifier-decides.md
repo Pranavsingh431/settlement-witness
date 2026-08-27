@@ -45,7 +45,10 @@ sends one is rejected rather than trimmed.
 
 **`LinkProposal` is the envelope the server builds.** It carries the proposal
 ID, the subject line, the snapshot fingerprint and the provider identity
-alongside the selection, and `bind` is the only thing that makes one.
+alongside the selection, and `bind` is the normal-path construction route for
+one. Direct construction stays possible in Python, as it does for any Pydantic
+model, so the envelope repeats the shape checks as a defensive boundary and a
+test builds one directly to exercise them.
 
 The split matters because those four fields all have correct values that the
 provider does not own. Which line was asked about, which snapshot the question

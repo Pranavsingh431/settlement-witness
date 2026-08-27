@@ -123,11 +123,17 @@ def validate_selection(
     Returns:
         A bound proposal, or a rejection naming what was wrong.
     """
+    # Membership is against this page, not the line's whole universe. A record
+    # on another page of the same line is as unselectable here as one that is
+    # not in the snapshot at all: it was not offered.
     unknown = sorted(set(selection.selected_source_record_ids) - request.candidate_ids)
     if unknown:
         return RejectedProposal(
             code=RejectionCode.OUT_OF_CANDIDATE_SET,
-            detail=f"the proposal selected records that were not offered: {unknown}",
+            detail=(
+                f"the proposal selected records that page {request.page_ordinal} "
+                f"did not offer: {unknown}"
+            ),
         )
 
     return ValidProposal(
@@ -135,6 +141,8 @@ def validate_selection(
             selection,
             subject_settlement_line_id=request.subject_settlement_line_id,
             snapshot_fingerprint=request.snapshot_fingerprint,
+            environment_fingerprint=request.environment_fingerprint,
+            page_ordinal=request.page_ordinal,
             provider=provider,
         )
     )

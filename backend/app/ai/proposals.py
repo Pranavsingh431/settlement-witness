@@ -38,7 +38,10 @@ and taking them from the response instead would mean a provider could name a
 different line, claim a different snapshot, or sign the answer as somebody else.
 An audit trail assembled partly from the thing being audited is not one.
 
-`bind` is where that happens, and it is the only way to make a `LinkProposal`.
+`bind` is where that happens, and it is the normal-path construction route for a
+`LinkProposal`. Direct construction stays possible in Python, as it does for any
+Pydantic model, so the envelope repeats the shape checks as a defensive boundary
+and a test builds one directly to exercise them.
 """
 
 import hashlib
@@ -79,10 +82,10 @@ class RawLinkSelection(BaseModel):
     lie about.
 
     `extra="forbid"` therefore refuses more than the obviously dangerous keys. A
-    response carrying `provider` or `snapshot_fingerprint` is refused too, even
-    though a correct value for each exists, because a provider supplying one has
-    misunderstood what it is being asked and the rest of its answer is not worth
-    salvaging.
+    response carrying `provider`, `snapshot_fingerprint`, `page_ordinal` or
+    `environment_fingerprint` is refused too, even though a correct value for
+    each exists, because a provider supplying one has misunderstood what it is
+    being asked and the rest of its answer is not worth salvaging.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -155,6 +158,13 @@ class LinkProposal(BaseModel):
     proposal_id: str = Field(min_length=1, max_length=128)
     subject_settlement_line_id: str = Field(min_length=1, max_length=200)
     snapshot_fingerprint: str = Field(min_length=64, max_length=64)
+    environment_fingerprint: str = Field(min_length=64, max_length=64)
+    """Which candidate universe this page was cut from."""
+
+    page_ordinal: int = Field(ge=1)
+    """Which page of that universe was asked. Part of the identity: without it,
+    two pages of one line in one snapshot would be the same record."""
+
     outcome: ProposalOutcome
     selected_source_record_ids: tuple[str, ...] = ()
     """Ordered, because the order a provider returned is part of what it said.
@@ -197,7 +207,12 @@ class LinkProposal(BaseModel):
 
 
 def proposal_id_for(
-    *, snapshot_fingerprint: str, subject_settlement_line_id: str, provider: ProviderIdentity
+    *,
+    snapshot_fingerprint: str,
+    subject_settlement_line_id: str,
+    environment_fingerprint: str,
+    page_ordinal: int,
+    provider: ProviderIdentity,
 ) -> str:
     """Return the identity of one proposal attempt.
 
@@ -205,9 +220,20 @@ def proposal_id_for(
     question about the same snapshot produces a byte-identical record. That is
     what makes a shadow evaluation reproducible, and it means a proposal cannot
     be told apart from a replay of itself by its identity alone.
+
+    The page and the environment are part of the question, so they are part of
+    the identity. Without them, every page of one line would be filed under the
+    same ID and a report would carry several records claiming to be one.
     """
     digest = hashlib.sha256()
-    for part in (snapshot_fingerprint, subject_settlement_line_id, provider.name, provider.version):
+    for part in (
+        snapshot_fingerprint,
+        subject_settlement_line_id,
+        environment_fingerprint,
+        str(page_ordinal),
+        provider.name,
+        provider.version,
+    ):
         digest.update(part.encode("utf-8"))
         digest.update(b"\x00")
     return digest.hexdigest()[:32]
@@ -218,14 +244,21 @@ def bind(
     *,
     subject_settlement_line_id: str,
     snapshot_fingerprint: str,
+    environment_fingerprint: str,
+    page_ordinal: int,
     provider: ProviderIdentity,
 ) -> LinkProposal:
     """Attach a raw selection to the question and the provider it came from.
 
-    The only way a `LinkProposal` is made. Every field but the selection comes
-    from the caller's own knowledge: the line it asked about, the snapshot it
-    asked against, and the provider object it called. The proposal ID is derived
-    here rather than accepted, so two records of the same question by the same
+    The normal-path construction route for a `LinkProposal`, and the only one
+    any caller should use. Direct construction remains possible in Python, as it
+    does for every Pydantic model, and the envelope keeps its own shape checks
+    for exactly that reason; a test exercises them by building one directly.
+
+    Every field but the selection comes from the caller's own knowledge: the
+    line it asked about, the snapshot and environment it asked against, which
+    page, and the provider object it called. The proposal ID is derived here
+    rather than accepted, so two records of the same question by the same
     provider are the same record and a provider cannot choose what its answer is
     filed under.
 
@@ -233,6 +266,8 @@ def bind(
         selection: What the provider returned, already parsed.
         subject_settlement_line_id: The line the request was about.
         snapshot_fingerprint: The snapshot the request was against.
+        environment_fingerprint: The candidate universe the page was cut from.
+        page_ordinal: Which page of that universe was asked.
         provider: The identity read from the provider object that was called,
             never from its response.
 
@@ -243,10 +278,14 @@ def bind(
         proposal_id=proposal_id_for(
             snapshot_fingerprint=snapshot_fingerprint,
             subject_settlement_line_id=subject_settlement_line_id,
+            environment_fingerprint=environment_fingerprint,
+            page_ordinal=page_ordinal,
             provider=provider,
         ),
         subject_settlement_line_id=subject_settlement_line_id,
         snapshot_fingerprint=snapshot_fingerprint,
+        environment_fingerprint=environment_fingerprint,
+        page_ordinal=page_ordinal,
         outcome=selection.outcome,
         selected_source_record_ids=selection.selected_source_record_ids,
         provider=provider,

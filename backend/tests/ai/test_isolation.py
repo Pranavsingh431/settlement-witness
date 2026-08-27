@@ -23,6 +23,7 @@ from app.ai.provider import (
     FixtureProvider,
     always_abstains,
     fails_with,
+    matching_visible_references,
     returns,
     selecting,
     selects_everything,
@@ -75,18 +76,17 @@ def baseline_decisions(engine: Engine) -> list[str]:
 def providers(snapshot: FactSnapshot) -> dict[str, FixtureProvider]:
     """Return one provider per behaviour worth proving harmless.
 
-    Two of the old behaviours are gone because they became inexpressible. A
-    response carries no subject and no snapshot fingerprint, so answering about
-    another line or against stale facts is not something a provider can do; the
-    nearest attempt is a payload carrying one of those fields, which is refused
-    as an extra and is covered by "supplies metadata" below.
+    Every page result a provider can produce: valid, broad, declined, malformed,
+    naming a record the page did not offer, forging each piece of server-owned
+    metadata, and failing three ways.
     """
     return {
         "perfect": FixtureProvider(selecting(lambda one: tuple(sorted(truth_for(one, snapshot))))),
+        "matches visible references": FixtureProvider(matching_visible_references()),
         "selects everything": FixtureProvider(selects_everything()),
         "abstains": FixtureProvider(always_abstains()),
         "malformed": FixtureProvider(returns("not a proposal at all")),
-        "out of set": FixtureProvider(returns(payload_for(("PAYMENT_EVENT:never-offered",)))),
+        "out of page": FixtureProvider(returns(payload_for(("PAYMENT_EVENT:never-offered",)))),
         "supplies a forged identity": FixtureProvider(
             returns(
                 payload_for(
@@ -99,6 +99,10 @@ def providers(snapshot: FactSnapshot) -> dict[str, FixtureProvider]:
         ),
         "supplies a stale fingerprint": FixtureProvider(
             returns(payload_for(("a",), snapshot_fingerprint="f" * 64))
+        ),
+        "supplies a page ordinal": FixtureProvider(returns(payload_for(("a",), page_ordinal=99))),
+        "supplies an environment": FixtureProvider(
+            returns(payload_for(("a",), environment_fingerprint="f" * 64))
         ),
         "unknown field": FixtureProvider(returns(payload_for(("a",), status="RESOLVED"))),
         "timed out": FixtureProvider(fails_with(FailureKind.TIMED_OUT)),
@@ -231,3 +235,50 @@ class TestNothingIsPersisted:
 
         assert "repository" not in source.lower()
         assert "session" not in source.lower()
+
+
+class TestTheGeneratedCorpusIsAlsoInert:
+    """The shadow corpus is generated in memory and never reaches the database."""
+
+    def test_evaluating_the_corpus_changes_nothing(self, loaded_engine: Engine) -> None:
+        """It is its own snapshot, built from generated facts.
+
+        Those facts are never imported, never written and never mixed with the
+        stored ones. A test rather than a comment, because a benchmark that
+        quietly seeded the database would corrupt every later reconciliation.
+        """
+        from app.ai.corpus import build_corpus
+
+        corpus = build_corpus()
+        corpus_snapshot = FactSnapshot.from_index(corpus.index)
+        before = store_state(loaded_engine)
+
+        for provider in providers(corpus_snapshot).values():
+            evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
+
+        assert store_state(loaded_engine) == before
+
+    def test_no_corpus_fact_reaches_the_store(self, loaded_engine: Engine) -> None:
+        """The generated facts and the stored ones stay separate populations."""
+        from app.ai.corpus import build_corpus
+
+        corpus = build_corpus()
+        corpus_snapshot = FactSnapshot.from_index(corpus.index)
+        evaluate(corpus_snapshot, FixtureProvider(always_abstains()))
+
+        with session_factory(loaded_engine)() as session:
+            stored = {fact.source_record_id for fact in SourceFactRepository(session).all_facts()}
+
+        assert not stored & {fact.source_record_id for fact in corpus.facts}
+
+    def test_the_oracle_is_not_persisted(self, loaded_engine: Engine) -> None:
+        """No table holds a scenario, an expected action or an answer."""
+        from sqlalchemy import inspect
+
+        tables = set(inspect(loaded_engine).get_table_names())
+
+        assert not any(
+            word in name
+            for name in tables
+            for word in ("scenario", "oracle", "corpus", "proposal", "page")
+        )

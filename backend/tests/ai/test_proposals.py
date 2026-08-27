@@ -25,6 +25,7 @@ from app.ai.proposals import (
 from tests.ai.conftest import FIXTURE
 
 FINGERPRINT = "a" * 64
+ENVIRONMENT = "e" * 64
 
 
 def selection(**overrides: object) -> RawLinkSelection:
@@ -125,7 +126,14 @@ class TestWhatAProviderMayNotSay:
 
     @pytest.mark.parametrize(
         "field",
-        ["proposal_id", "provider", "subject_settlement_line_id", "snapshot_fingerprint"],
+        [
+            "proposal_id",
+            "provider",
+            "subject_settlement_line_id",
+            "snapshot_fingerprint",
+            "page_ordinal",
+            "environment_fingerprint",
+        ],
     )
     def test_a_metadata_field_is_refused(self, field: str) -> None:
         """Refused even though a correct value exists.
@@ -203,6 +211,8 @@ class TestBindingIsWhereMetadataComesFrom:
             selection(),
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=FIXTURE,
         )
 
@@ -217,6 +227,8 @@ class TestBindingIsWhereMetadataComesFrom:
             selection(),
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=real,
         )
 
@@ -230,12 +242,16 @@ class TestBindingIsWhereMetadataComesFrom:
             selection(),
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=real,
         )
 
         assert proposal.proposal_id == proposal_id_for(
             snapshot_fingerprint=FINGERPRINT,
             subject_settlement_line_id="line-7",
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=real,
         )
 
@@ -247,6 +263,8 @@ class TestBindingIsWhereMetadataComesFrom:
             raw,
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=FIXTURE,
         )
 
@@ -260,12 +278,16 @@ class TestBindingIsWhereMetadataComesFrom:
             raw,
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=ProviderIdentity(name="one", version="1"),
         )
         second = bind(
             raw,
             subject_settlement_line_id="line-7",
             snapshot_fingerprint=FINGERPRINT,
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=ProviderIdentity(name="two", version="1"),
         )
 
@@ -278,6 +300,8 @@ class TestBindingIsWhereMetadataComesFrom:
             "proposal_id",
             "subject_settlement_line_id",
             "snapshot_fingerprint",
+            "environment_fingerprint",
+            "page_ordinal",
             "outcome",
             "selected_source_record_ids",
             "provider",
@@ -312,11 +336,15 @@ class TestProposalIdentity:
         first = proposal_id_for(
             snapshot_fingerprint=FINGERPRINT,
             subject_settlement_line_id="line-1",
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=FIXTURE,
         )
         second = proposal_id_for(
             snapshot_fingerprint=FINGERPRINT,
             subject_settlement_line_id="line-1",
+            environment_fingerprint=ENVIRONMENT,
+            page_ordinal=1,
             provider=FIXTURE,
         )
 
@@ -327,6 +355,8 @@ class TestProposalIdentity:
         [
             ("snapshot_fingerprint", "b" * 64),
             ("subject_settlement_line_id", "line-2"),
+            ("environment_fingerprint", "f" * 64),
+            ("page_ordinal", 2),
             ("provider", ProviderIdentity(name="fixture", version="2")),
         ],
     )
@@ -335,6 +365,8 @@ class TestProposalIdentity:
         base = {
             "snapshot_fingerprint": FINGERPRINT,
             "subject_settlement_line_id": "line-1",
+            "environment_fingerprint": ENVIRONMENT,
+            "page_ordinal": 1,
             "provider": FIXTURE,
         }
 
@@ -356,6 +388,8 @@ class TestTheEnvelopeChecksItselfToo:
             "proposal_id": "p-1",
             "subject_settlement_line_id": "line-1",
             "snapshot_fingerprint": FINGERPRINT,
+            "environment_fingerprint": ENVIRONMENT,
+            "page_ordinal": 1,
             "outcome": ProposalOutcome.PROPOSE,
             "selected_source_record_ids": ("rec-1",),
             "provider": FIXTURE,

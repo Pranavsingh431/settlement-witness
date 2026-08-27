@@ -24,3 +24,4 @@ Rules:
 | [ADR-010](ADR-010-import-receipts-are-the-created-resource.md) | A processed upload returns 201, whatever the document turned out to be | Accepted |
 | [ADR-011](ADR-011-same-origin-api-instead-of-cors.md) | The browser reaches the API through its own origin, not through CORS | Accepted |
 | [ADR-012](ADR-012-the-model-points-the-verifier-decides.md) | The model points, the verifier decides | Accepted |
+| [ADR-013](ADR-013-paged-environments-and-three-kinds-of-truth.md) | Paged finite environments, and three kinds of truth | Accepted |

@@ -24,6 +24,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.candidates import LinkProposalRequest
+from app.ai.presentation import equivalent
 from app.ai.proposals import ProposalOutcome, ProviderIdentity
 
 
@@ -164,3 +165,79 @@ def returns(payload: object) -> Behaviour:
     fingerprint, another line's IDs, and the rest.
     """
     return lambda _request: payload
+
+
+def matching_visible_references() -> Behaviour:
+    """Return a behaviour that selects by reading the rendered references.
+
+    A deterministic stand-in for a provider that reads what it is shown and
+    behaves sensibly. It is not a model and does not pretend to be one: it does
+    exactly three things, and each is something a careful reader would do.
+
+    It selects a candidate whose rendered reference is equivalent to the line's,
+    ignoring case and separators, because those are formatting differences a
+    reader should see through. It selects nothing when the line's own reference
+    is not shown, because there is nothing to match against. And it abstains
+    when the reference it was given is less specific than the ones it is
+    matching against, because anything matching a coarser reference might be one
+    of several and choosing would be a guess presented as a link.
+
+    That last rule is why the ambiguous and withheld families exist. A provider
+    that always selects its best match would link the wrong record on one and an
+    unfounded record on the other, and the safe-abstention metrics are what
+    report the difference.
+    """
+
+    def behave(request: LinkProposalRequest) -> ProviderResult:
+        payment = request.subject_payment_id
+        payout = request.subject_payout_id
+
+        by_payment = [
+            candidate.source_record_id
+            for candidate in request.candidates
+            if equivalent(candidate.payment_id, payment)
+        ]
+        by_payout = [
+            candidate.source_record_id
+            for candidate in request.candidates
+            if equivalent(candidate.payout_id, payout)
+        ]
+
+        # What was given to match on is coarser than the things being matched,
+        # so anything it matches might be one of several. Selecting would be a
+        # guess presented as a link.
+        if _shown_too_coarsely(request, payment):
+            return _payload(ProposalOutcome.ABSTAIN, ())
+
+        selected = tuple(sorted(set(by_payment) | set(by_payout)))
+        outcome = ProposalOutcome.PROPOSE if selected else ProposalOutcome.ABSTAIN
+        return _payload(outcome, selected)
+
+    return behave
+
+
+def _shown_too_coarsely(request: LinkProposalRequest, payment: str | None) -> bool:
+    """Return whether the line's reference is less specific than an identifier.
+
+    A reference on this corpus has three segments. A truncated one has two, so
+    it names a family of payments rather than a payment, and anything matching
+    it might be any member of that family. Selecting then means picking one and
+    presenting the guess as a link.
+
+    Detected by comparing the line's shown reference against the candidates'.
+    That is information a provider actually has: it can see that what it was
+    given to match on is coarser than the things it is matching against, without
+    knowing anything canonical. A rule reading the private oracle would not be a
+    provider behaviour at all.
+    """
+    if payment is None:
+        return False
+    widths = [
+        candidate.payment_id.count("-") + candidate.payment_id.count("_")
+        for candidate in request.candidates
+        if candidate.payment_id is not None
+    ]
+    if not widths:
+        return False
+    subject_width = payment.count("-") + payment.count("_") + payment.count(" ")
+    return subject_width < max(widths)
