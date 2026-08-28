@@ -31,6 +31,9 @@ from app.domain.banking import BankDirection, BankTransaction
 from app.domain.evidence import EvidenceRef, EvidenceVerification, verify_against_index
 from app.domain.lifecycle import PayoutBatch
 from app.domain.primitives import CurrencyCode, Identifier, SourceRecordId, UtcTimestamp
+from app.ingestion.schemas import (
+    BANK_STATEMENT_SCHEMA_VERSION as _BANK_STATEMENT_SCHEMA_VERSION,
+)
 
 BANK_FINALITY_VERSION: Final = "1.0.0"
 """Semantic version of the bank finality rules and certificate shape.
@@ -44,14 +47,14 @@ decision and invalidate every recorded run for a change none of them can see.
 Patch: wording. Minor: a new outcome, or a new optional certificate field.
 Major: a change to what an existing outcome means, or to what verifies."""
 
-BANK_STATEMENT_SCHEMA_VERSION: Final = "1.0.0"
-"""Version of the bank statement CSV layout, recorded on every audit.
-
-Separate from `PARSER_VERSION` for the same reason. `PARSER_VERSION` is in the
-reconciliation run key because a parser change can change a conclusion about the
-payment records; adding a layout for a record type no invariant reads cannot,
-and bumping it would have created a new run for every existing database with no
-change of meaning. This version is what moves when these columns change."""
+#: Version of the bank statement CSV layout, recorded on every audit.
+#:
+#: Defined with the layout it describes, in `app.ingestion.schemas`, and
+#: re-exported here because a certificate carries it. Phase 12 defined it in this
+#: module and treated it as a replacement for moving `PARSER_VERSION`, which was
+#: wrong: the two answer different questions and both move when the columns
+#: change. See Phase 12.1.
+BANK_STATEMENT_SCHEMA_VERSION: Final = _BANK_STATEMENT_SCHEMA_VERSION
 
 
 class BankFinalityOutcome(StrEnum):

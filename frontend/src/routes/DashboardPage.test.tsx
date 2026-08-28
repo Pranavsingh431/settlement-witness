@@ -240,7 +240,7 @@ describe('a store with a run', () => {
     renderScreen(<DashboardPage />);
 
     expect(await screen.findByText(/baseline 1\.0\.0/)).toBeInTheDocument();
-    expect(screen.getByText(/parser 3\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/parser 3\.1\.0/)).toBeInTheDocument();
   });
 
   it('links to the audit for that run', async () => {

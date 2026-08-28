@@ -7,6 +7,7 @@ importing it later makes a new audit rather than a correction.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -16,6 +17,7 @@ from sqlalchemy.exc import DatabaseError, IntegrityError
 from app.banking.audits import (
     BankFinalityAuditRepository,
     BankFinalityAuditService,
+    PersistedBankFinalityAudit,
     compute_audit_key,
 )
 from app.banking.finality import (
@@ -39,6 +41,9 @@ from tests.reconciliation.conftest import (
     payout,
     settlement_line,
 )
+
+type Lookup = Callable[[BankFinalityAuditRepository, str], PersistedBankFinalityAudit | None]
+"""What `find_by_key` is, so a stand-in for it can be typed."""
 
 RECORDED_AT = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
 """A fixed wall clock, so a recorded time is a fact about the test."""
@@ -479,3 +484,274 @@ class TestReadingBackAnAudit:
 
         assert isinstance(certificate.observed_amount_minor, int)
         assert certificate.observed_amount_minor == PAYOUT_NET_MINOR
+
+
+class TestTheParserVersionChangesIdentityAndNotContent:
+    """Phase 12.1 moved `PARSER_VERSION`, which is in the run key.
+
+    A new run key for the same facts under a genuinely different parser is
+    correct provenance rather than unwanted duplication. What must not change is
+    what the baseline concluded, and that is asserted here rather than assumed.
+    """
+
+    def test_the_run_key_differs_between_parser_versions(self) -> None:
+        """The same snapshot under 3.0.0 and 3.1.0 is two runs."""
+        from app.reconciliation.runs import compute_run_key
+
+        fingerprint = "a" * 64
+
+        assert compute_run_key(fingerprint, parser_version="3.0.0") != compute_run_key(
+            fingerprint, parser_version="3.1.0"
+        )
+
+    def test_the_current_run_key_is_the_one_for_3_1_0(self) -> None:
+        """The default is the constant, so a run records what read its facts."""
+        from app.ingestion.schemas import PARSER_VERSION
+        from app.reconciliation.runs import compute_run_key
+
+        fingerprint = "a" * 64
+
+        assert compute_run_key(fingerprint) == compute_run_key(
+            fingerprint, parser_version=PARSER_VERSION
+        )
+
+    def test_the_decision_body_is_byte_identical_across_the_bump(self) -> None:
+        """The parser version is not an input to any decision.
+
+        Compared as canonical JSON over every decision of a reconciliation of
+        the same facts. Nothing in a decision carries a parser version, so
+        nothing in one can move when it changes; this asserts that rather than
+        relying on it.
+        """
+        import json
+
+        from app.reconciliation.batch import reconcile
+
+        first = reconcile(index_of(*settlement_facts()))  # type: ignore[arg-type]
+        second = reconcile(index_of(*settlement_facts()))  # type: ignore[arg-type]
+
+        assert json.dumps(
+            [one.model_dump(mode="json") for one in first.decisions],
+            sort_keys=True,
+            separators=(",", ":"),
+        ) == json.dumps(
+            [one.model_dump(mode="json") for one in second.decisions],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def test_no_decision_carries_a_parser_version(self) -> None:
+        """Which is why the bump cannot reach a decision at all."""
+        from app.reconciliation.batch import reconcile
+
+        decision = reconcile(index_of(*settlement_facts())).decisions[0]  # type: ignore[arg-type]
+
+        assert "parser_version" not in decision.model_dump(mode="json")
+
+    def test_a_historical_receipt_is_read_back_unchanged(self, engine: Engine) -> None:
+        """A receipt written under 3.0.0 still says 3.0.0.
+
+        Nothing rewrites history. A stored receipt is what those rules did to
+        that document, and a migration that restamped it would destroy the only
+        record of which parser produced the facts behind it.
+        """
+        from datetime import datetime
+
+        from sqlalchemy import text
+
+        from app.storage.repository import ImportReceiptRepository
+
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO import_receipts (receipt_id, document_hash, "
+                    "document_name, source_system, source_record_type, parser_version, "
+                    "received_at, outcome, row_count, accepted_count, duplicate_count, "
+                    "conflict_count, rejected_count, row_outcomes) VALUES "
+                    "('old-1', :hash, 'payment_events.csv', 'PSP_API', 'PAYMENT_EVENT', "
+                    "'3.0.0', :when, 'ACCEPTED', 1, 1, 0, 0, 0, '[]')"
+                ),
+                {
+                    "hash": "d" * 64,
+                    "when": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+                },
+            )
+
+        with session_factory(engine)() as session:
+            stored = ImportReceiptRepository(session).find("old-1")
+
+        assert stored is not None
+        assert stored.parser_version == "3.0.0"
+
+    def test_a_historical_run_keeps_its_recorded_parser_version(self, engine: Engine) -> None:
+        """The same for a run. Its key was computed from what it recorded."""
+        with session_scope(engine) as session:
+            recorded = ReconciliationRunService(session).create_run(
+                index_of(*settlement_facts())  # type: ignore[arg-type]
+            )
+
+        with session_factory(engine)() as session:
+            stored = ReconciliationRunRepository(session).get(recorded.run_id)
+
+        assert stored is not None
+        assert stored.parser_version == "3.1.0"
+
+
+class TestConcurrentAuditsAreIdempotent:
+    """Two writers, one snapshot, one row.
+
+    The lookup is the fast path and the unique constraint is the guarantee.
+    Between them is a window another writer can commit in, and the loser must be
+    answered with the winner's audit rather than with a database error.
+    """
+
+    @staticmethod
+    def _missing_once(original: Lookup) -> Lookup:
+        """Return a lookup that reports nothing the first time it is called.
+
+        That is exactly a lost race: this caller looked before the winner
+        committed, and its insert then meets a key that is already taken.
+        """
+        seen = {"count": 0}
+
+        def lookup(
+            repository: BankFinalityAuditRepository, key: str
+        ) -> PersistedBankFinalityAudit | None:
+            seen["count"] += 1
+            return None if seen["count"] == 1 else original(repository, key)
+
+        return lookup
+
+    def _race(self, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+        """Record an audit, then record it again with the lookup made to miss."""
+        index = facts_for()
+        with session_scope(engine) as session:
+            winner = BankFinalityAuditService(session, now=RECORDED_AT).create_audit(index)
+
+        monkeypatch.setattr(
+            BankFinalityAuditRepository,
+            "find_by_key",
+            self._missing_once(BankFinalityAuditRepository.find_by_key),
+        )
+        with session_scope(engine) as session:
+            loser = BankFinalityAuditService(session, now=RECORDED_AT).create_audit(index)
+
+        return winner.audit_id, loser.audit_id
+
+    def test_the_loser_gets_the_winner_audit(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same identifier, not an error and not a second row."""
+        winner_id, loser_id = self._race(engine, monkeypatch)
+
+        assert loser_id == winner_id
+
+    def test_the_loser_is_told_it_created_nothing(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`was_created` false, which is the API's 200 rather than 201."""
+        index = facts_for()
+        with session_scope(engine) as session:
+            BankFinalityAuditService(session).create_audit(index)
+
+        monkeypatch.setattr(
+            BankFinalityAuditRepository,
+            "find_by_key",
+            self._missing_once(BankFinalityAuditRepository.find_by_key),
+        )
+        with session_scope(engine) as session:
+            loser = BankFinalityAuditService(session).create_audit(index)
+
+        assert loser.was_created is False
+
+    def test_exactly_one_audit_is_stored(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two rows describing one conclusion would make the history ambiguous."""
+        self._race(engine, monkeypatch)
+
+        with session_factory(engine)() as session:
+            assert BankFinalityAuditRepository(session).count() == 1
+
+    def test_the_certificate_set_is_complete_and_not_duplicated(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the savepoint was rolled back, so nothing partial survives.
+
+        An audit row without its certificates would be a conclusion with no
+        evidence behind it, and a duplicated set would be evidence counted
+        twice.
+        """
+        winner_id, _ = self._race(engine, monkeypatch)
+
+        with session_factory(engine)() as session:
+            certificates = BankFinalityAuditRepository(session).certificates_for(winner_id)
+
+        assert [one.payout_id for one in certificates] == ["payout-1"]
+
+    def test_the_winner_certificates_are_untouched(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The rolled-back attempt left the winner's conclusion exactly as it was."""
+        index = facts_for()
+        with session_scope(engine) as session:
+            winner = BankFinalityAuditService(session, now=RECORDED_AT).create_audit(index)
+        with session_factory(engine)() as session:
+            before = [
+                one.model_dump_json()
+                for one in BankFinalityAuditRepository(session).certificates_for(winner.audit_id)
+            ]
+
+        monkeypatch.setattr(
+            BankFinalityAuditRepository,
+            "find_by_key",
+            self._missing_once(BankFinalityAuditRepository.find_by_key),
+        )
+        with session_scope(engine) as session:
+            BankFinalityAuditService(session, now=RECORDED_AT).create_audit(index)
+
+        with session_factory(engine)() as session:
+            after = [
+                one.model_dump_json()
+                for one in BankFinalityAuditRepository(session).certificates_for(winner.audit_id)
+            ]
+
+        assert after == before
+
+    def test_an_unrelated_integrity_failure_is_still_raised(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Storage corruption must not be reported as a successful duplicate.
+
+        The insert is made to fail for a reason that is not a taken audit key,
+        so no winner is found and the error goes to the caller. Swallowing it
+        would turn a broken database into a silent success.
+        """
+
+        def broken(
+            self: BankFinalityAuditRepository, *args: object, **kwargs: object
+        ) -> PersistedBankFinalityAudit:
+            raise IntegrityError("INSERT", {}, Exception("something else entirely"))
+
+        monkeypatch.setattr(BankFinalityAuditRepository, "append", broken)
+
+        with pytest.raises(IntegrityError), session_scope(engine) as session:
+            BankFinalityAuditService(session).create_audit(facts_for())
+
+    def test_that_failure_leaves_no_audit_behind(
+        self, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The savepoint rolled back, so the failure wrote nothing."""
+
+        def broken(
+            self: BankFinalityAuditRepository, *args: object, **kwargs: object
+        ) -> PersistedBankFinalityAudit:
+            raise IntegrityError("INSERT", {}, Exception("something else entirely"))
+
+        monkeypatch.setattr(BankFinalityAuditRepository, "append", broken)
+
+        with pytest.raises(IntegrityError), session_scope(engine) as session:
+            BankFinalityAuditService(session).create_audit(facts_for())
+
+        with session_factory(engine)() as session:
+            assert BankFinalityAuditRepository(session).count() == 0

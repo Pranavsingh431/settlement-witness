@@ -82,7 +82,7 @@ class TestValidImports:
     def test_a_receipt_records_the_parser_version(self, session: Session) -> None:
         """A fact can always be traced to the rules that produced it."""
         assert run_import(session, "payment_events.csv").parser_version == PARSER_VERSION
-        assert PARSER_VERSION == "3.0.0"
+        assert PARSER_VERSION == "3.1.0"
 
     def test_every_row_gets_a_recorded_outcome(self, session: Session) -> None:
         """The receipt accounts for every row, not just the interesting ones."""

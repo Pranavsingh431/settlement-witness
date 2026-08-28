@@ -16,7 +16,12 @@ from app.domain.facts import SourceRecordType, SourceSystem
 from app.ingestion.errors import RowErrorCode
 from app.ingestion.projection import project_bank_transaction
 from app.ingestion.receipts import ImportOutcome, ImportReceipt
-from app.ingestion.schemas import BANK_TRANSACTION_COLUMNS, expected_headers
+from app.ingestion.schemas import (
+    BANK_STATEMENT_SCHEMA_VERSION,
+    BANK_TRANSACTION_COLUMNS,
+    PARSER_VERSION,
+    expected_headers,
+)
 from app.ingestion.service import ImportService
 from app.storage.database import (
     create_database_engine,
@@ -294,3 +299,96 @@ class TestTheStatementIsNotReconciled:
         batch = reconcile(index_of(bank_transaction("bt-1")))
 
         assert batch.decisions == ()
+
+
+class TestTheReceiptSaysWhichRulesReadTheDocument:
+    """Provenance is what a receipt is for, so it has to be true.
+
+    Phase 12 shipped this layout without moving `PARSER_VERSION`, so a bank
+    statement was stamped 3.0.0, a version that had no way to parse one. These
+    pin the corrected behaviour and the rule that keeps it corrected.
+    """
+
+    def test_a_bank_receipt_reports_the_parser_that_can_read_one(self, session: Session) -> None:
+        """3.1.0, which is the first version with a bank transaction layout."""
+        receipt = import_document(session, read_fixture("bank_transactions.csv"))
+
+        assert receipt.parser_version == PARSER_VERSION == "3.1.0"
+
+    def test_every_record_type_reports_the_same_parser_version(self, session: Session) -> None:
+        """One parser, one version. A per-type version would be four contracts."""
+        service = ImportService(session, now=FIXED_NOW)
+        versions = set()
+        for name, record_type in (
+            ("payment_events.csv", SourceRecordType.PAYMENT_EVENT),
+            ("settlement_lines.csv", SourceRecordType.SETTLEMENT_LINE),
+            ("payouts.csv", SourceRecordType.PAYOUT),
+            ("bank_transactions.csv", BANK),
+        ):
+            versions.add(
+                service.import_document(
+                    read_fixture(name),
+                    source_system=PSP,
+                    record_type=record_type,
+                    document_name=name,
+                ).parser_version
+            )
+
+        assert versions == {"3.1.0"}
+
+    def test_a_refused_bank_document_still_reports_it(self, session: Session) -> None:
+        """A refusal is provenance too: these rules refused this document."""
+        receipt = import_document(session, read_fixture("invalid_bank_direction.csv"))
+
+        assert receipt.outcome is ImportOutcome.REJECTED_INVALID
+        assert receipt.parser_version == "3.1.0"
+
+    def test_the_bank_layout_has_its_own_version(self) -> None:
+        """Two versions cover a bank fact, and they answer different questions.
+
+        `PARSER_VERSION` names the machinery and is recorded on the receipt that
+        created the fact. `BANK_STATEMENT_SCHEMA_VERSION` names these columns and
+        is recorded on the audit that used them.
+        """
+        assert BANK_STATEMENT_SCHEMA_VERSION == "1.0.0"
+
+    def test_the_audit_records_the_layout_version_the_receipt_implies(
+        self, session: Session
+    ) -> None:
+        """The two halves of the provenance meet on a real fact.
+
+        A receipt says which parser read the document; an audit says which
+        layout it was read under. Both have to be present for a bank fact to be
+        traceable at all.
+        """
+        from app.banking.audits import BankFinalityAuditService
+
+        import_document(session, read_fixture("payouts.csv"))
+        import_document(session, read_fixture("bank_transactions.csv"))
+        recorded = BankFinalityAuditService(session).create_audit(
+            SourceFactRepository(session).fact_index()
+        )
+
+        assert recorded.bank_statement_schema_version == BANK_STATEMENT_SCHEMA_VERSION
+
+    def test_a_bank_layout_change_moves_both_versions(self) -> None:
+        """The rule that keeps the two honest, pinned against the layout itself.
+
+        Editing the bank columns without moving both constants fails here. That
+        is the whole mechanism: Phase 12 changed the layout and moved neither,
+        and nothing caught it because nothing was watching.
+
+        The header row is written out rather than derived, so a change to the
+        columns changes this literal too, and whoever changes it has to decide
+        what the new versions are.
+        """
+        assert expected_headers(BANK) == (
+            "provider_event_id",
+            "bank_transaction_id",
+            "bank_reference",
+            "direction",
+            "amount_minor",
+            "currency",
+            "occurred_at",
+        )
+        assert (PARSER_VERSION, BANK_STATEMENT_SCHEMA_VERSION) == ("3.1.0", "1.0.0")

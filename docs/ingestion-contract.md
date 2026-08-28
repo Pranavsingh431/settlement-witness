@@ -1,4 +1,4 @@
-# Ingestion contract, parser version 3.0.0, bank statement schema 1.0.0
+# Ingestion contract, parser version 3.1.0, bank statement schema 1.0.0
 
 This describes the CSV documents Settlement Witness accepts and what it does
 with them. The code in `backend/app/ingestion/` is the definition; this page
@@ -349,7 +349,7 @@ that it handles them.
 
 ## Parser version
 
-`PARSER_VERSION` is `3.0.0` and is recorded on every receipt, so a fact can
+`PARSER_VERSION` is `3.1.0` and is recorded on every receipt, so a fact can
 always be traced to the rules that produced it. It changes when a header set, a
 coercion rule, or the source-record ID derivation changes.
 
@@ -359,21 +359,33 @@ the previous version accepted can be refused by the next. Facts already stored
 are unaffected in both cases: the change is to what is accepted, not to how an
 accepted row is represented.
 
-### Why the bank transaction schema did not move it
+3.1.0 added the bank transaction layout. Minor rather than major: it accepts a
+document that was previously refused and refuses nothing that was previously
+accepted, and no rule applying to an existing record type changed.
 
-Phase 12 added a fourth header set and left `PARSER_VERSION` at 3.0.0. That is a
-deliberate exception to the rule above, and the reason is what the version is
-used for rather than what it is called.
+### The two versions a bank fact carries
 
-`PARSER_VERSION` is an input to the reconciliation run key, because a parser
-change can change a conclusion about the payment records. Adding a layout for a
-record type that no invariant reads cannot change one. Bumping it would have
-created a new reconciliation run for every existing database, with different
-decision identifiers, for a change no decision can observe.
+`PARSER_VERSION` names the parsing machinery and is recorded on the **receipt**
+that created a fact. `BANK_STATEMENT_SCHEMA_VERSION` names the bank columns and
+their rules and is recorded on the **audit** that used them. They answer
+different questions, and both have to be present for a bank fact to be traceable
+at all.
 
-Every rule that applies to a previously supported row is unchanged, so the
-version still means exactly what it meant for every fact it has ever applied to.
-The bank layout is versioned separately by `BANK_STATEMENT_SCHEMA_VERSION`,
-which starts at 1.0.0 and is recorded on every bank finality audit, so a bank
-fact is still traceable to the rules that produced it. See
+**A change to the bank columns moves both.** A new column, a removed one, a
+reordered header row or a changed coercion is a change to the layout and to the
+parser's header sets. `test_a_bank_layout_change_moves_both_versions` pins the
+two against the committed header row, so a layout edited without moving either
+version fails rather than shipping evidence attributed to rules that did not read
+it.
+
+Phase 12 shipped this layout without moving `PARSER_VERSION`, on the argument
+that a layout no invariant reads cannot change a conclusion. That argument was
+about the reconciliation run key, and it was the wrong thing to optimise: a bank
+statement was stamped 3.0.0, a version that had no way to parse one, so the
+receipt named rules that could not have produced the evidence it describes. A new
+run key for the same facts under a genuinely different parser is correct
+provenance, and it is what the run key is for. Corrected in Phase 12.1; see
 [ADR-016](adr/ADR-016-settlement-agreement-is-not-bank-finality.md).
+
+Nothing rewrites history. A receipt written under 3.0.0 still says 3.0.0, and a
+recorded run keeps the parser version its key was computed from.

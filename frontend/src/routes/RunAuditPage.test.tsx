@@ -92,7 +92,7 @@ describe('run metadata', () => {
 
     expect(screen.getByText('Baseline version').nextSibling).toHaveTextContent('1.0.0');
     expect(screen.getByText('Domain contract version').nextSibling).toHaveTextContent('5.0.0');
-    expect(screen.getByText('Parser version').nextSibling).toHaveTextContent('3.0.0');
+    expect(screen.getByText('Parser version').nextSibling).toHaveTextContent('3.1.0');
   });
 
   it('shows the as-of and recorded times', async () => {

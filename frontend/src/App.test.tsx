@@ -101,7 +101,7 @@ describe('routing', () => {
         snapshot_fingerprint: 'f',
         baseline_version: '1.0.0',
         domain_schema_version: '5.0.0',
-        parser_version: '3.0.0',
+        parser_version: '3.1.0',
         created_at: '2026-08-24T12:00:00Z',
         as_of: '2026-08-24T12:00:00Z',
         fact_count: 0,

@@ -18,7 +18,7 @@ from typing import Final
 from app.domain.banking import BankDirection
 from app.domain.facts import SourceRecordType
 
-PARSER_VERSION: Final = "3.0.0"
+PARSER_VERSION: Final = "3.1.0"
 """Version of the parsing and normalisation rules.
 
 Recorded on every import receipt, so a fact can always be traced to the rules
@@ -26,10 +26,20 @@ that produced it. It changes when a header set, a coercion rule or the
 source-record ID derivation changes.
 
 2.0.0 stopped trimming whitespace and started refusing it. 3.0.0 started
-refusing a payment event amount of zero. Each is a major step because documents
-the previous version accepted can be refused by the next. Facts already stored
-are unaffected: the change is to what is accepted, not to how an accepted row is
-represented.
+refusing a payment event amount of zero. Both are major steps because documents
+the previous version accepted can be refused by the next.
+
+3.1.0 added the bank transaction layout. Minor, not major: it accepts a document
+that was previously refused and refuses nothing that was previously accepted, and
+no rule applying to an existing record type changed.
+
+Phase 12 shipped that layout without moving this constant, on the argument that a
+layout no invariant reads cannot change a conclusion. That argument was about the
+run key and it was the wrong thing to optimise. This version is provenance
+first: it is recorded on the receipt that created a fact, and a bank statement
+stamped 3.0.0 attributes evidence to rules that had no way to parse it. A new run
+key for the same facts under a genuinely different parser is correct provenance,
+not unwanted duplication, and it is what the run key is for.
 """
 
 
@@ -143,6 +153,21 @@ SUPPORTED_RECORD_TYPES: Final[frozenset[SourceRecordType]] = frozenset(COLUMNS_B
 
 BANK_DIRECTIONS: Final[tuple[str, ...]] = tuple(sorted(member.value for member in BankDirection))
 """The directions a statement row may declare, for the parser's error message."""
+
+BANK_STATEMENT_SCHEMA_VERSION: Final = "1.0.0"
+"""Version of the bank statement layout above.
+
+Two versions cover a bank fact, and they answer different questions. This one
+names the columns and their rules, and is recorded on every bank finality audit
+so a certificate says which layout its evidence was read under. `PARSER_VERSION`
+names the parsing machinery and is recorded on the receipt that created the fact.
+
+**Changing these columns changes both.** A new column, a removed one, a reordered
+header row or a changed coercion is a change to this layout and to the parser's
+header sets, so both constants move together.
+`test_a_bank_layout_change_moves_both_versions` pins the two together against the
+committed header row, so a layout edited without moving either version fails
+rather than shipping evidence attributed to rules that did not produce it."""
 
 
 def expected_headers(record_type: SourceRecordType) -> tuple[str, ...]:

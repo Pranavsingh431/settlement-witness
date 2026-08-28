@@ -138,3 +138,43 @@ bumping it would rewrite the declared version of every recorded decision.
   provider's own records, which is the thing it exists to be independent of.
 - Nothing in this phase writes to a reconciliation decision, and a test compares
   every stored and recomputed decision byte for byte before and after auditing.
+
+
+## Amendment, Phase 12.1
+
+Section 5 argued that `PARSER_VERSION` should not move for the bank layout,
+because it is an input to the reconciliation run key and a layout no invariant
+reads cannot change a conclusion. **That argument was about the wrong thing and
+the decision it reached was wrong.**
+
+`PARSER_VERSION` is recorded on the import receipt that creates a fact, and its
+stated job is that a fact can always be traced to the rules that produced it. A
+bank statement imported under Phase 12 was stamped 3.0.0, a version that had no
+bank layout and no way to parse one. The receipt named rules that could not have
+produced the evidence it describes, which is exactly the kind of untrue
+provenance the rest of this system is built to avoid.
+
+The run-key cost was real and it was the smaller thing. A new run key for the
+same facts under a genuinely different parser is correct provenance, not
+unwanted duplication, and it is what the run key is for.
+
+**`PARSER_VERSION` is now 3.1.0.** Minor rather than major: the change accepts a
+document that was previously refused and refuses nothing that was previously
+accepted, and no rule applying to an existing record type moved.
+
+`BANK_STATEMENT_SCHEMA_VERSION` stays 1.0.0 and now lives beside the layout it
+describes. The two are not alternatives: `PARSER_VERSION` names the machinery
+and goes on the receipt, and the layout version names the columns and goes on
+the audit. **A future change to the bank columns moves both**, and a test pins
+them together against the committed header row so a layout edited without moving
+either fails rather than shipping evidence attributed to rules that did not read
+it.
+
+Nothing rewrites history. A receipt written under 3.0.0 still says 3.0.0, and a
+recorded run keeps the parser version its key was computed from. Decision
+content is unaffected either way: no decision carries a parser version, and a
+byte-for-byte comparison across the bump asserts it.
+
+The other Phase 12 argument in section 5, keeping `BankTransaction` out of the
+exported domain schema, is unchanged. That one is about a contract no decision
+reads, not about provenance on a receipt.

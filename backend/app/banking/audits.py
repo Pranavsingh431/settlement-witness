@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.banking.finality import (
@@ -270,14 +271,29 @@ class BankFinalityAuditService:
     def create_audit(self, index: SourceFactIndex) -> PersistedBankFinalityAudit:
         """Audit every payout in the index, or return the audit already recorded.
 
+        The lookup is the fast path and the unique constraint is the guarantee.
+        Between the two there is a window in which another writer can commit the
+        same audit, and the insert then fails. That is a lost race rather than a
+        problem, so the savepoint is rolled back, the winner is read, and this
+        caller is answered with it exactly as if the lookup had seen it.
+
+        Only the savepoint is rolled back, so nothing partial survives: an audit
+        row without its certificates would be a conclusion with no evidence
+        behind it.
+
         Args:
             index: The complete accepted fact index.
 
         Returns:
-            The stored audit, saying whether this call created it.
+            The stored audit, saying whether this call created it. A caller that
+            lost the race gets `was_created` false, which is the same answer an
+            ordinary duplicate gets, because it is the same fact.
 
         Raises:
             ValueError: If the index is empty.
+            IntegrityError: If the insert failed for any reason other than
+                another writer having recorded this audit. Masking that would
+                turn storage corruption into a silent success.
         """
         snapshot = BankFinalitySnapshot.from_index(index)
         audit_key = compute_audit_key(snapshot.digest)
@@ -287,4 +303,17 @@ class BankFinalityAuditService:
             return existing
 
         now = self._now if self._now is not None else datetime.now(UTC)
-        return self._repository.append(audit(snapshot), audit_key, now=now)
+        savepoint = self._session.begin_nested()
+        try:
+            recorded = self._repository.append(audit(snapshot), audit_key, now=now)
+        except IntegrityError:
+            savepoint.rollback()
+            winner = self._repository.find_by_key(audit_key)
+            if winner is None:
+                # Nothing is holding this key, so the constraint that refused
+                # the insert was some other one. Re-raised rather than reported
+                # as a duplicate.
+                raise
+            return winner
+        savepoint.commit()
+        return recorded

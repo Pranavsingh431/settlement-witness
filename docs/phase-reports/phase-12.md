@@ -5,6 +5,7 @@
 - Domain contract 5.0.0, parser 3.0.0, baseline 1.0.0, review contract 1.0.0, all unchanged
 - New: bank finality 1.0.0, bank statement schema 1.0.0, migration `0004_bank_finality_audits`, `ADR-016`
 - Baseline and benchmark output byte-identical to Phase 11.1
+- **Two claims below were corrected in [Phase 12.1](phase-12-1.md).** See "Corrected later".
 
 ## What this phase is, in one paragraph
 
@@ -120,7 +121,7 @@ including a refused one.
 | --- | --- | --- | --- |
 | Domain schema | 5.0.0 | 5.0.0 | No decision, invariant or code reads a bank fact |
 | Baseline | 1.0.0 | 1.0.0 | The reconciliation engine is untouched |
-| Parser | 3.0.0 | 3.0.0 | See below |
+| Parser | 3.0.0 | 3.0.0 | See below. **Corrected to 3.1.0 in [Phase 12.1](phase-12-1.md)** |
 | Review contract | 1.0.0 | 1.0.0 | Untouched |
 | Bank finality | none | 1.0.0 | A new independent contract |
 | Bank statement schema | none | 1.0.0 | The new CSV layout, versioned separately |
@@ -142,6 +143,15 @@ so a bank fact is still traceable to the rules that produced it. The same
 argument keeps `BankTransaction` out of the exported domain schema. Both are
 recorded in ADR-016 and in the ingestion contract rather than left as a silent
 judgement.
+
+> **Corrected in Phase 12.1. This was wrong.** The argument is about the run key,
+> and `PARSER_VERSION` is recorded on the import receipt that creates a fact. A
+> bank statement imported under this phase was stamped 3.0.0, a version with no
+> bank layout, so the receipt named rules that could not have produced the
+> evidence it describes. `PARSER_VERSION` is now 3.1.0, minor because the change
+> accepts more and refuses nothing that was accepted before. The
+> `BankTransaction`-out-of-the-domain-schema half of the argument stands: that
+> one is about a contract no decision reads rather than about provenance.
 
 ## API and interface
 
@@ -365,6 +375,19 @@ noise rather than corruption, but it is still a gap.
 | ADR, API docs, README, phase report | Passed | ADR-016 and the four documents |
 | The remaining limitation stated plainly | Passed | README, ADR-016 and "Limitations" above |
 | Full CI, migrations, schema, frontend, containers, byte-identical baseline | Passed | Commands and hashes above |
+
+## Corrected later
+
+Two claims here were reasoned carefully and reached the wrong answer.
+
+| Claimed here | What was true | Fixed in |
+| --- | --- | --- |
+| The parser version deliberately does not move for the new header set, because bumping it would create a new run for a change no decision can observe | `PARSER_VERSION` goes on the import receipt that creates a fact, not only into the run key. A bank statement was stamped 3.0.0, a version that had no bank layout, so the receipt attributed evidence to rules that could not have read it. The run-key cost was the smaller thing, and a new run key for a genuinely different parser is correct provenance. | [Phase 12.1](phase-12-1.md), part A |
+| Bank finality audits are idempotent on the audit key | True of a second call that sees the first. Two writers whose lookups both miss produced an `IntegrityError` for the loser rather than the winner's audit. The unique constraint kept the data correct and the caller got a database error. | [Phase 12.1](phase-12-1.md), part B |
+
+The exit-gate row "Immutable audits keyed by snapshot plus rule version,
+idempotent replay" was tested with sequential calls, which is the case that
+worked. There was no row asserting anything about concurrent ones.
 
 ## Unresolved
 
