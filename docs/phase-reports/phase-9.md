@@ -185,6 +185,10 @@ a line. The two are not comparable and the version says so.
 `abstained_line_rate` is kept as the line-level measure, defined as lines where
 the provider selected nothing on any page.
 
+That definition is wrong and the field was removed in Phase 9.2: it counted
+failing and never being asked as abstaining. See
+[phase-9-2.md](phase-9-2.md).
+
 ## Changed files
 
 | File | Change |

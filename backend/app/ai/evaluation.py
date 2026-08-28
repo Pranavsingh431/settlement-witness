@@ -17,6 +17,18 @@ So the page rates and the line rates are named apart. `abstention_page_rate` and
 lines and requires the aggregate selection across every page of a line to equal
 that line's full linked set.
 
+## Abstaining is something a provider does
+
+Two measures here are about declining, and both require a provider to have
+declined. A page that was malformed, failed or was rejected returned nothing,
+which is not a refusal, and a line nobody was asked about was not declined by
+anybody. Counting either as an abstention flatters exactly the providers that
+deserve it least, and it has been the same mistake twice: once on
+`safe_abstention_recall` and once on the line rate that replaced it.
+
+`no_selection_line_rate` is the measure that does count all of those together.
+It is named for what it counts and is not an abstention measure.
+
 ## Why the metrics are separate
 
 A single number would hide the ways of being wrong. Selecting every candidate
@@ -71,7 +83,7 @@ from app.ai.validation import RejectedProposal, RejectionCode, parse_proposal
 from app.benchmark.metrics import Rate
 from app.reconciliation.snapshot import FactSnapshot
 
-SHADOW_HARNESS_VERSION = "4.0.0"
+SHADOW_HARNESS_VERSION = "5.0.0"
 """Version of these definitions.
 
 Changes when a metric's meaning changes, so two reports carrying different
@@ -90,7 +102,13 @@ counted, so returning malformed output on every page scored as safely
 abstaining. Report and proposal identity now include what the provider was
 shown, so two runs over one snapshot under different renderings are visibly
 different. And a settlement line with no candidates appears in the report as an
-unaskable line rather than not appearing at all."""
+unaskable line rather than not appearing at all.
+
+5.0.0 removed `abstained_line_rate`, which counted any line where nothing was
+selected. It reported 1.000 for a corpus no provider was ever called on, and
+1.000 alongside an invalid page rate of 1.000 for a provider whose every page
+was refused. It is replaced by `fully_abstained_askable_line_rate`, which
+requires an actual abstention on every page and counts only askable lines."""
 
 
 class ExpectedProviderAction(StrEnum):
@@ -218,6 +236,17 @@ class LineOutcome(BaseModel):
         return self.askable and set(self.selected) == set(self.truth)
 
     @property
+    def fully_abstained(self) -> bool:
+        """Return whether the provider declined on every page of this line.
+
+        Requires at least one page. A line nobody was asked about was not
+        declined, and a line where any page was malformed, failed or was
+        rejected was not declined either: nothing was returned, which is not
+        the same as returning a refusal.
+        """
+        return self.askable and self.abstained_page_count == self.page_count
+
+    @property
     def abstention_outcome(self) -> LineAbstention:
         """Return how this line turned out, for a line where abstaining is safe.
 
@@ -226,7 +255,7 @@ class LineOutcome(BaseModel):
         """
         if self.selected_anything:
             return LineAbstention.UNSAFE_SELECTION
-        if self.askable and self.abstained_page_count == self.page_count:
+        if self.fully_abstained:
             return LineAbstention.SAFE
         return LineAbstention.UNUSABLE
 
@@ -301,8 +330,28 @@ class ShadowReport(BaseModel):
     invalid_page_rate: Rate
     """Pages where the output was refused or the provider failed."""
 
-    abstained_line_rate: Rate
-    """Lines where the provider selected nothing at all, on any page."""
+    fully_abstained_askable_line_rate: Rate
+    """Askable lines where the provider declined on every page.
+
+    An abstention measure, so it requires abstentions. A line with a malformed
+    page, a provider failure, a rejection, a partial abstention or any selected
+    record is not counted, and neither is a line nobody was asked about.
+
+    The denominator is askable lines only. Counting lines with no candidates
+    would let a corpus nobody was called on report a full abstention, which is
+    what the field this replaces did."""
+
+    no_selection_line_rate: Rate
+    """Askable lines that produced no record, for any reason.
+
+    Deliberately not called an abstention. It counts declining, failing,
+    returning something malformed and being refused all together, because what
+    it is for is reading recall: these are the lines that contributed no links.
+    Which of those happened is what the page rates and
+    `fully_abstained_askable_line_rate` are for.
+
+    Same denominator, so neither can be inflated by lines nobody was asked
+    about."""
 
     false_link_rate: Rate
     """Of the records selected, how many the baseline does not link.
@@ -485,6 +534,7 @@ def _report(
         len(set(page.selected) & set(page.page_truth)) for page in answered_pages
     )
 
+    askable = [line for line in lines if line.askable]
     expecting_abstention = [
         line for line in lines if line.expected_action is ExpectedProviderAction.ABSTAIN
     ]
@@ -506,8 +556,11 @@ def _report(
         invalid_page_rate=Rate.of(
             sum(1 for page in pages if page.rejection is not None), len(pages)
         ),
-        abstained_line_rate=Rate.of(
-            sum(1 for line in lines if not line.selected_anything), len(lines)
+        fully_abstained_askable_line_rate=Rate.of(
+            sum(1 for line in askable if line.fully_abstained), len(askable)
+        ),
+        no_selection_line_rate=Rate.of(
+            sum(1 for line in askable if not line.selected_anything), len(askable)
         ),
         false_link_rate=Rate.of(false_links, selected_total),
         safe_abstention_recall=Rate.of(by_outcome[LineAbstention.SAFE], len(expecting_abstention)),

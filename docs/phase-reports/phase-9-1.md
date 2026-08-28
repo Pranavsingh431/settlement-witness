@@ -131,6 +131,22 @@ The finding from Phase 9 stands and is unaffected: the canonical oracle is
 perfect on every linking metric and unsafe on both abstaining cases, while the
 matcher gives up 0.025 of recall to be safe on both.
 
+## Corrected in Phase 9.2
+
+This phase fixed `safe_abstention_recall` and left the same defect in the field
+beside it. `abstained_line_rate` went on counting any line where nothing was
+selected, so it reported 1.000 for a corpus no provider was ever called on, and
+1.000 next to an invalid page rate of 1.000 for a provider whose every page was
+refused.
+
+The limitation this report records, that safe abstention is scored per line
+rather than per page, is unrelated and still stands. What it did not say is that
+the general line-level measure was still crediting failure, which is the exact
+mistake the phase was written to remove.
+
+`abstained_line_rate` is replaced by `fully_abstained_askable_line_rate`. See
+[phase-9-2.md](phase-9-2.md).
+
 ## Versioning
 
 `SHADOW_HARNESS_VERSION` is `4.0.0`. Report fields changed, and both proposal
@@ -209,6 +225,7 @@ Each new file opens with the reproduction it exists for, kept as a test.
 | --- | --- | --- |
 | Three defects reproduced before any change | Passed | Output quoted above, each kept as a test |
 | Safe abstention requires a valid abstention on every page | Passed | Malformed, failed and partial all refused credit |
+| Every abstention measure requires an abstention | Partly wrong | `abstained_line_rate` still credited failure. Corrected in Phase 9.2 |
 | A selected record remains an unsafe selection | Passed | Including one record on one page of two |
 | `unusable_expected_abstention_rate` added | Passed | Named and reported separately |
 | The three outcomes partition the denominator | Passed | Asserted over five behaviours |
