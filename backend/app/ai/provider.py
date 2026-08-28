@@ -57,7 +57,12 @@ class FailureKind(StrEnum):
     limit and an authentication failure are the same fact here: no answer."""
 
     RESPONSE_TOO_LARGE = "RESPONSE_TOO_LARGE"
-    """The body passed the configured byte budget and was abandoned unread."""
+    """The body passed the configured byte budget and was abandoned part read.
+
+    An adapter that streams stops at the budget plus whatever chunk crossed it,
+    so an oversized response costs a bounded read rather than a whole download.
+    A body declared oversized by an honest `Content-Length` is never read at
+    all."""
 
     UNREADABLE_RESPONSE = "UNREADABLE_RESPONSE"
     """The body was not JSON, or was JSON in a shape the adapter does not know.
@@ -71,6 +76,16 @@ class FailureKind(StrEnum):
 
     A stop rather than a failure of the provider, recorded the same way because
     the effect on the page is the same: no answer, and nothing invented."""
+
+    REQUEST_NOT_AUTHORIZED = "REQUEST_NOT_AUTHORIZED"
+    """The page was not one the provider was authorised to ask about.
+
+    An adapter that can reach a third party carries an allow-list of the exact
+    requests it may send, and a page outside it is refused before any header is
+    built or any socket is opened. Not a provider failure at all: the provider
+    never heard about it. Recorded as one because the effect on the page is the
+    same, and because a run that silently skipped such a page would be a run
+    whose page count no longer matched its corpus."""
 
 
 class ProviderFailure(BaseModel):

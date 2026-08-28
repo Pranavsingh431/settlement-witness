@@ -12,10 +12,12 @@ API key appears in nothing.
 """
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from typing import Final
 
 import httpx2
 import pytest
+from pydantic import SecretStr
 
 from app.ai.candidates import (
     LinkProposalRequest,
@@ -32,8 +34,10 @@ from app.ai.hosted import (
     HostedLinkProposalProvider,
     HostedProviderConfig,
     MissingConfiguration,
+    NothingAuthorised,
     presentation_payload,
 )
+from app.ai.presentation import ReferenceStyle
 from app.ai.provider import FailureKind, ProviderFailure
 from app.ai.validation import RejectionCode, ValidProposal, parse_proposal
 from app.reconciliation.snapshot import FactSnapshot
@@ -82,9 +86,19 @@ def completion(content: str) -> httpx2.Response:
 def serving(
     handler: Callable[[httpx2.Request], httpx2.Response],
     config: HostedProviderConfig,
+    *authorised: LinkProposalRequest,
 ) -> HostedLinkProposalProvider:
-    """Return a provider whose requests are served in process."""
-    return HostedLinkProposalProvider(config, transport=httpx2.MockTransport(handler))
+    """Return a provider whose requests are served in process.
+
+    Every caller names the pages it may ask about. There is no default here
+    either: a test helper that quietly authorised everything would be testing a
+    provider the application never builds.
+    """
+    return HostedLinkProposalProvider(
+        config,
+        authorised_requests=frozenset(one.request_fingerprint for one in authorised),
+        transport=httpx2.MockTransport(handler),
+    )
 
 
 def answering(payload: object) -> Callable[[httpx2.Request], httpx2.Response]:
@@ -203,7 +217,7 @@ class TestTheKeyIsNeverWrittenDown:
         def refuse(_request: httpx2.Request) -> httpx2.Response:
             return httpx2.Response(401, json={"error": f"bad key {SECRET}"})
 
-        with serving(refuse, config) as provider:
+        with serving(refuse, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -214,20 +228,24 @@ class TestTheKeyIsNeverWrittenDown:
     ) -> None:
         """The artifact a person is most likely to paste somewhere."""
         from app.ai.evaluation import SHADOW_HARNESS_VERSION
-        from app.ai.live_shadow import LiveShadowRunReceipt
+        from app.ai.live_shadow import LIVE_RECEIPT_VERSION, LiveShadowRunReceipt
 
         with serving(
-            answering({"outcome": "ABSTAIN", "selected_source_record_ids": []}), config
+            answering({"outcome": "ABSTAIN", "selected_source_record_ids": []}),
+            config,
+            *build_requests(snapshot),
         ) as provider:
             report = evaluate(snapshot, provider)
             receipt = LiveShadowRunReceipt(
+                receipt_version=LIVE_RECEIPT_VERSION,
                 harness_version=SHADOW_HARNESS_VERSION,
                 corpus_version="1.0.0",
                 provider_name=provider.identity.name,
                 model_id=config.model,
                 configuration=config.provenance(),
                 requests_made=provider.requests_made,
-                failure_counts={},
+                report_rejection_counts={},
+                typed_failure_counts=provider.typed_failure_counts,
                 report=report,
                 ran_at="2026-08-27T00:00:00+00:00",
             )
@@ -245,7 +263,7 @@ class TestTheKeyIsNeverWrittenDown:
             seen["body"] = request.content.decode()
             return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
 
-        with serving(capture, config) as provider:
+        with serving(capture, config, page) as provider:
             provider.propose(page)
 
         assert seen["authorization"] == f"Bearer {SECRET}"
@@ -331,7 +349,7 @@ class TestOnlyPresentationLeavesTheProcess:
             seen["body"] = json.loads(request.content)
             return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
 
-        with serving(capture, config) as provider:
+        with serving(capture, config, page) as provider:
             provider.propose(page)
 
         body = seen["body"]
@@ -349,7 +367,7 @@ class TestOnlyPresentationLeavesTheProcess:
             seen["body"] = json.loads(request.content)
             return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
 
-        with serving(capture, config) as provider:
+        with serving(capture, config, page) as provider:
             provider.propose(page)
 
         body = seen["body"]
@@ -358,11 +376,11 @@ class TestOnlyPresentationLeavesTheProcess:
         assert body["response_format"]["type"] == "json_schema"  # type: ignore[index]
 
     def test_the_identity_names_the_adapter_and_the_model(
-        self, config: HostedProviderConfig
+        self, config: HostedProviderConfig, page: LinkProposalRequest
     ) -> None:
         """So a report says which model produced it."""
         with serving(
-            answering({"outcome": "ABSTAIN", "selected_source_record_ids": []}), config
+            answering({"outcome": "ABSTAIN", "selected_source_record_ids": []}), config, page
         ) as provider:
             identity = provider.identity
 
@@ -380,7 +398,7 @@ class TestAValidAnswerReachesTheOrdinaryValidator:
         chosen = sorted(truth_for(page, snapshot))
         handler = answering({"outcome": "PROPOSE", "selected_source_record_ids": chosen})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             raw = provider.propose(page)
             result = parse_proposal(raw, page, provider.identity)
 
@@ -393,7 +411,7 @@ class TestAValidAnswerReachesTheOrdinaryValidator:
         """Declining is an answer here as everywhere else."""
         handler = answering({"outcome": "ABSTAIN", "selected_source_record_ids": []})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert isinstance(result, ValidProposal)
@@ -405,7 +423,7 @@ class TestAValidAnswerReachesTheOrdinaryValidator:
         """Identity is read from the provider object, as it is for a fixture."""
         handler = answering({"outcome": "ABSTAIN", "selected_source_record_ids": []})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert isinstance(result, ValidProposal)
@@ -440,7 +458,7 @@ class TestNothingIsRepaired:
         Doing either would be the adapter deciding what the model meant, and a
         report over repaired answers cannot say which part was whose.
         """
-        with serving(answering(content), config) as provider:
+        with serving(answering(content), config, page) as provider:
             result = provider.propose(page)
 
         if isinstance(result, ProviderFailure):
@@ -504,7 +522,7 @@ class TestNothingIsRepaired:
         payload: Mapping[str, object],
     ) -> None:
         """The same rules a fixture's answer meets, not a looser set."""
-        with serving(answering(payload), config) as provider:
+        with serving(answering(payload), config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert result.code is RejectionCode.MALFORMED  # type: ignore[union-attr]
@@ -517,7 +535,7 @@ class TestNothingIsRepaired:
             {"outcome": "PROPOSE", "selected_source_record_ids": ["PAYMENT_EVENT:invented"]}
         )
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert result.code is RejectionCode.OUT_OF_CANDIDATE_SET  # type: ignore[union-attr]
@@ -529,7 +547,7 @@ class TestNothingIsRepaired:
         chosen = sorted(page.candidate_ids)[0]
         handler = answering({"outcome": "PROPOSE", "selected_source_record_ids": [chosen, chosen]})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert result.code is RejectionCode.MALFORMED  # type: ignore[union-attr]
@@ -545,7 +563,7 @@ class TestNothingIsRepaired:
             }
         )
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = parse_proposal(provider.propose(page), page, provider.identity)
 
         assert result.code is RejectionCode.MALFORMED  # type: ignore[union-attr]
@@ -562,7 +580,7 @@ class TestNothingIsRepaired:
         from_page_two = sorted(pages[1].candidate_ids)[0]
         handler = answering({"outcome": "PROPOSE", "selected_source_record_ids": [from_page_two]})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, pages[0]) as provider:
             result = parse_proposal(provider.propose(pages[0]), pages[0], provider.identity)
 
         assert result.code is RejectionCode.OUT_OF_CANDIDATE_SET  # type: ignore[union-attr]
@@ -577,7 +595,7 @@ class TestFailuresAreTypedAndCarryNothing:
         def slow(_request: httpx2.Request) -> httpx2.Response:
             raise httpx2.TimeoutException("too slow")
 
-        with serving(slow, config) as provider:
+        with serving(slow, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -591,7 +609,7 @@ class TestFailuresAreTypedAndCarryNothing:
         def unreachable(_request: httpx2.Request) -> httpx2.Response:
             raise httpx2.ConnectError("no route")
 
-        with serving(unreachable, config) as provider:
+        with serving(unreachable, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -606,7 +624,7 @@ class TestFailuresAreTypedAndCarryNothing:
             status, json={"error": {"message": "provider prose that must not be kept"}}
         )
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -620,7 +638,7 @@ class TestFailuresAreTypedAndCarryNothing:
         huge = "x" * (config.max_response_bytes + 1)
         handler = lambda _request: httpx2.Response(200, content=huge.encode())  # noqa: E731
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -630,7 +648,7 @@ class TestFailuresAreTypedAndCarryNothing:
         """A host that answered with nothing did not answer."""
         handler = lambda _request: httpx2.Response(200, content=b"")  # noqa: E731
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -659,7 +677,7 @@ class TestFailuresAreTypedAndCarryNothing:
         """
         handler = lambda _request: httpx2.Response(200, json=envelope)  # noqa: E731
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -671,7 +689,7 @@ class TestFailuresAreTypedAndCarryNothing:
         """An HTML error page, for instance."""
         handler = lambda _request: httpx2.Response(200, content=b"<html>502</html>")  # noqa: E731
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
@@ -710,7 +728,7 @@ class TestNothingIsRetried:
                 return httpx2.Response(500, json={})
             return httpx2.Response(200, content=b"not json")
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             provider.propose(page)
 
         assert attempts["count"] == 1
@@ -726,7 +744,7 @@ class TestNothingIsRetried:
             attempts["count"] += 1
             return completion('{"outcome": "PROPOSE", "selected_source_record_ids": ["nope"]}')
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             provider.propose(page)
 
         assert attempts["count"] == 1
@@ -746,7 +764,7 @@ class TestTheRequestBudgetStops:
             attempts["count"] += 1
             return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             first = provider.propose(page)
             second = provider.propose(page)
             third = provider.propose(page)
@@ -766,7 +784,7 @@ class TestTheRequestBudgetStops:
         )
         handler = answering({"outcome": "ABSTAIN", "selected_source_record_ids": []})
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, page) as provider:
             provider.propose(page)
             exhausted = provider.propose(page)
 
@@ -791,7 +809,7 @@ class TestTheRequestBudgetStops:
             attempts["count"] += 1
             return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, *build_requests(corpus_snapshot, corpus.styling)) as provider:
             report = evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
 
         assert attempts["count"] == 5
@@ -823,8 +841,672 @@ class TestTheRemainingEdges:
         def odd(_request: httpx2.Request) -> httpx2.Response:
             raise httpx2.TooManyRedirects("looping")
 
-        with serving(odd, config) as provider:
+        with serving(odd, config, page) as provider:
             result = provider.propose(page)
 
         assert isinstance(result, ProviderFailure)
         assert result.kind is FailureKind.RAISED
+
+
+class RecordingStream(httpx2.SyncByteStream):
+    """A chunked response body that counts every byte it hands out.
+
+    The whole point of these tests is what the adapter did **not** read, and a
+    plain `httpx2.Response(200, content=...)` cannot answer that: it is already
+    in memory before the adapter sees it. This yields the body a chunk at a time
+    and records how much was actually taken, so an assertion can be about the
+    read rather than about the outcome the read happened to produce.
+    """
+
+    def __init__(self, payload: bytes, chunk: int = 4096) -> None:
+        self._payload = payload
+        self._chunk = chunk
+        self.consumed = 0
+
+    @property
+    def chunk_size(self) -> int:
+        """Return the size of one chunk, for a budget-plus-one assertion."""
+        return self._chunk
+
+    def __iter__(self) -> Iterator[bytes]:
+        """Yield the body in fixed size pieces, counting as it goes."""
+        for start in range(0, len(self._payload), self._chunk):
+            piece = self._payload[start : start + self._chunk]
+            self.consumed += len(piece)
+            yield piece
+
+
+ABSTAIN: Final = '{"outcome": "ABSTAIN", "selected_source_record_ids": []}'
+"""A valid answer, so an oversized envelope is oversized and nothing else."""
+
+
+def padded(size: int) -> bytes:
+    """Return a valid completion envelope padded past any sane budget."""
+    return json.dumps(
+        {"choices": [{"message": {"content": ABSTAIN}}], "padding": "p" * size}
+    ).encode("utf-8")
+
+
+def streaming(
+    stream: RecordingStream, status: int = 200, headers: Mapping[str, str] | None = None
+) -> Callable[[httpx2.Request], httpx2.Response]:
+    """Return a handler that answers with one recorded stream."""
+    return lambda _request: httpx2.Response(status, stream=stream, headers=dict(headers or {}))
+
+
+class TestTheResponseIsReadUnderBudget:
+    """An oversized answer costs a bounded read, not a full download.
+
+    Reading the whole body and then measuring it is not a byte budget. It is a
+    report of how much was already spent, and a host that answers with a
+    gigabyte would be paid in full before being refused.
+    """
+
+    @pytest.fixture
+    def config(self) -> HostedProviderConfig:
+        """Return a configuration with a small, easily crossed budget."""
+        return HostedProviderConfig.from_environment(
+            {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_MAX_RESPONSE_BYTES": "1000"}
+        )
+
+    def test_an_oversized_body_with_no_length_stops_while_streaming(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """No Content-Length at all, which is what a chunked host sends."""
+        stream = RecordingStream(padded(200_000))
+
+        with serving(streaming(stream), config, page) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.RESPONSE_TOO_LARGE
+        assert stream.consumed <= config.max_response_bytes + stream.chunk_size
+        assert stream.consumed < 200_000
+
+    def test_a_forged_small_length_buys_no_extra_reading(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """A host that declares 40 bytes and sends 200 kilobytes.
+
+        The declared size is a convenience for the honest case and is never the
+        thing relied on. A lie about it changes nothing.
+        """
+        stream = RecordingStream(padded(200_000))
+
+        with serving(streaming(stream, headers={"content-length": "40"}), config, page) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.RESPONSE_TOO_LARGE
+        assert stream.consumed <= config.max_response_bytes + stream.chunk_size
+        assert stream.consumed < 200_000
+
+    def test_an_honest_oversized_length_is_never_read_at_all(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """The cheap case: refused before a single byte is asked for."""
+        body = padded(200_000)
+        stream = RecordingStream(body)
+
+        with serving(
+            streaming(stream, headers={"content-length": str(len(body))}), config, page
+        ) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.RESPONSE_TOO_LARGE
+        assert stream.consumed == 0
+
+    @pytest.mark.parametrize("status", [401, 429, 500, 503])
+    def test_a_refused_response_body_is_never_consumed(
+        self, config: HostedProviderConfig, page: LinkProposalRequest, status: int
+    ) -> None:
+        """A host that refuses can also be a host that explains at length.
+
+        None of that explanation is wanted, so none of it is read.
+        """
+        stream = RecordingStream(b"why this failed, at length. " * 20_000)
+
+        with serving(streaming(stream, status=status), config, page) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REFUSED_BY_PROVIDER
+        assert stream.consumed == 0
+
+    def test_a_body_inside_the_budget_is_read_and_answered(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """The ordinary case still works, chunked and all."""
+        body = json.dumps({"choices": [{"message": {"content": ABSTAIN}}]}).encode("utf-8")
+        stream = RecordingStream(body, chunk=16)
+
+        with serving(streaming(stream), config, page) as provider:
+            result = provider.propose(page)
+
+        assert result == {"outcome": "ABSTAIN", "selected_source_record_ids": []}
+        assert stream.consumed == len(body)
+
+    def test_a_body_exactly_at_the_budget_is_accepted(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """The budget is a limit, not a limit minus one."""
+        content = json.dumps({"choices": [{"message": {"content": ABSTAIN}}], "pad": ""})
+        body = content.replace('"pad": ""', '"pad": "' + "p" * (1000 - len(content)) + '"')
+
+        assert len(body.encode("utf-8")) == config.max_response_bytes
+
+        stream = RecordingStream(body.encode("utf-8"), chunk=64)
+        with serving(streaming(stream), config, page) as provider:
+            result = provider.propose(page)
+
+        assert result == {"outcome": "ABSTAIN", "selected_source_record_ids": []}
+
+    def test_one_byte_over_the_budget_is_refused(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Read one byte at a time, so the stopping point is exact."""
+        stream = RecordingStream(b"x" * (config.max_response_bytes + 1), chunk=1)
+
+        with serving(streaming(stream), config, page) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.RESPONSE_TOO_LARGE
+        assert stream.consumed == config.max_response_bytes + 1
+
+    def test_a_nonsense_content_length_is_ignored_and_streaming_decides(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """A header that is not a number is not trusted and not fatal."""
+        stream = RecordingStream(padded(200_000))
+
+        with serving(
+            streaming(stream, headers={"content-length": "not-a-number"}), config, page
+        ) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.RESPONSE_TOO_LARGE
+        assert stream.consumed <= config.max_response_bytes + stream.chunk_size
+
+
+class TestOnlyAuthorisedPagesAreAsked:
+    """Corpus-only is a property of the adapter, not of the command's options.
+
+    A command with no `--database` flag is corpus-only until somebody writes a
+    second caller. An adapter that refuses every page it was not given is
+    corpus-only whoever calls it.
+    """
+
+    @pytest.fixture
+    def corpus_pages(self) -> tuple[LinkProposalRequest, ...]:
+        """Return every page of the shadow corpus, canonically styled."""
+        corpus = build_corpus()
+        return build_requests(FactSnapshot.from_index(corpus.index), corpus.styling)
+
+    @pytest.fixture
+    def authorised(self, corpus_pages: tuple[LinkProposalRequest, ...]) -> frozenset[str]:
+        """Return the allow-list the command would build."""
+        return frozenset(one.request_fingerprint for one in corpus_pages)
+
+    @staticmethod
+    def _counting() -> tuple[list[str], Callable[[httpx2.Request], httpx2.Response]]:
+        """Return a call log and a handler that appends to it."""
+        seen: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen.append(str(request.url))
+            return completion(ABSTAIN)
+
+        return seen, handler
+
+    def test_a_page_from_another_snapshot_is_refused_before_any_request(
+        self, config: HostedProviderConfig, authorised: frozenset[str], page: LinkProposalRequest
+    ) -> None:
+        """The defect this class exists for: a real snapshot reached the wire."""
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+        assert seen == []
+
+    def test_the_same_corpus_under_different_styling_is_refused(
+        self, config: HostedProviderConfig, authorised: frozenset[str]
+    ) -> None:
+        """Same records, different question.
+
+        The allow-list is over request fingerprints, which cover what a provider
+        was shown and not only which records existed. Re-rendering the corpus is
+        a different set of questions and is not authorised by the first set.
+        """
+        corpus = build_corpus()
+        snapshot = FactSnapshot.from_index(corpus.index)
+        restyled = build_requests(snapshot, dict.fromkeys(corpus.styling, ReferenceStyle.SPACED))
+        seen, handler = self._counting()
+
+        assert {one.request_fingerprint for one in restyled}.isdisjoint(authorised)
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            results = [provider.propose(one) for one in restyled]
+
+        assert seen == []
+        assert all(
+            isinstance(one, ProviderFailure) and one.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+            for one in results
+        )
+
+    def test_every_authorised_corpus_page_reaches_the_host(
+        self,
+        config: HostedProviderConfig,
+        authorised: frozenset[str],
+        corpus_pages: tuple[LinkProposalRequest, ...],
+    ) -> None:
+        """The allow-list refuses what it should and nothing else."""
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            results = [provider.propose(one) for one in corpus_pages]
+
+        assert len(seen) == len(corpus_pages) == 24
+        assert all(
+            one == {"outcome": "ABSTAIN", "selected_source_record_ids": []} for one in results
+        )
+
+    def test_an_unauthorised_page_costs_no_budget(
+        self, config: HostedProviderConfig, authorised: frozenset[str], page: LinkProposalRequest
+    ) -> None:
+        """Nothing was sent, so nothing was spent."""
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            provider.propose(page)
+            provider.propose(page)
+
+            assert provider.requests_made == 0
+
+        assert seen == []
+
+    def test_it_is_refused_even_when_the_budget_is_gone(
+        self, authorised: frozenset[str], page: LinkProposalRequest
+    ) -> None:
+        """Authorisation is checked first, so the answer never depends on it.
+
+        Whether an unauthorised page would have fitted the budget is not a
+        question worth asking, and a run that reported BUDGET_EXHAUSTED for a
+        page it was never allowed to ask would be hiding the real problem.
+        """
+        config = HostedProviderConfig.from_environment(
+            {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_MAX_REQUESTS": "1"}
+        )
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+        assert seen == []
+
+    def test_it_cannot_be_built_with_an_empty_allow_list(
+        self, config: HostedProviderConfig
+    ) -> None:
+        """There is no permissive default, including the empty one."""
+        with pytest.raises(NothingAuthorised) as raised:
+            HostedLinkProposalProvider(config, authorised_requests=frozenset())
+
+        assert "permissive default" in str(raised.value)
+
+    def test_it_cannot_be_built_without_an_allow_list_at_all(
+        self, config: HostedProviderConfig
+    ) -> None:
+        """Keyword only and required, so it cannot be forgotten quietly."""
+        with pytest.raises(TypeError):
+            HostedLinkProposalProvider(config)  # type: ignore[call-arg]
+
+    def test_the_allow_list_cannot_be_widened_after_construction(
+        self, config: HostedProviderConfig, authorised: frozenset[str], page: LinkProposalRequest
+    ) -> None:
+        """It is a frozenset, so a caller holding a reference cannot add to it."""
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            with pytest.raises(AttributeError):
+                authorised.add(page.request_fingerprint)  # type: ignore[attr-defined]
+            result = provider.propose(page)
+
+        assert isinstance(result, ProviderFailure)
+        assert seen == []
+
+
+class TestTheAdapterCountsItsOwnFailures:
+    """The adapter knows why a page failed. The shared report does not.
+
+    `ShadowReport` says `PROVIDER_FAILED` for every provider that did not
+    answer, which is right for a report that also scores fixtures and useless
+    for working out why a hosted run went badly. Both are kept, separately.
+    """
+
+    @pytest.fixture
+    def small(self) -> HostedProviderConfig:
+        """Return a configuration with a small response budget."""
+        return HostedProviderConfig.from_environment(
+            {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_MAX_RESPONSE_BYTES": "500"}
+        )
+
+    def test_it_starts_empty(self, config: HostedProviderConfig, page: LinkProposalRequest) -> None:
+        """Rather than reporting zeroes for kinds that have not occurred."""
+        with serving(answering(ABSTAIN), config, page) as provider:
+            assert provider.typed_failure_counts == {}
+
+    def test_an_answered_page_counts_nothing(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Only failures are counted, so a count is a count of problems."""
+        with serving(answering(ABSTAIN), config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {}
+
+    def test_a_rejected_answer_is_not_a_provider_failure(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """A model that answered badly is not a provider that failed.
+
+        The envelope was fine and the answer arrived. What is wrong with it is
+        the validator's business, and counting it here would put a model's
+        mistake in the column that says the host was unreachable.
+        """
+        with serving(answering('{"outcome": "NONSENSE"}'), config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {}
+
+    def test_a_timeout_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """One test per kind, so no kind is silently uncounted."""
+
+        def slow(_request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ReadTimeout("too slow")
+
+        with serving(slow, config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"TIMED_OUT": 1}
+
+    def test_a_connection_failure_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """A dead socket, which must never read as a rate limit."""
+
+        def unreachable(_request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ConnectError("no route to host")
+
+        with serving(unreachable, config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"CONNECTION_FAILED": 1}
+
+    def test_an_unexpected_http_error_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Something httpx raised that is neither a timeout nor a transport error."""
+
+        def odd(_request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.TooManyRedirects("round and round")
+
+        with serving(odd, config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"RAISED": 1}
+
+    @pytest.mark.parametrize("status", [401, 403, 429, 500])
+    def test_every_refusal_is_counted_as_one_kind(
+        self, config: HostedProviderConfig, page: LinkProposalRequest, status: int
+    ) -> None:
+        """A rate limit and a bad key are one kind here, and not the wrong one.
+
+        They are deliberately indistinguishable: keeping them apart would mean
+        keeping the host's own explanation. Both must still be distinguishable
+        from a host that could not be reached, which is the point.
+        """
+        with serving(lambda _r: httpx2.Response(status, json={}), config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"REFUSED_BY_PROVIDER": 1}
+
+    def test_an_empty_body_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Two hundred and nothing in it."""
+        with serving(lambda _r: httpx2.Response(200, content=b""), config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"RETURNED_NOTHING": 1}
+
+    def test_an_oversized_response_is_counted_as_one(
+        self, small: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Counted from the streaming path, where the read was abandoned."""
+        stream = RecordingStream(padded(200_000))
+
+        with serving(streaming(stream), small, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"RESPONSE_TOO_LARGE": 1}
+
+    def test_an_unreadable_response_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """The envelope was not JSON the adapter understands."""
+        with serving(lambda _r: httpx2.Response(200, content=b"<html>"), config, page) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"UNREADABLE_RESPONSE": 1}
+
+    def test_an_exhausted_budget_is_counted_as_one(self, page: LinkProposalRequest) -> None:
+        """A stop rather than a failure, and still worth seeing in a receipt."""
+        config = HostedProviderConfig.from_environment(
+            {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_MAX_REQUESTS": "1"}
+        )
+
+        with serving(answering(ABSTAIN), config, page) as provider:
+            provider.propose(page)
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"BUDGET_EXHAUSTED": 1}
+
+    def test_an_unauthorised_page_is_counted_as_one(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """The one kind that never involved the host at all."""
+        corpus = build_corpus()
+        authorised = frozenset(
+            one.request_fingerprint
+            for one in build_requests(FactSnapshot.from_index(corpus.index), corpus.styling)
+        )
+
+        with HostedLinkProposalProvider(
+            config,
+            authorised_requests=authorised,
+            transport=httpx2.MockTransport(answering(ABSTAIN)),
+        ) as provider:
+            provider.propose(page)
+
+            assert provider.typed_failure_counts == {"REQUEST_NOT_AUTHORIZED": 1}
+
+    def test_a_mixed_run_keeps_the_kinds_apart(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Which is the whole reason for counting them separately."""
+        answers = iter(
+            [
+                httpx2.Response(429, json={}),
+                httpx2.Response(429, json={}),
+                httpx2.Response(200, content=b""),
+                completion(ABSTAIN),
+            ]
+        )
+
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return next(answers)
+
+        with serving(handler, config, page) as provider:
+            for _ in range(4):
+                provider.propose(page)
+
+            assert provider.typed_failure_counts == {
+                "REFUSED_BY_PROVIDER": 2,
+                "RETURNED_NOTHING": 1,
+            }
+
+    def test_the_counts_carry_no_provider_text(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """Keys are kind names and values are integers. Nothing else fits."""
+
+        def chatty(_request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(
+                429,
+                json={"error": f"rate limited, key {SECRET}"},
+                headers={"x-request-id": SECRET, "retry-after": "60"},
+            )
+
+        with serving(chatty, config, page) as provider:
+            provider.propose(page)
+            counts = provider.typed_failure_counts
+
+        assert counts == {"REFUSED_BY_PROVIDER": 1}
+        assert SECRET not in json.dumps(counts)
+        assert all(isinstance(value, int) for value in counts.values())
+
+    def test_the_kinds_are_bounded_by_the_enum(
+        self, config: HostedProviderConfig, page: LinkProposalRequest
+    ) -> None:
+        """A host cannot grow the counter, whatever it answers with."""
+
+        def varied(request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(int(request.headers.get("x-status", "500")), json={})
+
+        with serving(varied, config, page) as provider:
+            for _ in range(50):
+                provider.propose(page)
+            counts = provider.typed_failure_counts
+
+        assert set(counts) <= {kind.value for kind in FailureKind}
+        assert len(counts) == 1
+
+
+class TestTheEndpointCannotSmuggleASecret:
+    """A base URL is copied into the provenance of every receipt.
+
+    So it is held to the same standard as the key: the three places a token gets
+    put in a URL are refused outright, and a refusal never quotes what it read.
+    """
+
+    LEAKY: Final = (
+        "https://admin:hunter2@api.example.test/v1",
+        "https://admin@api.example.test/v1",
+        "https://:hunter2@api.example.test/v1",
+        "https://api.example.test/v1?api_key=hunter2",
+        "https://api.example.test/v1?token=hunter2&x=1",
+        "https://api.example.test/v1#hunter2",
+        "http://admin:hunter2@localhost:8080/v1",
+    )
+
+    @pytest.mark.parametrize("endpoint", LEAKY)
+    def test_it_is_refused(self, endpoint: str) -> None:
+        """User-info credentials, a query string, or a fragment."""
+        with pytest.raises(MissingConfiguration):
+            HostedProviderConfig.from_environment(
+                {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_BASE_URL": endpoint}
+            )
+
+    @pytest.mark.parametrize("endpoint", LEAKY)
+    def test_the_refusal_quotes_nothing(self, endpoint: str) -> None:
+        """A message about a secret must not contain the secret.
+
+        This is the failure mode the check exists to prevent, so the message is
+        asserted rather than assumed: an error that helpfully echoed the URL it
+        rejected would put the token in a terminal, a log and probably a ticket.
+        """
+        with pytest.raises(MissingConfiguration) as raised:
+            HostedProviderConfig.from_environment(
+                {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_BASE_URL": endpoint}
+            )
+
+        message = str(raised.value)
+
+        assert "hunter2" not in message
+        assert "admin" not in message
+        assert endpoint not in message
+        assert "SETTLEMENT_WITNESS_AI_BASE_URL" in message
+
+    @pytest.mark.parametrize("endpoint", LEAKY)
+    def test_direct_construction_is_refused_too(self, endpoint: str) -> None:
+        """The guarantee is on the model, not on one way of building it.
+
+        `MissingConfiguration` is a `RuntimeError` for exactly this reason.
+        Pydantic wraps a `ValueError` raised in a validator into a message that
+        quotes the input it was given, so a `ValueError` here would echo the URL
+        on this path even though `from_environment` did not.
+        """
+        with pytest.raises(MissingConfiguration) as raised:
+            HostedProviderConfig(
+                base_url=endpoint,
+                api_key=SecretStr(SECRET),
+                model="some-model-1",
+                timeout_seconds=20,
+                max_response_bytes=20000,
+                max_requests=50,
+            )
+
+        assert "hunter2" not in str(raised.value)
+
+    def test_a_url_that_cannot_be_parsed_is_refused(self) -> None:
+        """An unclosed IPv6 bracket, which urlparse itself rejects."""
+        with pytest.raises(MissingConfiguration) as raised:
+            HostedProviderConfig.from_environment(
+                {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_BASE_URL": "https://[::1/v1"}
+            )
+
+        assert "not a URL that can be parsed" in str(raised.value)
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "https://api.example.test/v1",
+            "https://api.example.test/openai/deployments/x",
+            "http://localhost:8080/v1",
+            "http://127.0.0.1:1234/v1",
+        ],
+    )
+    def test_an_ordinary_endpoint_is_still_accepted(self, endpoint: str) -> None:
+        """The check refuses what it should and nothing else."""
+        config = HostedProviderConfig.from_environment(
+            {**ENVIRONMENT, "SETTLEMENT_WITNESS_AI_BASE_URL": endpoint}
+        )
+
+        assert config.base_url == endpoint
+
+    def test_the_provenance_of_a_clean_url_is_the_url(self) -> None:
+        """Recorded verbatim, which is only safe because of the checks above."""
+        config = HostedProviderConfig.from_environment(ENVIRONMENT)
+
+        assert config.provenance()["base_url"] == "https://api.example.test/v1"

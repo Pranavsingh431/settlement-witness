@@ -198,7 +198,9 @@ anything that could read the store.
 answer meets. Nothing is repaired and nothing is retried. The model cannot
 produce a decision, a run, or a row in any table.
 
-The receipt records the model, the settings and the metrics. It carries no
+The receipt records the model, the settings, the metrics and two sets of failure
+counts: what the shared report rejected, and what the adapter itself typed each
+failure as, so a rate limit does not read as an unreachable host. It carries no
 prompt, no response, no header and no key. `results/` is ignored by git.
 
 See [ADR-014](docs/adr/ADR-014-hosted-models-are-corpus-only.md) for why this is

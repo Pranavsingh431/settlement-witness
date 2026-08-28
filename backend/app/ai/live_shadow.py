@@ -16,9 +16,15 @@ Usage::
 
     uv run python -m app.ai.live_shadow --allow-network --output results/live.json
 
+**The provider is authorised for the corpus and nothing else.** The allow-list
+handed to the adapter is derived here, from the same `build_corpus()` and the
+same canonical styling the run is scored against. So a page from anywhere else
+is refused by the adapter itself, not merely absent from this command's options.
+
 The receipt it writes carries the metrics, the configuration that produced them
-and the failure counts. It carries no prompt, no response, no header, no model
-prose and no key.
+and two separate sets of counts: what the shared report rejected, and what the
+adapter itself typed each failure as. It carries no prompt, no response, no
+header, no model prose and no key.
 """
 
 import argparse
@@ -27,14 +33,29 @@ import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 
 import httpx2
 from pydantic import BaseModel, ConfigDict
 
+from app.ai.candidates import build_requests
 from app.ai.corpus import CORPUS_VERSION, build_corpus
 from app.ai.evaluation import SHADOW_HARNESS_VERSION, ShadowReport, evaluate
 from app.ai.hosted import HostedLinkProposalProvider, HostedProviderConfig, MissingConfiguration
 from app.reconciliation.snapshot import FactSnapshot
+
+LIVE_RECEIPT_VERSION: Final = "2.0.0"
+"""The schema of the local run receipt.
+
+Versioned because a receipt is an artifact somebody keeps, and a reader needs to
+know whether the file in front of them has the fields they expect.
+
+1.0.0 was the unversioned shape Phase 10 wrote: one `failure_counts` field
+holding the shared report's rejection codes. 2.0.0 renames that to
+`report_rejection_counts`, adds `typed_failure_counts` from the adapter, and
+adds this field. A 1.0.0 receipt cannot be read as a 2.0.0 one and is not
+converted: there is no reason to migrate a local artifact of a run that already
+happened."""
 
 
 class LiveShadowRunReceipt(BaseModel):
@@ -48,6 +69,9 @@ class LiveShadowRunReceipt(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    receipt_version: str
+    """The schema of this file. See `LIVE_RECEIPT_VERSION`."""
+
     harness_version: str
     corpus_version: str
     provider_name: str
@@ -57,8 +81,23 @@ class LiveShadowRunReceipt(BaseModel):
     which has no branch that could include the key."""
 
     requests_made: int
-    failure_counts: dict[str, int]
-    """How many pages ended in each typed failure, by kind."""
+    report_rejection_counts: dict[str, int]
+    """How many pages the shared report rejected, by rejection code.
+
+    Generic on purpose. `PROVIDER_FAILED` is the right word for a report that
+    also scores fixtures, where a timeout and a refusal really are the same
+    fact. It is the wrong word for diagnosing a hosted run, which is what the
+    next field is for."""
+
+    typed_failure_counts: dict[str, int]
+    """How many pages ended in each `FailureKind`, as the adapter typed it.
+
+    Read from the adapter rather than derived from the report, because the
+    report never held it. A rate limit, an unreachable host, a timeout and an
+    unauthorised page are four different problems and four different fixes, and
+    all four are one word in the field above.
+
+    Counts only. No status text, no error body, no header, no provider prose."""
 
     report: ShadowReport
     ran_at: str
@@ -97,8 +136,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def failure_counts(report: ShadowReport) -> dict[str, int]:
-    """Return how many pages ended in each rejection, by name."""
+def rejection_counts(report: ShadowReport) -> dict[str, int]:
+    """Return how many pages the report rejected, by rejection code."""
     counts: dict[str, int] = {}
     for page in report.page_outcomes:
         if page.rejection is not None:
@@ -144,19 +183,30 @@ def run(
 
     corpus = build_corpus()
     snapshot = FactSnapshot.from_index(corpus.index)
+    # The allow-list the adapter is held to. Built from the same corpus, the
+    # same snapshot and the same styling the run is scored against, so it holds
+    # exactly the pages `evaluate` is about to ask about and no others.
+    authorised = frozenset(
+        page.request_fingerprint for page in build_requests(snapshot, corpus.styling)
+    )
 
-    with HostedLinkProposalProvider(config, transport=transport) as provider:
+    with HostedLinkProposalProvider(
+        config, authorised_requests=authorised, transport=transport
+    ) as provider:
         report = evaluate(snapshot, provider, corpus.expected_actions, corpus.styling)
         made = provider.requests_made
+        typed = provider.typed_failure_counts
 
     receipt = LiveShadowRunReceipt(
+        receipt_version=LIVE_RECEIPT_VERSION,
         harness_version=SHADOW_HARNESS_VERSION,
         corpus_version=CORPUS_VERSION,
         provider_name=provider.identity.name,
         model_id=config.model,
         configuration=config.provenance(),
         requests_made=made,
-        failure_counts=failure_counts(report),
+        report_rejection_counts=rejection_counts(report),
+        typed_failure_counts=typed,
         report=report,
         ran_at=datetime.now(UTC).isoformat(),
     )
@@ -195,8 +245,10 @@ def describe(receipt: LiveShadowRunReceipt) -> str:
         f"abstention pages : {rate('abstention_page_rate')}",
         f"invalid pages    : {rate('invalid_page_rate')}",
     ]
-    if receipt.failure_counts:
-        lines.append(f"failures         : {receipt.failure_counts}")
+    if receipt.report_rejection_counts:
+        lines.append(f"report rejections: {receipt.report_rejection_counts}")
+    if receipt.typed_failure_counts:
+        lines.append(f"typed failures   : {receipt.typed_failure_counts}")
     lines.append(
         "This is one run over a generated shadow corpus. It is not "
         "reconciliation accuracy and not production performance."

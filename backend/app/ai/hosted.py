@@ -22,10 +22,23 @@ stripped, extra keys are not trimmed, identifiers are not guessed at, and
 nothing is retried. A repaired answer is partly the model's and partly ours, and
 a report over those cannot say which.
 
+**It may only ask about pages it was authorised to ask about.** A provider is
+built with an allow-list of request fingerprints and refuses anything outside
+it before a header exists or a socket is opened. The command that uses this
+derives that list from `build_corpus()`, so corpus-only is a property of the
+adapter rather than a property of which arguments the command happens to
+offer.
+
+**It reads a bounded number of bytes.** The response is streamed and abandoned
+at the budget plus whatever chunk crossed it. A host that answers with a
+gigabyte costs a bounded read, whether or not it declared the size honestly.
+
 **The key is never written down.** It is held in a `SecretStr`, read once when
 the request is built, and appears in no repr, no serialisation, no log, no
 exception and no artifact. A test asserts that across every configuration and
-failure path.
+failure path. The endpoint is held to the same standard: a base URL carrying
+user-info credentials, a query string or a fragment is refused, because those
+are places a token is put and the endpoint is copied into a run receipt.
 """
 
 import json
@@ -108,6 +121,21 @@ class MissingConfiguration(RuntimeError):
 
     Names the variables that were missing or wrong and never their values, so
     that a message about a bad key cannot contain the key.
+
+    Deliberately not a `ValueError`. Pydantic wraps a `ValueError` raised inside
+    a validator into a `ValidationError` whose text echoes the input it was
+    given, and the input here is an endpoint that may carry a password. A
+    `RuntimeError` propagates out of a validator unchanged, so the only text
+    anyone sees is the text written here.
+    """
+
+
+class NothingAuthorised(ValueError):
+    """Raised when a provider is built with an empty allow-list.
+
+    There is no permissive default. A provider that could ask about anything is
+    exactly the provider this design does not have, so an empty list is a
+    programming error rather than a permissive configuration.
     """
 
 
@@ -134,28 +162,56 @@ class HostedProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def _endpoint_is_safe(self) -> Self:
-        """Refuse an endpoint that would send the key in the clear.
+        """Refuse an endpoint that would send a secret in the clear or carry one.
 
         Plain HTTP is allowed only to the local machine, which is for a fake
         server during development. Anywhere else, a header carrying an API key
         must be encrypted.
+
+        A base URL is also refused when it carries user-info credentials, a
+        query string or a fragment. Those are the three places a token gets put
+        when somebody is handed a "just use this URL" endpoint, and this URL is
+        copied verbatim into the provenance of every run receipt. There is no
+        stripping: a URL that carries a secret is a configuration mistake, and
+        quietly removing the secret would leave the operator believing they had
+        configured something they had not.
+
+        Raises:
+            MissingConfiguration: Naming the variable and the problem. Never the
+                value, because the value is the part that might be a secret.
         """
-        parsed = urlparse(self.base_url)
+        try:
+            parsed = urlparse(self.base_url)
+        except ValueError as error:
+            # urlparse refuses a malformed bracketed IPv6 host. Re-raised here
+            # so the only message anyone sees is one written in this file.
+            message = f"{_ENV['base_url']} is not a URL that can be parsed"
+            raise MissingConfiguration(message) from error
         if parsed.scheme not in {"http", "https"}:
-            message = (
-                f"{_ENV['base_url']} must be an http or https URL; "
-                f"the scheme given was {parsed.scheme!r}"
-            )
-            raise ValueError(message)
-        if parsed.scheme == "http" and (parsed.hostname or "") not in LOCAL_HOSTS:
+            message = f"{_ENV['base_url']} must be an http or https URL"
+            raise MissingConfiguration(message)
+        if not parsed.hostname:
+            message = f"{_ENV['base_url']} names no host"
+            raise MissingConfiguration(message)
+        if parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS:
             message = (
                 f"{_ENV['base_url']} must use https unless it names a local test "
                 f"endpoint; {sorted(LOCAL_HOSTS)} may use http"
             )
-            raise ValueError(message)
-        if not parsed.hostname:
-            message = f"{_ENV['base_url']} names no host"
-            raise ValueError(message)
+            raise MissingConfiguration(message)
+        for part, description in (
+            (parsed.username or parsed.password, "user-info credentials"),
+            (parsed.query, "a query string"),
+            (parsed.fragment, "a fragment"),
+        ):
+            if part:
+                message = (
+                    f"{_ENV['base_url']} must not carry {description}, because a "
+                    f"secret put there would be copied into every run receipt. "
+                    f"Give the endpoint alone and put the key in "
+                    f"{_ENV['api_key']}."
+                )
+                raise MissingConfiguration(message)
         return self
 
     @classmethod
@@ -264,23 +320,43 @@ class HostedLinkProposalProvider:
     """
 
     def __init__(
-        self, config: HostedProviderConfig, transport: httpx2.BaseTransport | None = None
+        self,
+        config: HostedProviderConfig,
+        *,
+        authorised_requests: frozenset[str],
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         """Build a client for one run.
 
         Args:
             config: A validated configuration. Validation happens before this,
                 so a client is never constructed against a bad endpoint.
+            authorised_requests: The `request_fingerprint` of every page this
+                provider may ask about. Required and keyword only, because a
+                provider that will accept any page is the one thing this class
+                must not be able to become by accident. Immutable, so a caller
+                cannot widen it after construction.
             transport: Injected in tests so nothing reaches the network. In a
                 live run this is None and httpx opens real connections.
+
+        Raises:
+            NothingAuthorised: When the allow-list is empty.
         """
+        if not authorised_requests:
+            message = (
+                "a hosted provider needs the fingerprints of the pages it may "
+                "ask about; there is no permissive default"
+            )
+            raise NothingAuthorised(message)
         self._config = config
+        self._authorised = authorised_requests
         self._client = httpx2.Client(
             timeout=config.timeout_seconds,
             transport=transport,
             follow_redirects=False,
         )
         self._requests_made = 0
+        self._typed_failures: dict[str, int] = {}
 
     @property
     def identity(self) -> ProviderIdentity:
@@ -291,6 +367,29 @@ class HostedLinkProposalProvider:
     def requests_made(self) -> int:
         """Return how many requests this run has sent."""
         return self._requests_made
+
+    @property
+    def typed_failure_counts(self) -> dict[str, int]:
+        """Return how many pages ended in each `FailureKind`, by name.
+
+        The adapter knows why each page failed and the shared shadow report does
+        not: it records one generic rejection for every provider that did not
+        answer, which is the right thing for a report that also scores fixtures.
+        Kept here so a live receipt can say whether a run was rate limited or
+        could not reach the host at all, which are the same word in the report
+        and very different problems.
+
+        Bounded by construction. There are as many keys as there are members of
+        `FailureKind`, whatever a host does, and each value is a count. No
+        response body, no header, no status text and no provider prose is
+        counted, stored or reachable from here.
+        """
+        return dict(sorted(self._typed_failures.items()))
+
+    def _failed(self, kind: FailureKind) -> ProviderFailure:
+        """Count one typed failure and return it."""
+        self._typed_failures[kind.value] = self._typed_failures.get(kind.value, 0) + 1
+        return ProviderFailure(kind=kind)
 
     def close(self) -> None:
         """Release the connection pool."""
@@ -313,33 +412,40 @@ class HostedLinkProposalProvider:
         exception escaping here would end the run at whichever page happened to
         fail first.
 
+        A page outside the allow-list is refused first, before the budget is
+        consulted, before a header exists and before the client is touched. The
+        ordering is the point: whether an unauthorised page would have fitted
+        the budget is not a question worth asking.
+
         Args:
             request: The page to ask about.
 
         Returns:
             The raw parsed content, or a `ProviderFailure`.
         """
+        if request.request_fingerprint not in self._authorised:
+            return self._failed(FailureKind.REQUEST_NOT_AUTHORIZED)
         if self._requests_made >= self._config.max_requests:
-            return ProviderFailure(kind=FailureKind.BUDGET_EXHAUSTED)
+            return self._failed(FailureKind.BUDGET_EXHAUSTED)
 
         self._requests_made += 1
         try:
-            response = self._client.post(
+            with self._client.stream(
+                "POST",
                 f"{self._config.base_url}/chat/completions",
                 headers={
                     "authorization": f"Bearer {self._config.api_key.get_secret_value()}",
                     "content-type": "application/json",
                 },
                 json=self._body(request),
-            )
+            ) as response:
+                return self._read(response)
         except httpx2.TimeoutException:
-            return ProviderFailure(kind=FailureKind.TIMED_OUT)
+            return self._failed(FailureKind.TIMED_OUT)
         except httpx2.TransportError:
-            return ProviderFailure(kind=FailureKind.CONNECTION_FAILED)
+            return self._failed(FailureKind.CONNECTION_FAILED)
         except httpx2.HTTPError:
-            return ProviderFailure(kind=FailureKind.RAISED)
-
-        return self._read(response)
+            return self._failed(FailureKind.RAISED)
 
     def _body(self, request: LinkProposalRequest) -> dict[str, object]:
         """Return the request body.
@@ -371,31 +477,39 @@ class HostedLinkProposalProvider:
         }
 
     def _read(self, response: httpx2.Response) -> ProviderResult:
-        """Turn one HTTP response into a selection payload or a typed failure.
+        """Turn one streamed HTTP response into a selection or a typed failure.
 
         Keeps nothing from the response but the parsed selection. Not the body,
         not the headers, not the status text, and not the host's own error
         prose: none of that belongs beside a reconciliation result, and a
         message written by whatever failed is the least trustworthy thing in
         the exchange.
+
+        The response arrives unread. A refusal is returned without its body ever
+        being asked for, and a success is read chunk by chunk and abandoned the
+        moment it crosses the budget, so the most an oversized answer can cost
+        is the budget plus the one chunk that crossed it.
         """
         if response.status_code // 100 != 2:
-            return ProviderFailure(kind=FailureKind.REFUSED_BY_PROVIDER)
+            # Returned before a single byte of the body is requested. A host
+            # that refuses can also be a host that answers with a gigabyte of
+            # explanation, and none of it would be read anyway.
+            return self._failed(FailureKind.REFUSED_BY_PROVIDER)
 
-        body = response.content
-        if len(body) > self._config.max_response_bytes:
-            return ProviderFailure(kind=FailureKind.RESPONSE_TOO_LARGE)
+        body = self._bounded_body(response)
+        if body is None:
+            return self._failed(FailureKind.RESPONSE_TOO_LARGE)
         if not body:
-            return ProviderFailure(kind=FailureKind.RETURNED_NOTHING)
+            return self._failed(FailureKind.RETURNED_NOTHING)
 
         try:
             envelope = json.loads(body)
         except ValueError:
-            return ProviderFailure(kind=FailureKind.UNREADABLE_RESPONSE)
+            return self._failed(FailureKind.UNREADABLE_RESPONSE)
 
         content = _content_of(envelope)
         if content is None:
-            return ProviderFailure(kind=FailureKind.UNREADABLE_RESPONSE)
+            return self._failed(FailureKind.UNREADABLE_RESPONSE)
 
         try:
             selection: object = json.loads(content)
@@ -404,8 +518,33 @@ class HostedLinkProposalProvider:
             # ours. Returned as a failure of the exchange rather than repaired:
             # stripping fences or hunting for a JSON object inside prose would
             # be this adapter deciding what the model meant.
-            return ProviderFailure(kind=FailureKind.UNREADABLE_RESPONSE)
+            return self._failed(FailureKind.UNREADABLE_RESPONSE)
         return selection
+
+    def _bounded_body(self, response: httpx2.Response) -> bytes | None:
+        """Return the body, or None when it passed the budget.
+
+        Two checks, because one of them can be lied to. A `Content-Length` above
+        the budget ends it before the body is asked for, which is the cheap case
+        and the honest one. A length that is absent, or present and wrong, is
+        caught by the streaming loop instead: bytes are taken a chunk at a time
+        and the read stops as soon as the buffer passes the budget, so a
+        declared size is a convenience and never the thing relied on.
+
+        Nothing survives an abandoned read. The partial buffer goes out of scope
+        with the failure and no part of it is parsed, stored or reported.
+        """
+        budget = self._config.max_response_bytes
+        declared = response.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > budget:
+            return None
+
+        body = bytearray()
+        for chunk in response.iter_bytes():
+            body += chunk
+            if len(body) > budget:
+                return None
+        return bytes(body)
 
 
 def _content_of(envelope: object) -> str | None:

@@ -11,13 +11,15 @@ from pathlib import Path
 import httpx2
 import pytest
 
+from app.ai.candidates import build_requests
 from app.ai.evaluation import SHADOW_HARNESS_VERSION
 from app.ai.hosted import HostedProviderConfig
 from app.ai.live_shadow import (
+    LIVE_RECEIPT_VERSION,
     LiveShadowRunReceipt,
     build_parser,
     describe,
-    failure_counts,
+    rejection_counts,
     run,
 )
 from tests.ai.test_hosted import ENVIRONMENT, SECRET, completion, serving
@@ -161,16 +163,18 @@ class TestTheReceipt:
             '{"outcome": "ABSTAIN", "selected_source_record_ids": []}'
         )
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, *build_requests(snapshot, corpus.styling)) as provider:
             report = evaluate(snapshot, provider, corpus.expected_actions, corpus.styling)
             return LiveShadowRunReceipt(
+                receipt_version=LIVE_RECEIPT_VERSION,
                 harness_version=SHADOW_HARNESS_VERSION,
                 corpus_version=corpus.version,
                 provider_name=provider.identity.name,
                 model_id=config.model,
                 configuration=config.provenance(),
                 requests_made=provider.requests_made,
-                failure_counts=failure_counts(report),
+                report_rejection_counts=rejection_counts(report),
+                typed_failure_counts=provider.typed_failure_counts,
                 report=report,
                 ran_at="2026-08-27T00:00:00+00:00",
             )
@@ -178,19 +182,22 @@ class TestTheReceipt:
     def test_it_declares_only_what_it_should(self) -> None:
         """Asserted over the schema, so a field cannot appear unnoticed."""
         assert set(LiveShadowRunReceipt.model_fields) == {
+            "receipt_version",
             "harness_version",
             "corpus_version",
             "provider_name",
             "model_id",
             "configuration",
             "requests_made",
-            "failure_counts",
+            "report_rejection_counts",
+            "typed_failure_counts",
             "report",
             "ran_at",
         }
 
     def test_it_records_the_versions_and_the_model(self, receipt: LiveShadowRunReceipt) -> None:
         """A number is only interpretable against all three."""
+        assert receipt.receipt_version == LIVE_RECEIPT_VERSION == "2.0.0"
         assert receipt.harness_version == SHADOW_HARNESS_VERSION
         assert receipt.corpus_version == "1.0.0"
         assert receipt.model_id == "some-model-1"
@@ -261,10 +268,10 @@ class TestFailureCounting:
         config = HostedProviderConfig.from_environment(ENVIRONMENT)
         handler = lambda _request: httpx2.Response(429, json={})  # noqa: E731
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, *build_requests(snapshot, corpus.styling)) as provider:
             report = evaluate(snapshot, provider, corpus.expected_actions, corpus.styling)
 
-        assert failure_counts(report) == {"PROVIDER_FAILED": 24}
+        assert rejection_counts(report) == {"PROVIDER_FAILED": 24}
 
     def test_it_is_empty_when_every_page_answered(self) -> None:
         """Rather than reporting zeroes for kinds that did not occur."""
@@ -279,10 +286,10 @@ class TestFailureCounting:
             '{"outcome": "ABSTAIN", "selected_source_record_ids": []}'
         )
 
-        with serving(handler, config) as provider:
+        with serving(handler, config, *build_requests(snapshot, corpus.styling)) as provider:
             report = evaluate(snapshot, provider, corpus.expected_actions, corpus.styling)
 
-        assert failure_counts(report) == {}
+        assert rejection_counts(report) == {}
 
 
 class TestTheArtifact:
@@ -297,13 +304,15 @@ class TestTheArtifact:
         snapshot = FactSnapshot.from_index(index_of(settlement_line("sl-1")))
         report: ShadowReport = evaluate(snapshot, FixtureProvider(always_abstains()))
         return LiveShadowRunReceipt(
+            receipt_version=LIVE_RECEIPT_VERSION,
             harness_version=SHADOW_HARNESS_VERSION,
             corpus_version="1.0.0",
             provider_name="openai-compatible",
             model_id="some-model-1",
             configuration=HostedProviderConfig.from_environment(ENVIRONMENT).provenance(),
             requests_made=0,
-            failure_counts={},
+            report_rejection_counts={},
+            typed_failure_counts={},
             report=report,
             ran_at="2026-08-27T00:00:00+00:00",
         )
@@ -454,3 +463,262 @@ class TestTheModuleEntryPoint:
 
         assert caught.value.code == 2
         assert "--allow-network" in capsys.readouterr().err
+
+
+class TestTheProviderIsAuthorisedForTheCorpusOnly:
+    """The command does not merely lack a `--database` flag.
+
+    It hands the adapter the exact pages it may ask about, derived from the same
+    `build_corpus()` the run is scored against. So the guarantee holds through
+    the adapter, and would still hold if somebody wrote a second caller.
+    """
+
+    def test_every_corpus_page_is_authorised(self) -> None:
+        """All 24 reach the host, so the allow-list is not too narrow."""
+        seen: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen.append(str(request.url))
+            return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
+
+        status = run(
+            ["--allow-network"],
+            environment=ENVIRONMENT,
+            transport=httpx2.MockTransport(handler),
+        )
+
+        assert status == 0
+        assert len(seen) == 24
+
+    def test_no_page_is_refused_as_unauthorised(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The allow-list is not too narrow either, asserted on the receipt."""
+        target = tmp_path / "live.json"
+        run(
+            ["--allow-network", "--output", str(target)],
+            environment=ENVIRONMENT,
+            transport=httpx2.MockTransport(
+                lambda _request: completion(
+                    '{"outcome": "ABSTAIN", "selected_source_record_ids": []}'
+                )
+            ),
+        )
+        capsys.readouterr()
+
+        written = json.loads(target.read_text(encoding="utf-8"))
+
+        assert written["typed_failure_counts"] == {}
+
+    def test_the_allow_list_is_the_corpus_and_nothing_else(self) -> None:
+        """Asserted against the corpus directly, rather than through a run.
+
+        The command builds it from `build_corpus()` with the corpus styling, and
+        `evaluate` builds its questions from the same two things, so the two
+        sets are the same set. If they ever drift, every page of a live run
+        would be refused and this says which side moved.
+        """
+        from app.ai.corpus import build_corpus
+        from app.reconciliation.snapshot import FactSnapshot
+
+        corpus = build_corpus()
+        snapshot = FactSnapshot.from_index(corpus.index)
+        pages = build_requests(snapshot, corpus.styling)
+        seen: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen.append(json.loads(request.content)["messages"][1]["content"])
+            return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
+
+        run(["--allow-network"], environment=ENVIRONMENT, transport=httpx2.MockTransport(handler))
+
+        assert len(seen) == len(pages) == 24
+
+    def test_a_page_from_a_real_snapshot_would_be_refused(self) -> None:
+        """The adapter the command builds refuses anything else.
+
+        Built here the way `run` builds it, then asked about a page from an
+        ordinary snapshot. Nothing reaches the transport.
+        """
+        from app.ai.corpus import build_corpus
+        from app.ai.hosted import HostedLinkProposalProvider
+        from app.ai.provider import FailureKind, ProviderFailure
+        from app.reconciliation.snapshot import FactSnapshot
+        from tests.reconciliation.conftest import index_of, payment_event, payout, settlement_line
+
+        corpus = build_corpus()
+        authorised = frozenset(
+            page.request_fingerprint
+            for page in build_requests(FactSnapshot.from_index(corpus.index), corpus.styling)
+        )
+        real = FactSnapshot.from_index(
+            index_of(
+                payment_event("pe-1", payment_id="pay-1"),
+                settlement_line("sl-1"),
+                payout("po-1"),
+            )
+        )
+        seen: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen.append(str(request.url))
+            return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
+
+        with HostedLinkProposalProvider(
+            HostedProviderConfig.from_environment(ENVIRONMENT),
+            authorised_requests=authorised,
+            transport=httpx2.MockTransport(handler),
+        ) as provider:
+            result = provider.propose(build_requests(real)[0])
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+        assert seen == []
+
+
+class TestTypedFailuresReachTheReceipt:
+    """A rate limit and an unreachable host must not read as the same problem.
+
+    They are the same word in the shared report, which is correct there and
+    useless for working out what went wrong with a hosted run.
+    """
+
+    @staticmethod
+    def _receipt_from(transport: httpx2.MockTransport, tmp_path: Path) -> dict[str, object]:
+        """Run the command over that transport and return the written receipt."""
+        target = tmp_path / "live.json"
+        status = run(
+            ["--allow-network", "--output", str(target)],
+            environment=ENVIRONMENT,
+            transport=transport,
+        )
+
+        assert status == 0
+        loaded: dict[str, object] = json.loads(target.read_text(encoding="utf-8"))
+        return loaded
+
+    def test_a_rate_limit_is_not_reported_as_a_connection_failure(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The defect, from the other end: 429 is a refusal, not a dead socket."""
+        receipt = self._receipt_from(
+            httpx2.MockTransport(lambda _request: httpx2.Response(429, json={})), tmp_path
+        )
+        capsys.readouterr()
+
+        assert receipt["typed_failure_counts"] == {"REFUSED_BY_PROVIDER": 24}
+        assert receipt["report_rejection_counts"] == {"PROVIDER_FAILED": 24}
+
+    def test_a_dead_socket_is_a_connection_failure(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The same generic rejection, a different typed cause."""
+
+        def unreachable(_request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ConnectError("no route to host")
+
+        receipt = self._receipt_from(httpx2.MockTransport(unreachable), tmp_path)
+        capsys.readouterr()
+
+        assert receipt["typed_failure_counts"] == {"CONNECTION_FAILED": 24}
+        assert receipt["report_rejection_counts"] == {"PROVIDER_FAILED": 24}
+
+    def test_a_timeout_is_neither(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Three causes, three words, one generic rejection."""
+
+        def slow(_request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ReadTimeout("too slow")
+
+        receipt = self._receipt_from(httpx2.MockTransport(slow), tmp_path)
+        capsys.readouterr()
+
+        assert receipt["typed_failure_counts"] == {"TIMED_OUT": 24}
+
+    def test_a_mixed_run_keeps_both_sets_of_counts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Some refused, some unreadable, some answered.
+
+        The generic column says how many pages produced nothing usable. The
+        typed column says why, and the two are not derivable from each other.
+        """
+        calls = {"count": 0}
+
+        def mixed(_request: httpx2.Request) -> httpx2.Response:
+            calls["count"] += 1
+            if calls["count"] % 3 == 0:
+                return httpx2.Response(429, json={})
+            if calls["count"] % 3 == 1:
+                return httpx2.Response(200, content=b"<html>not json</html>")
+            return completion('{"outcome": "ABSTAIN", "selected_source_record_ids": []}')
+
+        receipt = self._receipt_from(httpx2.MockTransport(mixed), tmp_path)
+        capsys.readouterr()
+
+        typed = receipt["typed_failure_counts"]
+        assert typed == {"REFUSED_BY_PROVIDER": 8, "UNREADABLE_RESPONSE": 8}
+        assert receipt["report_rejection_counts"] == {"PROVIDER_FAILED": 16}
+
+    def test_the_summary_shows_both(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """So a person reading the terminal sees the cause, not just the count."""
+        self._receipt_from(
+            httpx2.MockTransport(lambda _request: httpx2.Response(429, json={})), tmp_path
+        )
+        printed = capsys.readouterr().out
+
+        assert "report rejections: {'PROVIDER_FAILED': 24}" in printed
+        assert "typed failures   : {'REFUSED_BY_PROVIDER': 24}" in printed
+
+    def test_neither_column_carries_provider_text(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A host that explains itself at length, in a header and a body."""
+
+        def chatty(_request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(
+                429,
+                json={"error": {"message": f"slow down, key {SECRET}", "code": "rate_limit"}},
+                headers={"x-request-id": SECRET, "retry-after": "60"},
+            )
+
+        target = tmp_path / "live.json"
+        run(
+            ["--allow-network", "--output", str(target)],
+            environment=ENVIRONMENT,
+            transport=httpx2.MockTransport(chatty),
+        )
+        capsys.readouterr()
+
+        written = target.read_text(encoding="utf-8")
+
+        assert SECRET not in written
+        assert "slow down" not in written
+        assert "rate_limit" not in written
+        assert "retry-after" not in written.lower()
+
+    def test_the_receipt_declares_its_version(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A reader needs to know which shape the file in front of them is."""
+        receipt = self._receipt_from(
+            httpx2.MockTransport(
+                lambda _request: completion(
+                    '{"outcome": "ABSTAIN", "selected_source_record_ids": []}'
+                )
+            ),
+            tmp_path,
+        )
+        capsys.readouterr()
+
+        assert receipt["receipt_version"] == LIVE_RECEIPT_VERSION == "2.0.0"
+
+    def test_the_old_field_name_is_gone(self) -> None:
+        """Renamed rather than kept as an alias.
+
+        `failure_counts` held the generic rejection codes and read as though it
+        held the typed ones, which is how the defect survived a phase. Leaving
+        the name in place beside the new field would keep the confusion.
+        """
+        assert "failure_counts" not in LiveShadowRunReceipt.model_fields

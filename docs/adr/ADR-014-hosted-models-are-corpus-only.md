@@ -90,3 +90,66 @@ text in the exchange and does not belong beside a reconciliation result.
   a precaution, not a solution to prompt injection. It removes the string
   concatenation a value could escape from; it does not make a model immune to
   text that reads like an instruction.
+
+## Amendment, Phase 10.1
+
+Three of the decisions above were argued correctly and implemented weakly. The
+original text is left as written, because a record of what was decided is worth
+more than a record edited to look right afterwards.
+
+### Corpus-only is now enforced by the adapter, not only by the caller
+
+Section 1 argued that there should be no handle to misuse rather than a rule
+against misusing one, then relied on the CLI having no data argument. The
+adapter itself accepted any `LinkProposalRequest` and sent it. So the guarantee
+held for exactly as long as there was one caller, which is a rule about
+discipline dressed as a structural property.
+
+`HostedLinkProposalProvider` now requires a non-empty immutable allow-list of
+request fingerprints at construction and refuses anything outside it as
+`REQUEST_NOT_AUTHORIZED`, before a header is built or a socket is opened. The
+command derives that list from `build_corpus()` with the corpus styling. A
+second caller has to state which pages it may ask about, in code, and cannot
+state "anything".
+
+The allow-list is over request fingerprints rather than record IDs, so the same
+corpus rendered differently is a different set of questions and is not
+authorised by the first set.
+
+### The response budget is enforced while reading, not after
+
+Section 3 described a byte budget. The adapter asked httpx for the whole body
+and then measured it, which reports what was already spent rather than limiting
+it: a 200 kilobyte answer against a 1 kilobyte budget was fully downloaded
+before being refused.
+
+The response is now streamed. A non-2xx body is never read at all. An honest
+`Content-Length` above the budget ends the exchange before the body is
+requested. An absent or forged one is caught by the read itself, which stops as
+soon as the buffer passes the budget, so the most an oversized answer costs is
+the budget plus the one chunk that crossed it.
+
+### Typed failures survive into the receipt
+
+Section 3 said a host's error prose is the least trustworthy text in the
+exchange, which is still true, and the adapter still keeps none of it. But the
+run receipt recorded only the shared report's generic `PROVIDER_FAILED`, so a
+rate limit and an unreachable host were the same word. Those are different
+problems with different fixes, and neither is the host's prose.
+
+The adapter now keeps its own counter of `FailureKind` outcomes, bounded by the
+enum, values are integers, and the receipt carries it as `typed_failure_counts`
+beside the report's `report_rejection_counts`. `ShadowReport` is unchanged:
+generic is the right word for a report that also scores fixtures.
+
+### The endpoint is held to the key's standard
+
+Not in the original text at all. The base URL is copied verbatim into every
+receipt's provenance, and user-info credentials, a query string and a fragment
+are the three places a token is put in a URL. All three are now refused, and the
+refusal names the variable rather than quoting what it read.
+
+That last part is why `MissingConfiguration` is a `RuntimeError` rather than a
+`ValueError`: pydantic wraps a `ValueError` raised inside a validator into a
+message that quotes the input it was given, which for this field is the thing
+that must not be quoted.

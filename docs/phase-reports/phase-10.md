@@ -2,6 +2,7 @@
 
 - Date: 2026-08-28
 - Exit gate: passed, with one part not performed. See "Exit gate status".
+- **Three claims below were corrected in [Phase 10.1](phase-10-1.md).** See "Corrected later".
 - Domain contract 5.0.0, parser 3.0.0, baseline 1.0.0, all unchanged
 - Shadow link harness 5.0.0, shadow corpus 1.0.0, both unchanged
 - New: `ADR-014`, adapter `openai-compatible`
@@ -249,6 +250,10 @@ fixture runs and versioned, so distinguishing a timeout from a 401 in the
 receipt would change that contract. Left as it is, and recorded here rather than
 changed quietly.
 
+> Corrected in Phase 10.1. The reasoning about the shared report was right and
+> the conclusion was wrong: the fix was never to change `ShadowReport`, it was
+> to carry the adapter's own counts alongside it. The receipt now has both.
+
 **JSON framing is not a solution to prompt injection.** Sending data as
 structured JSON in a message separate from the instruction removes the string
 concatenation a value could escape from. It does not make a model immune to text
@@ -281,8 +286,26 @@ measurement.
 | No AI endpoint, no persistence, no path to a decision | Passed | Isolation suite; no route, no model, no writer added |
 | A live hosted run with a real score | **Not performed** | No credentials configured. No number invented. |
 
+## Corrected later
+
+Three claims in this report were true of the intent and not of the code. They
+are left where they are, with this section saying what was actually the case,
+because a phase report edited to look right afterwards is not a record.
+
+| Claimed here | What was true | Fixed in |
+| --- | --- | --- |
+| "a byte budget on each response", and `RESPONSE_TOO_LARGE` meaning a body "abandoned unread" | The whole body was downloaded, then measured. A 200 kilobyte answer against a 1 kilobyte budget cost 200 kilobytes. | [Phase 10.1](phase-10-1.md), part A |
+| "Reachable only through a new CLI that evaluates `build_corpus()`", passed on the grounds that the command has no data argument | True of the command, not of the adapter. `HostedLinkProposalProvider.propose()` accepted a page built from any snapshot and sent it. | [Phase 10.1](phase-10-1.md), part B |
+| "every failure is typed" | The adapter typed them. The receipt did not carry the type, so every one of them read as `PROVIDER_FAILED`. | [Phase 10.1](phase-10-1.md), part C |
+
+The exit gate rows for those three requirements should be read as passing
+against the tests that existed, which is a weaker statement than the rows make
+it sound. Phase 10.1 reproduces all three as failing tests first.
+
 ## Unresolved
 
 Nothing blocking. The one open item is the coarse failure counting in the
 receipt, described above, which is a deliberate choice to leave the versioned
 harness contract alone rather than a defect.
+
+> That item is closed by Phase 10.1.

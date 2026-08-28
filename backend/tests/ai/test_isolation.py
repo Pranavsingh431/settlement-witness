@@ -17,7 +17,7 @@ import httpx2
 import pytest
 from sqlalchemy import Engine
 
-from app.ai.candidates import build_request, truth_for
+from app.ai.candidates import build_request, build_requests, truth_for
 from app.ai.evaluation import evaluate
 from app.ai.provider import (
     FailureKind,
@@ -320,6 +320,9 @@ class TestTheHostedAdapterIsAlsoInert:
             "server error": lambda _request: httpx2.Response(500, json={}),
             "empty body": lambda _request: httpx2.Response(200, content=b""),
             "malformed envelope": lambda _request: httpx2.Response(200, json={"nope": True}),
+            "oversized stream": lambda _request: httpx2.Response(
+                200, content=b'{"choices": [{"message": {"content": "' + b"p" * 200_000 + b'"}}]}'
+            ),
         }
 
     def test_every_hosted_behaviour_leaves_the_store_untouched(self, loaded_engine: Engine) -> None:
@@ -333,11 +336,16 @@ class TestTheHostedAdapterIsAlsoInert:
         corpus = build_corpus()
         corpus_snapshot = FactSnapshot.from_index(corpus.index)
         config = HostedProviderConfig.from_environment(ENVIRONMENT)
+        authorised = frozenset(
+            page.request_fingerprint for page in build_requests(corpus_snapshot, corpus.styling)
+        )
         before = store_state(loaded_engine)
 
         for name, handler in self._handlers().items():
             with HostedLinkProposalProvider(
-                config, transport=httpx2.MockTransport(handler)
+                config,
+                authorised_requests=authorised,
+                transport=httpx2.MockTransport(handler),
             ) as provider:
                 evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
             assert store_state(loaded_engine) == before, f"{name} changed the store"
@@ -353,11 +361,14 @@ class TestTheHostedAdapterIsAlsoInert:
         corpus = build_corpus()
         corpus_snapshot = FactSnapshot.from_index(corpus.index)
         config = HostedProviderConfig.from_environment(ENVIRONMENT)
+        authorised = frozenset(
+            page.request_fingerprint for page in build_requests(corpus_snapshot, corpus.styling)
+        )
         before = baseline_decisions(loaded_engine)
 
         for handler in self._handlers().values():
             with HostedLinkProposalProvider(
-                config, transport=httpx2.MockTransport(handler)
+                config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
             ) as provider:
                 evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
 
@@ -375,3 +386,47 @@ class TestTheHostedAdapterIsAlsoInert:
             for name in tables
             for word in ("proposal", "model", "hosted", "live", "shadow")
         )
+
+    def test_a_refused_unauthorised_page_writes_nothing_either(
+        self, loaded_engine: Engine, live_snapshot: FactSnapshot
+    ) -> None:
+        """The one path that never reaches the transport at all.
+
+        A page from a real snapshot, refused by the adapter before a header
+        exists. Nothing is sent and nothing is written, and the second half is
+        worth asserting because a refusal is still a code path that ran against
+        a database that was open.
+        """
+        import httpx2
+
+        from app.ai.corpus import build_corpus
+        from app.ai.hosted import HostedLinkProposalProvider, HostedProviderConfig
+        from app.ai.provider import FailureKind, ProviderFailure
+        from tests.ai.test_hosted import ENVIRONMENT
+
+        corpus = build_corpus()
+        authorised = frozenset(
+            page.request_fingerprint
+            for page in build_requests(FactSnapshot.from_index(corpus.index), corpus.styling)
+        )
+        before = store_state(loaded_engine)
+        seen: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen.append(str(request.url))
+            return httpx2.Response(200, json={})
+
+        with HostedLinkProposalProvider(
+            HostedProviderConfig.from_environment(ENVIRONMENT),
+            authorised_requests=authorised,
+            transport=httpx2.MockTransport(handler),
+        ) as provider:
+            results = [provider.propose(page) for page in build_requests(live_snapshot)]
+
+        assert results
+        assert all(
+            isinstance(one, ProviderFailure) and one.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+            for one in results
+        )
+        assert seen == []
+        assert store_state(loaded_engine) == before
