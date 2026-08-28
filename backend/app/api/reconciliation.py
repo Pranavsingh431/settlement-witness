@@ -1,9 +1,14 @@
 """Reconciliation run endpoints.
 
-One create path and three read paths. There is no endpoint that changes a
-stored decision. Human override is a real need and it is deferred deliberately:
-a mutable resolve endpoint would make a stored conclusion editable, and the
-whole contract rests on conclusions being immutable and replayable.
+One create path and three read paths. There is no endpoint here that changes a
+stored decision, and there is no plan for one: a mutable resolve endpoint would
+make a stored conclusion editable, and the whole contract rests on conclusions
+being immutable and replayable.
+
+What people do about a conclusion lives in `app.api.review`, under its own
+prefix, and appends beside a decision rather than to it. The separation is
+deliberate: it keeps the claim that every reconciliation route is a read
+checkable by looking at this file.
 """
 
 from typing import Annotated

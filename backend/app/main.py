@@ -1,6 +1,7 @@
 """FastAPI application factory for the Settlement Witness backend.
 
-Exposes a health endpoint, the CSV import API and the reconciliation run API.
+Exposes a health endpoint, the CSV import API, the reconciliation run API and
+the human review queue.
 
 Uploads are bounded twice. `RequestBodyLimit` counts the bytes of an import
 request before anything parses them, which is what stops a client that sends no
@@ -14,9 +15,11 @@ and it must not be exposed to a network where either assumption fails. Adding
 authentication is real work that has not been done, and pretending otherwise by
 adding a token check without a tenancy model would be worse than saying so.
 
-There is no endpoint that changes a stored decision. Human override is a real
-need and is deferred deliberately: the contract rests on conclusions being
-immutable and replayable, and a mutable resolve endpoint would end that.
+There is no endpoint that changes a stored decision. The review API appends
+human workflow events beside a decision and cannot alter one: there is no field
+in its command that could carry a status, and the table it writes to refuses
+UPDATE and DELETE at the database. A genuine resolution would be a new source
+record, imported and reconciled into a new run. It would never be a button.
 """
 
 from typing import Literal
@@ -32,6 +35,7 @@ from app.api.body_limit import RequestBodyLimit, post_to
 from app.api.imports import IMPORTS_PATH
 from app.api.imports import router as imports_router
 from app.api.reconciliation import router as reconciliation_router
+from app.api.review import router as review_router
 from app.config import AppEnv, Settings, get_settings
 from app.storage.database import create_database_engine, database_url_for
 
@@ -137,6 +141,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
 
     application.include_router(imports_router)
     application.include_router(reconciliation_router)
+    application.include_router(review_router)
     return application
 
 

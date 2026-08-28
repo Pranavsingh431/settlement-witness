@@ -1,6 +1,6 @@
 """Database tables.
 
-Four tables, all append-only, in two pairs.
+Five tables, all append-only.
 
 ``source_facts`` holds what the system believes. It is append-only: a row is
 inserted once and never updated or deleted. ``import_receipts`` holds what the
@@ -13,6 +13,9 @@ concluded. A run is a statement about one snapshot of facts under one set of
 rule versions, and it is never revised. New facts, or a new rule version,
 produce a new run beside the old one, so the history of what was concluded and
 on what evidence stays intact.
+
+``review_events`` holds what people did about those conclusions. It is the only
+table that is not about the ledger, and it changes nothing in the four above.
 
 Every table here is protected by triggers that abort UPDATE and DELETE.
 """
@@ -194,3 +197,65 @@ class ReconciliationDecisionRow(Base):
 
     Kept whole rather than reassembled from the columns above, so replay uses
     what was decided rather than a reconstruction of it."""
+
+
+class ReviewEventRow(Base):
+    """One recorded human review action against one recorded decision.
+
+    Append-only like everything else here, and for a sharper reason: an editable
+    workflow history would let somebody rewrite what was known and when, beside
+    a decision that cannot be rewritten at all. The asymmetry would be the worst
+    possible one.
+
+    There is no status column. The workflow state is derived from the events
+    every time it is asked for, because a stored status and an event log can
+    disagree and then somebody has to decide which one is true.
+
+    There is no actor column either. This application has no authentication, so
+    there is nobody to record. A column filled with a name typed into a box
+    would look like accountability and provide none.
+    """
+
+    __tablename__ = "review_events"
+    __table_args__ = (
+        # A retry carries the same key and returns the original event. The
+        # database enforces that rather than trusting the service to look first.
+        UniqueConstraint("idempotency_key", name="uq_review_events_idempotency_key"),
+        UniqueConstraint("event_id", name="uq_review_events_event_id"),
+        CheckConstraint(
+            "action IN ('ACKNOWLEDGED', 'REQUEST_EVIDENCE', 'ESCALATED', "
+            "'CLOSED_WITHOUT_OVERRIDE')",
+            name="ck_review_events_action",
+        ),
+        CheckConstraint(
+            "length(decision_fingerprint) = 64", name="ck_review_events_fingerprint_length"
+        ),
+        CheckConstraint("length(command_fingerprint) = 64", name="ck_review_events_command_length"),
+        ForeignKeyConstraint(
+            ["run_id"], ["reconciliation_runs.run_id"], name="fk_review_events_run"
+        ),
+    )
+
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    """Insertion order, assigned by the database.
+
+    The only ordering this workflow uses. Timestamps are recorded and never
+    sorted on: two events in the same millisecond still have an order, and a
+    clock that steps backwards cannot reorder a history."""
+
+    event_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    decision_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    subject_settlement_line_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    decision_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    """A digest of the decision the reviewer was looking at when they acted."""
+
+    action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """A sentence from a person, stored and served as plain text."""
+
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    command_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    """What the command asked for, so a retry can be told from a reuse."""
+
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

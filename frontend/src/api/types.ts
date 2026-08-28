@@ -165,3 +165,74 @@ export interface RunCreation {
   readonly run: RunSummary;
   readonly created: boolean;
 }
+
+/**
+ * The four things a reviewer may record, and nothing else.
+ *
+ * There is no approve, no resolve and no override. `CLOSED_WITHOUT_OVERRIDE` is
+ * named the way it is because the name is the guarantee: an item can leave the
+ * working queue, and the line it points at is still whatever the baseline found
+ * it to be.
+ */
+export const REVIEW_ACTIONS = [
+  'ACKNOWLEDGED',
+  'REQUEST_EVIDENCE',
+  'ESCALATED',
+  'CLOSED_WITHOUT_OVERRIDE',
+] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
+/**
+ * Where an item stands operationally.
+ *
+ * Deliberately no value in common with `DecisionStatus`. A workflow state and a
+ * baseline status are different facts about different things, and a shared word
+ * would be the beginning of a screen that showed one where the other belongs.
+ */
+export type ReviewWorkflowState =
+  'OPEN' | 'ACKNOWLEDGED' | 'WAITING_FOR_EVIDENCE' | 'ESCALATED' | 'CLOSED_WITHOUT_OVERRIDE';
+
+export interface ReviewEventView {
+  readonly event_id: string;
+  /** The order the database assigned. What the timeline is sorted by. */
+  readonly sequence: number;
+  readonly action: ReviewAction;
+  /** A sentence from a person. Rendered as text, never as markup. */
+  readonly note: string | null;
+  readonly recorded_at: string;
+  readonly decision_fingerprint: string;
+}
+
+export interface ReviewQueueItem {
+  readonly run_id: string;
+  /** The baseline's conclusion, unchanged by anything in this response. */
+  readonly decision: DecisionView;
+  /** Echo this back when appending an event, so a stale command is refused. */
+  readonly decision_fingerprint: string;
+  readonly workflow_state: ReviewWorkflowState;
+  /** The same value as `decision.status`, named so it cannot be missed. */
+  readonly baseline_status: DecisionStatus;
+  readonly baseline_unchanged_note: string;
+  readonly events: readonly ReviewEventView[];
+}
+
+export interface ReviewQueuePage {
+  readonly run_id: string;
+  readonly review_contract_version: string;
+  readonly items: readonly ReviewQueueItem[];
+  /** How many reviewable decisions the run holds, not how many it has. */
+  readonly total: number;
+  /** How many of those are not closed. */
+  readonly open_total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly baseline_unchanged_note: string;
+}
+
+export interface ReviewEventReceipt {
+  readonly event: ReviewEventView;
+  readonly workflow_state: ReviewWorkflowState;
+  /** The status after the event, which is the status before it. */
+  readonly baseline_status: DecisionStatus;
+  readonly baseline_unchanged_note: string;
+}

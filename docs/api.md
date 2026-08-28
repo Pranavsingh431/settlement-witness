@@ -1,7 +1,8 @@
 # Backend API
 
-The import and reconciliation API. Examples below are real responses, taken from
-a database holding the example documents in `data/fixtures/ingestion/`.
+The import, reconciliation and human review API. Examples below are real
+responses, taken from a database holding the example documents in
+`data/fixtures/ingestion/`.
 
 ## Before anything else: this is a local backend
 
@@ -12,16 +13,28 @@ either assumption fails.
 That is a statement of fact, not a plan. Adding a token check without a tenancy
 model would look like security and provide none, so nothing has been added.
 
+It follows that a review event records **no reviewer**. There is nobody to
+attribute it to. The review API is a workflow record and not an accountability
+one, and nothing in it answers "who decided this".
+
 **There is no endpoint that changes anything already stored.** Every route is a
-`GET` apart from the two that create something: an import receipt and a
-reconciliation run. Facts, receipts, runs and decisions are all append-only in
-the database, and the API adds no exception.
+`GET` apart from the three that create something: an import receipt, a
+reconciliation run and a human review event. Facts, receipts, runs, decisions
+and review events are all append-only in the database, and the API adds no
+exception.
 
 **There is no endpoint that changes a stored decision.** Every reconciliation
-route is a `GET`, apart from the one that creates a run. Human override is a
-real need and it is deferred deliberately: the contract rests on conclusions
-being immutable and replayable, and a mutable resolve endpoint would end that.
-A test asserts no other verb exists.
+route is a `GET`, apart from the one that creates a run, and a test asserts no
+other verb exists there.
+
+The review API appends human workflow events *beside* a decision and cannot
+alter one. There is no field in its command that could carry a status, no code
+path that writes to the decision tables, and the table it does write to refuses
+UPDATE and DELETE at the database. Closing a review does not resolve a line: the
+line keeps the `EXCEPTION` or `INSUFFICIENT_EVIDENCE` the baseline gave it, and
+every review response says so. Actual resolution would mean a source record
+supporting the line, imported and reconciled into a new run. See
+[ADR-015](adr/ADR-015-review-events-annotate-they-do-not-decide.md).
 
 ## What responses contain, and what they do not
 
@@ -419,6 +432,126 @@ it did.
 404 if either the run or the decision is unknown. The run is checked first, so
 the message names the right thing.
 
+## `GET /v1/review/runs/{run_id}/queue`
+
+The decisions of one recorded run that need a person: `EXCEPTION` and
+`INSUFFICIENT_EVIDENCE`, and nothing else. A resolved line is not work, and a
+pending one is waiting for information that is expected to arrive.
+
+Query parameters: `limit` (1 to 100, default 20) and `offset`. Ordered by
+settlement line ID, which is how the baseline emits decisions. The order does
+not move when somebody acts on an item, so a page boundary lands in the same
+place on every call.
+
+```json
+{
+  "run_id": "fd0c9443bb7e4e5fb4eee88a79b6dc74",
+  "review_contract_version": "1.0.0",
+  "items": [
+    {
+      "run_id": "fd0c9443bb7e4e5fb4eee88a79b6dc74",
+      "decision": { "status": "EXCEPTION", "...": "the same DecisionView as every other endpoint" },
+      "decision_fingerprint": "b31c1a2f4d0e5c6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c",
+      "workflow_state": "OPEN",
+      "baseline_status": "EXCEPTION",
+      "baseline_unchanged_note": "A review event records human workflow only. ...",
+      "events": []
+    }
+  ],
+  "total": 2,
+  "open_total": 2,
+  "limit": 20,
+  "offset": 0,
+  "baseline_unchanged_note": "A review event records human workflow only. ..."
+}
+```
+
+`total` is the size of the queue, not of the run. `open_total` is how many of
+those are not closed. Both are derived from the events, like `workflow_state`
+itself, which is folded from the timeline every time it is served rather than
+stored.
+
+`baseline_status` repeats `decision.status` deliberately. A client that reads
+only the workflow state would otherwise have to go looking for the conclusion,
+and the one mistake this endpoint must not make possible is showing a closed
+review as though the line were settled.
+
+404 if the run is unknown.
+
+## `GET /v1/review/runs/{run_id}/queue/{decision_id}`
+
+One queue item, in the same shape as it appears in the list.
+
+404 if the run is unknown, if the decision is unknown, **or if the decision is
+not one this queue holds**. A resolved line is a 404 here rather than a 200 with
+an empty timeline.
+
+## `POST /v1/review/runs/{run_id}/queue/{decision_id}/events`
+
+Append one human workflow event beside a decision.
+
+```json
+{
+  "action": "REQUEST_EVIDENCE",
+  "decision_fingerprint": "b31c1a2f4d0e5c6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c",
+  "idempotency_key": "3f9c1d2e-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+  "note": "need the 3 March bank statement"
+}
+```
+
+`action` is one of `ACKNOWLEDGED`, `REQUEST_EVIDENCE`, `ESCALATED`,
+`CLOSED_WITHOUT_OVERRIDE`. There is no fifth, and there is no field that could
+carry a status: an override is unexpressible here rather than refused.
+
+`decision_fingerprint` is the one this API served with the item. Echoing it back
+is what stops an action aimed at another conclusion being recorded against this
+one.
+
+`idempotency_key` is the caller's own, at least 8 characters. The same key with
+the same command returns the original event with status 200 instead of 201. The
+same key with a different command is refused with 409 and writes nothing.
+
+`note` is optional, at most 500 characters, stored and served as plain text.
+Blank is the same as absent.
+
+201 when the event was recorded, 200 when a retry returned the original:
+
+```json
+{
+  "event": {
+    "event_id": "2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d",
+    "sequence": 1,
+    "action": "REQUEST_EVIDENCE",
+    "note": "need the 3 March bank statement",
+    "recorded_at": "2026-08-27T09:15:00Z",
+    "decision_fingerprint": "b31c1a2f..."
+  },
+  "workflow_state": "WAITING_FOR_EVIDENCE",
+  "baseline_status": "EXCEPTION",
+  "baseline_unchanged_note": "A review event records human workflow only. ..."
+}
+```
+
+`sequence` is assigned by the database and is the only thing the timeline is
+ordered by. Timestamps are recorded and never sorted on: two events in the same
+millisecond still have an order, and a clock correction cannot reorder history.
+
+`baseline_status` is the status after the event, which is the status before it.
+
+There is no reviewer in this payload. See the note at the top of this document.
+
+### What this endpoint refuses
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 404 | `not_found` | Unknown run, or unknown decision |
+| 409 | `not_reviewable` | The decision is `RESOLVED` or `PENDING`, so it is not in this queue |
+| 409 | `stale_certificate` | The fingerprint is not this decision's |
+| 409 | `idempotency_conflict` | The key was used for a different command |
+| 422 | `invalid_request` | Malformed body, unknown action, short key, over-long note |
+
+Every one of them writes nothing.
+
 ## Errors
 
 Every failure has one shape: a code and a sentence, nested under `detail`.
@@ -446,8 +579,8 @@ broke, never by quoting what was sent:
 
 | Status | When |
 | --- | --- |
-| 404 | Unknown run, decision or import receipt |
-| 409 | Nothing to reconcile |
+| 404 | Unknown run, decision, import receipt or queue item |
+| 409 | Nothing to reconcile, or a review command refused (see above) |
 | 413 | Body or uploaded document over `SW_MAX_UPLOAD_BYTES` |
 | 422 | Invalid parameter or form field, an unsupported record type, or a contract rule refusing something |
 
@@ -463,6 +596,7 @@ service appears here. See
 ## Determinism
 
 Two identical calls return identical bytes. Decisions are ordered by settlement
-line ID, matching how the baseline emits them, and runs by created-at then run
-ID. The persisted run agrees with what the CLI prints for the same snapshot, and
+line ID, matching how the baseline emits them, runs by created-at then run ID,
+and review queue items by settlement line ID again. A review timeline is ordered
+by the sequence the database assigned. The persisted run agrees with what the CLI prints for the same snapshot, and
 a test compares them.

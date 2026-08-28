@@ -81,9 +81,14 @@ export function RunAuditPage() {
             checked.
           </p>
         </div>
-        <Link className="button button--quiet button--small" to="/runs">
-          All runs
-        </Link>
+        <div className="form-row">
+          <Link className="button button--quiet button--small" to={`/runs/${runId}/review`}>
+            Review queue
+          </Link>
+          <Link className="button button--quiet button--small" to="/runs">
+            All runs
+          </Link>
+        </div>
       </div>
 
       <Panel

@@ -8,8 +8,26 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ACCEPTED_RECEIPT, EXCEPTION_DECISION, RESOLVED_DECISION, RUN } from '../test/fixtures';
-import { createRun, getImport, getRun, importDocument, listImports, listRuns } from './client';
+import {
+  ACCEPTED_RECEIPT,
+  BASELINE_NOTE,
+  EXCEPTION_DECISION,
+  OPEN_ITEM,
+  RESOLVED_DECISION,
+  REVIEW_QUEUE,
+  RUN,
+} from '../test/fixtures';
+import {
+  appendReviewEvent,
+  createRun,
+  getImport,
+  getReviewItem,
+  getReviewQueue,
+  getRun,
+  importDocument,
+  listImports,
+  listRuns,
+} from './client';
 import { ApiError, MalformedResponseError, NetworkError, describeError } from './errors';
 
 const fetchMock = vi.fn();
@@ -322,5 +340,154 @@ describe('describing a failure for a person', () => {
     expect(describeError(new Error('kaboom at line 42'))).toBe(
       'Something went wrong. Please try again.',
     );
+  });
+});
+
+describe('the review queue', () => {
+  it('asks for the queue of one run at a same-origin path', async () => {
+    fetchMock.mockResolvedValue(answer(REVIEW_QUEUE));
+
+    await getReviewQueue(RUN.run_id);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/v1/review/runs/${RUN.run_id}/queue`);
+  });
+
+  it('passes the page size and offset through', async () => {
+    fetchMock.mockResolvedValue(answer(REVIEW_QUEUE));
+
+    await getReviewQueue(RUN.run_id, { limit: 5, offset: 10 });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `/v1/review/runs/${RUN.run_id}/queue?limit=5&offset=10`,
+    );
+  });
+
+  it('checks the queue rather than casting it', async () => {
+    fetchMock.mockResolvedValue(answer({ items: [] }));
+
+    await expect(getReviewQueue(RUN.run_id)).rejects.toThrow(MalformedResponseError);
+  });
+
+  it('reports a missing run in the backend words', async () => {
+    fetchMock.mockResolvedValue(answer(envelope('not_found', "no run with id 'nope'"), 404));
+
+    await expect(getReviewQueue('nope')).rejects.toThrow(ApiError);
+  });
+
+  it('asks for one item by run and decision', async () => {
+    fetchMock.mockResolvedValue(answer(OPEN_ITEM));
+
+    await getReviewItem(RUN.run_id, OPEN_ITEM.decision.decision_id);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `/v1/review/runs/${RUN.run_id}/queue/${encodeURIComponent(OPEN_ITEM.decision.decision_id)}`,
+    );
+  });
+
+  it('escapes an identifier rather than pasting it into a path', async () => {
+    fetchMock.mockResolvedValue(answer(OPEN_ITEM));
+
+    await getReviewItem(RUN.run_id, 'a/b?c');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('a%2Fb%3Fc');
+  });
+});
+
+describe('appending a review event', () => {
+  const RECEIPT = {
+    event: {
+      event_id: 'e1',
+      sequence: 1,
+      action: 'ACKNOWLEDGED',
+      note: null,
+      recorded_at: '2026-08-27T11:00:00Z',
+      decision_fingerprint: OPEN_ITEM.decision_fingerprint,
+    },
+    workflow_state: 'ACKNOWLEDGED',
+    baseline_status: 'EXCEPTION',
+    baseline_unchanged_note: BASELINE_NOTE,
+  };
+
+  async function record(note?: string): Promise<void> {
+    await appendReviewEvent(RUN.run_id, OPEN_ITEM.decision.decision_id, {
+      action: 'ACKNOWLEDGED',
+      decisionFingerprint: OPEN_ITEM.decision_fingerprint,
+      idempotencyKey: 'key-00000001',
+      ...(note === undefined ? {} : { note }),
+    });
+  }
+
+  function sentBody(): Record<string, unknown> {
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    // The client always sends a JSON string here. Narrowed rather than
+    // stringified, so a change that started sending a FormData fails loudly.
+    const body = init.body;
+    if (typeof body !== 'string') {
+      throw new TypeError('the review command was not sent as a JSON string');
+    }
+    return JSON.parse(body) as Record<string, unknown>;
+  }
+
+  it('posts to the events path of one queue item', async () => {
+    fetchMock.mockResolvedValue(answer(RECEIPT, 201));
+
+    await record();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `/v1/review/runs/${RUN.run_id}/queue/` +
+        `${encodeURIComponent(OPEN_ITEM.decision.decision_id)}/events`,
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+  });
+
+  it('sends the action, the fingerprint and the key in the server field names', async () => {
+    fetchMock.mockResolvedValue(answer(RECEIPT, 201));
+
+    await record();
+
+    expect(sentBody()).toEqual({
+      action: 'ACKNOWLEDGED',
+      decision_fingerprint: OPEN_ITEM.decision_fingerprint,
+      idempotency_key: 'key-00000001',
+    });
+  });
+
+  it('sends no status field, because there is no status to send', async () => {
+    fetchMock.mockResolvedValue(answer(RECEIPT, 201));
+
+    await record();
+
+    expect(sentBody()).not.toHaveProperty('status');
+    expect(sentBody()).not.toHaveProperty('baseline_status');
+  });
+
+  it('sends a note when there is one', async () => {
+    fetchMock.mockResolvedValue(answer(RECEIPT, 201));
+
+    await record('chasing the bank');
+
+    expect(sentBody().note).toBe('chasing the bank');
+  });
+
+  it('omits an empty note rather than sending a blank one', async () => {
+    fetchMock.mockResolvedValue(answer(RECEIPT, 201));
+
+    await record('');
+
+    expect(sentBody()).not.toHaveProperty('note');
+  });
+
+  it('reports a refused command in the backend words', async () => {
+    fetchMock.mockResolvedValue(
+      answer(envelope('stale_certificate', 'the decision fingerprint does not match'), 409),
+    );
+
+    await expect(record()).rejects.toThrow(/does not match/);
+  });
+
+  it('checks the receipt rather than casting it', async () => {
+    fetchMock.mockResolvedValue(answer({ event: {} }, 201));
+
+    await expect(record()).rejects.toThrow(MalformedResponseError);
   });
 });

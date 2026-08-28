@@ -5,7 +5,13 @@
  * a test that passes here is a test against a shape the server actually sends.
  */
 
-import type { DecisionView, ImportReceipt, RunSummary } from '../api/types';
+import type {
+  DecisionView,
+  ImportReceipt,
+  ReviewQueueItem,
+  ReviewQueuePage,
+  RunSummary,
+} from '../api/types';
 
 export const RUN: RunSummary = {
   run_id: 'fd0c9443bb7e4e5fb4eee88a79b6dc74',
@@ -231,4 +237,73 @@ export const CONFLICT_RECEIPT: ImportReceipt = {
         'a fact with this identity is already stored with a different payload hash; stored 2c1d4bb2, incoming 81658ed3',
     },
   ],
+};
+
+/** The sentence the server sends with every review response. */
+export const BASELINE_NOTE =
+  'A review event records human workflow only. It does not change this ' +
+  "decision's status, exception codes, invariant results or evidence, and " +
+  'closing a review does not resolve the line.';
+
+export const OPEN_ITEM: ReviewQueueItem = {
+  run_id: RUN.run_id,
+  decision: EXCEPTION_DECISION,
+  decision_fingerprint: 'b31c1a2f4d0e5c6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c',
+  workflow_state: 'OPEN',
+  baseline_status: 'EXCEPTION',
+  baseline_unchanged_note: BASELINE_NOTE,
+  events: [],
+};
+
+export const UNKNOWN_ITEM: ReviewQueueItem = {
+  run_id: RUN.run_id,
+  decision: INSUFFICIENT_DECISION,
+  decision_fingerprint: 'c42d2b3f5e1f6d7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c5d',
+  workflow_state: 'WAITING_FOR_EVIDENCE',
+  baseline_status: 'INSUFFICIENT_EVIDENCE',
+  baseline_unchanged_note: BASELINE_NOTE,
+  events: [
+    {
+      event_id: '2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d',
+      sequence: 1,
+      action: 'REQUEST_EVIDENCE',
+      note: 'need the 3 March bank statement',
+      recorded_at: '2026-08-27T09:15:00Z',
+      decision_fingerprint: 'c42d2b3f5e1f6d7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c5d',
+    },
+  ],
+};
+
+/** A closed item whose baseline status is still an exception. */
+export const CLOSED_ITEM: ReviewQueueItem = {
+  ...OPEN_ITEM,
+  workflow_state: 'CLOSED_WITHOUT_OVERRIDE',
+  events: [
+    {
+      event_id: '9f8e7d6c5b4a39281706f5e4d3c2b1a0',
+      sequence: 1,
+      action: 'CLOSED_WITHOUT_OVERRIDE',
+      note: null,
+      recorded_at: '2026-08-27T10:00:00Z',
+      decision_fingerprint: OPEN_ITEM.decision_fingerprint,
+    },
+  ],
+};
+
+export const REVIEW_QUEUE: ReviewQueuePage = {
+  run_id: RUN.run_id,
+  review_contract_version: '1.0.0',
+  items: [OPEN_ITEM, UNKNOWN_ITEM],
+  total: 2,
+  open_total: 2,
+  limit: 20,
+  offset: 0,
+  baseline_unchanged_note: BASELINE_NOTE,
+};
+
+export const EMPTY_REVIEW_QUEUE: ReviewQueuePage = {
+  ...REVIEW_QUEUE,
+  items: [],
+  total: 0,
+  open_total: 0,
 };

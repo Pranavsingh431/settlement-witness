@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import { DashboardPage } from './routes/DashboardPage';
 import { ImportsPage } from './routes/ImportsPage';
 import { RunAuditPage } from './routes/RunAuditPage';
+import { ReviewQueuePage } from './routes/ReviewQueuePage';
 import { RunsPage } from './routes/RunsPage';
 
 const LINKS = [
@@ -43,6 +44,7 @@ export function App() {
           <Route path="/imports" element={<ImportsPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/runs/:runId" element={<RunAuditPage />} />
+          <Route path="/runs/:runId/review" element={<ReviewQueuePage />} />
           <Route
             path="*"
             element={

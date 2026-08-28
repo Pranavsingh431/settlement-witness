@@ -165,6 +165,31 @@ class TestUpgradingAnExistingDatabase:
 
         assert {"reconciliation_runs", "reconciliation_decisions"} <= present
 
+    def test_the_review_table_appears_after_the_upgrade(self, tmp_path: Path) -> None:
+        """The third revision, added without touching either earlier one."""
+        engine = self._initial_with_data(tmp_path / "review.sqlite")
+        upgrade_to_head(engine)
+
+        present = set(inspect(engine).get_table_names())
+        engine.dispose()
+
+        assert "review_events" in present
+
+    def test_the_review_table_starts_empty(self, tmp_path: Path) -> None:
+        """A schema change adds a place to record things, not a record.
+
+        An upgrade that invented a workflow history for decisions nobody had
+        looked at would be inventing the one thing this table exists to hold.
+        """
+        engine = self._initial_with_data(tmp_path / "empty-review.sqlite")
+        upgrade_to_head(engine)
+
+        with engine.connect() as connection:
+            total = connection.exec_driver_sql("SELECT count(*) FROM review_events").scalar()
+        engine.dispose()
+
+        assert total == 0
+
     def test_importing_still_works_after_the_upgrade(self, tmp_path: Path) -> None:
         """An upgraded database is a working database, not just a preserved one."""
         engine = self._initial_with_data(tmp_path / "still.sqlite")

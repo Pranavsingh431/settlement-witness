@@ -15,14 +15,28 @@ import { MalformedResponseError, NetworkError, toApiError } from './errors';
 import {
   parseReceipt,
   parseReceiptPage,
+  parseReviewEventReceipt,
+  parseReviewQueueItem,
+  parseReviewQueuePage,
   parseRunDetail,
   parseRunPage,
   parseRunSummary,
 } from './parse';
-import type { ImportReceipt, ImportReceiptPage, RunCreation, RunDetail, RunPage } from './types';
+import type {
+  ImportReceipt,
+  ImportReceiptPage,
+  ReviewAction,
+  ReviewEventReceipt,
+  ReviewQueueItem,
+  ReviewQueuePage,
+  RunCreation,
+  RunDetail,
+  RunPage,
+} from './types';
 
 const IMPORTS = '/v1/imports';
 const RUNS = '/v1/reconciliation/runs';
+const REVIEW = '/v1/review/runs';
 
 interface Answer {
   readonly status: number;
@@ -152,4 +166,71 @@ export interface DecisionFilters {
 export async function getRun(runId: string, filters: DecisionFilters = {}): Promise<RunDetail> {
   const { body } = await send(`${RUNS}/${encodeURIComponent(runId)}${query({ ...filters })}`);
   return parseRunDetail(body);
+}
+
+export interface ReviewQueueFilters {
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
+/**
+ * Return a page of the review queue for one recorded run.
+ *
+ * Only the decisions that need a person are here. A resolved line is not work,
+ * and the server leaves it out rather than expecting the client to filter.
+ */
+export async function getReviewQueue(
+  runId: string,
+  filters: ReviewQueueFilters = {},
+): Promise<ReviewQueuePage> {
+  const { body } = await send(
+    `${REVIEW}/${encodeURIComponent(runId)}/queue${query({ ...filters })}`,
+  );
+  return parseReviewQueuePage(body);
+}
+
+/** Return one queue item with its certificate and its review timeline. */
+export async function getReviewItem(runId: string, decisionId: string): Promise<ReviewQueueItem> {
+  const { body } = await send(
+    `${REVIEW}/${encodeURIComponent(runId)}/queue/${encodeURIComponent(decisionId)}`,
+  );
+  return parseReviewQueueItem(body);
+}
+
+/**
+ * Record one human review action beside a decision.
+ *
+ * The decision is untouched. There is no field here that could carry a status,
+ * which is the point: an override is unexpressible rather than refused.
+ *
+ * `decisionFingerprint` is the one the server served with the item. Echoing it
+ * back is what stops an action aimed at a conclusion the reviewer last saw
+ * elsewhere being recorded against this one. `idempotencyKey` makes a retry a
+ * retry: the same key with the same command returns the original event, and the
+ * same key with a different command is refused.
+ */
+export async function appendReviewEvent(
+  runId: string,
+  decisionId: string,
+  input: {
+    readonly action: ReviewAction;
+    readonly decisionFingerprint: string;
+    readonly idempotencyKey: string;
+    readonly note?: string | undefined;
+  },
+): Promise<ReviewEventReceipt> {
+  const { body } = await send(
+    `${REVIEW}/${encodeURIComponent(runId)}/queue/${encodeURIComponent(decisionId)}/events`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: input.action,
+        decision_fingerprint: input.decisionFingerprint,
+        idempotency_key: input.idempotencyKey,
+        ...(input.note !== undefined && input.note !== '' ? { note: input.note } : {}),
+      }),
+    },
+  );
+  return parseReviewEventReceipt(body);
 }

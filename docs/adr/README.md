@@ -26,3 +26,4 @@ Rules:
 | [ADR-012](ADR-012-the-model-points-the-verifier-decides.md) | The model points, the verifier decides | Accepted |
 | [ADR-013](ADR-013-paged-environments-and-three-kinds-of-truth.md) | Paged finite environments, and three kinds of truth | Accepted |
 | [ADR-014](ADR-014-hosted-models-are-corpus-only.md) | A hosted model sees the shadow corpus and nothing else | Accepted |
+| [ADR-015](ADR-015-review-events-annotate-they-do-not-decide.md) | A review event annotates a conclusion, it does not become one | Accepted |

@@ -10,7 +10,13 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, NetworkError } from '../api/errors';
-import { ACCEPTED_RECEIPT, INVALID_RECEIPT, RUN } from '../test/fixtures';
+import {
+  ACCEPTED_RECEIPT,
+  EMPTY_REVIEW_QUEUE,
+  INVALID_RECEIPT,
+  REVIEW_QUEUE,
+  RUN,
+} from '../test/fixtures';
 import { renderScreen } from '../test/render';
 import { DashboardPage } from './DashboardPage';
 
@@ -22,6 +28,7 @@ const NO_IMPORTS = { receipts: [], total: 0, limit: 5, offset: 0, filtered: fals
 
 beforeEach(() => {
   vi.resetAllMocks();
+  client.getReviewQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE);
 });
 
 afterEach(() => {
@@ -287,5 +294,85 @@ describe('when the backend is unreachable', () => {
     renderScreen(<DashboardPage />);
 
     expect(await screen.findByText('the store is on fire')).toBeInTheDocument();
+  });
+});
+
+describe('the review queue panel', () => {
+  beforeEach(() => {
+    client.listRuns.mockResolvedValue({ runs: [RUN], total: 1, limit: 1, offset: 0 });
+    client.listImports.mockResolvedValue(NO_IMPORTS);
+  });
+
+  it('reads the real queue for the latest run', async () => {
+    client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+    renderScreen(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(client.getReviewQueue).toHaveBeenCalledWith(RUN.run_id, { limit: 1 });
+    });
+  });
+
+  it('reports what needs review, what is open, and what is closed', async () => {
+    client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+    renderScreen(<DashboardPage />);
+
+    const stats = await screen.findByRole('group', { name: /review queue/i });
+    expect(within(stats).getByText('Needing review')).toBeInTheDocument();
+    expect(within(stats).getByText('Still open')).toBeInTheDocument();
+    expect(within(stats).getByText('Closed without override')).toBeInTheDocument();
+  });
+
+  it('says the workflow state does not change the baseline decision', async () => {
+    client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+    renderScreen(<DashboardPage />);
+
+    expect(
+      await screen.findByText(/human workflow state does not change the baseline decision/i),
+    ).toBeInTheDocument();
+  });
+
+  it('links to the review queue for that run', async () => {
+    client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+    renderScreen(<DashboardPage />);
+
+    const link = await screen.findByRole('link', { name: /open the review queue/i });
+    expect(link).toHaveAttribute('href', `/runs/${RUN.run_id}/review`);
+  });
+
+  it('reports a failure to read the queue without hiding the rest of the page', async () => {
+    client.getReviewQueue.mockRejectedValue(new NetworkError(new Error('offline')));
+    renderScreen(<DashboardPage />);
+
+    expect(await screen.findByText(/could not load the review queue/i)).toBeInTheDocument();
+    expect(screen.getByText(/latest reconciliation run/i)).toBeInTheDocument();
+  });
+
+  it('reports an empty queue as zeroes rather than as a failure', async () => {
+    client.getReviewQueue.mockResolvedValue(EMPTY_REVIEW_QUEUE);
+    renderScreen(<DashboardPage />);
+
+    const stats = await screen.findByRole('group', { name: /review queue/i });
+    expect(within(stats).getAllByText('0').length).toBeGreaterThan(0);
+  });
+});
+
+describe('the review queue panel with no run', () => {
+  it('explains that a queue is built from a run', async () => {
+    client.listRuns.mockResolvedValue(NO_RUNS);
+    client.listImports.mockResolvedValue(NO_IMPORTS);
+    renderScreen(<DashboardPage />);
+
+    expect(
+      await screen.findByText(/there is no run yet, so there is nothing to review/i),
+    ).toBeInTheDocument();
+  });
+
+  it('asks the backend for no queue at all', async () => {
+    client.listRuns.mockResolvedValue(NO_RUNS);
+    client.listImports.mockResolvedValue(NO_IMPORTS);
+    renderScreen(<DashboardPage />);
+
+    await screen.findByText(/there is no run yet/i);
+    expect(client.getReviewQueue).not.toHaveBeenCalled();
   });
 });

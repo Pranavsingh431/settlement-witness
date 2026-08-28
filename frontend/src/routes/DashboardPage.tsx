@@ -10,7 +10,7 @@
 
 import { Link } from 'react-router-dom';
 
-import { listImports, listRuns } from '../api/client';
+import { getReviewQueue, listImports, listRuns } from '../api/client';
 import { formatMinorUnits, formatTimestamp } from '../format';
 import { useLoad } from '../hooks';
 import {
@@ -70,6 +70,17 @@ export function DashboardPage() {
   const imports = useLoad(() => listImports({ limit: 5 }), 'recent-imports');
 
   const latest = runs.data?.runs[0] ?? null;
+  // Asked for only once there is a run to ask about, and with a page size of
+  // one because the counts describe the whole queue rather than the page. The
+  // key carries the run ID so the request is remade when the latest run
+  // changes, rather than reporting the previous run's queue under the new one.
+  const review = useLoad(
+    () =>
+      latest === null
+        ? Promise.resolve(null)
+        : getReviewQueue(latest.run_id, { limit: 1 }).then((page) => page),
+    `review-queue|${latest?.run_id ?? 'none'}`,
+  );
   const resolved = latest?.status_counts.RESOLVED ?? 0;
   const exceptions = latest?.status_counts.EXCEPTION ?? 0;
   const insufficient = latest?.status_counts.INSUFFICIENT_EVIDENCE ?? 0;
@@ -154,6 +165,52 @@ export function DashboardPage() {
             <p className="panel__note" style={{ marginTop: 12 }}>
               Recorded {formatTimestamp(latest.created_at)} · baseline {latest.baseline_version} ·
               contract {latest.domain_schema_version} · parser {latest.parser_version}
+            </p>
+          </>
+        ) : null}
+      </Panel>
+
+      <Panel
+        title="Human review queue"
+        note="The lines the latest run did not resolve, and what people are doing about them."
+        actions={
+          latest ? (
+            <Link
+              className="button button--quiet button--small"
+              to={`/runs/${latest.run_id}/review`}
+            >
+              Open the review queue
+            </Link>
+          ) : null
+        }
+      >
+        {latest === null ? (
+          <p className="panel__note">
+            There is no run yet, so there is nothing to review. A review queue is built from a
+            recorded run, never from the fact store directly.
+          </p>
+        ) : null}
+        {latest && review.loading ? <Loading what="the review queue" /> : null}
+        {latest && review.error ? (
+          <ErrorNotice error={review.error} onRetry={review.reload} what="the review queue" />
+        ) : null}
+        {review.data ? (
+          <>
+            <Stats label="Review queue">
+              <Stat
+                label="Needing review"
+                value={formatMinorUnits(review.data.total)}
+                tone="exception"
+              />
+              <Stat label="Still open" value={formatMinorUnits(review.data.open_total)} />
+              <Stat
+                label="Closed without override"
+                value={formatMinorUnits(review.data.total - review.data.open_total)}
+              />
+            </Stats>
+            <p className="notice notice--warn baseline-note" role="note">
+              <strong>Human workflow state does not change the baseline decision.</strong>{' '}
+              {review.data.baseline_unchanged_note}
             </p>
           </>
         ) : null}

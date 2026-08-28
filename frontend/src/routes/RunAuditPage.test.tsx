@@ -351,3 +351,14 @@ describe('when the run cannot be loaded', () => {
     expect(screen.getByRole('link', { name: /back to runs/i })).toHaveAttribute('href', '/runs');
   });
 });
+
+describe('reaching the review queue', () => {
+  it('links to the queue for this run', async () => {
+    client.getRun.mockResolvedValue({ run: RUN, decisions: ALL_DECISIONS, filtered: false });
+    render();
+
+    const link = await screen.findByRole('link', { name: /review queue/i });
+
+    expect(link).toHaveAttribute('href', `/runs/${RUN.run_id}/review`);
+  });
+});

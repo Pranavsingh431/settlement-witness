@@ -35,3 +35,4 @@ so.
 | 10 | [phase-10.md](phase-10.md) | Passed, with no live run |
 | 10.1 | [phase-10-1.md](phase-10-1.md) | Passed, with no live run |
 | 10.2 | [phase-10-2.md](phase-10-2.md) | Passed, with no live run |
+| 11 | [phase-11.md](phase-11.md) | Passed |

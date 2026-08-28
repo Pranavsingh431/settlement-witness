@@ -18,6 +18,14 @@ from app.domain.facts import SourceRecordType, SourceSystem
 from app.domain.invariants import InvariantId, InvariantOutcome
 from app.ingestion.receipts import ImportOutcome, ImportReceipt, RowOutcome
 from app.reconciliation.runs import PersistedRun
+from app.review.events import (
+    MAX_NOTE_LENGTH,
+    REVIEW_CONTRACT_VERSION,
+    ReviewAction,
+    ReviewEvent,
+    ReviewWorkflowState,
+)
+from app.review.service import AppendedReviewEvent, ReviewQueueItem, ReviewQueueSlice
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
@@ -345,3 +353,172 @@ class ErrorEnvelope(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     detail: ErrorResponse
+
+
+BASELINE_IS_UNCHANGED = (
+    "A review event records human workflow only. It does not change this "
+    "decision's status, exception codes, invariant results or evidence, and "
+    "closing a review does not resolve the line."
+)
+"""The sentence every review response carries.
+
+On the wire rather than only in the interface, because a client written against
+this API by somebody who never sees the screen has to be told the same thing.
+It is a constant so the API tests and the interface tests assert one string
+rather than two that could drift apart."""
+
+
+class ReviewEventView(BaseModel):
+    """One recorded review action.
+
+    No actor field. There is no authentication in this application, so there is
+    nobody to name, and a field holding a constant would read as one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_id: str
+    sequence: int
+    """The order the database assigned. What the timeline is sorted by."""
+
+    action: ReviewAction
+    note: str | None
+    """A sentence from a person. Plain text, and never markup."""
+
+    recorded_at: datetime
+    decision_fingerprint: str
+
+    @classmethod
+    def of(cls, event: ReviewEvent) -> "ReviewEventView":
+        """Return the public view of a stored event."""
+        return cls(
+            event_id=event.event_id,
+            sequence=event.sequence,
+            action=event.action,
+            note=event.note,
+            recorded_at=event.recorded_at,
+            decision_fingerprint=event.decision_fingerprint,
+        )
+
+
+class ReviewQueueItemView(BaseModel):
+    """One reviewable decision, with the workflow recorded beside it.
+
+    The decision is carried whole, as the same `DecisionView` every other
+    endpoint serves. The workflow is carried separately and is never merged into
+    it, because the two describe different things and a single flattened object
+    would invite a client to render a workflow state where a status belongs.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    decision: DecisionView
+    """The baseline's conclusion, unchanged by anything in this response."""
+
+    decision_fingerprint: str
+    """Echo this back when appending an event, so a command aimed at another
+    conclusion is refused rather than recorded against this one."""
+
+    workflow_state: ReviewWorkflowState
+    """Derived from `events` every time it is served. Never stored."""
+
+    baseline_status: DecisionStatus
+    """The same value as `decision.status`, named so it cannot be missed.
+
+    Repeated deliberately. A client that reads only the workflow state would
+    otherwise have to go looking for the conclusion, and the one mistake this
+    endpoint must not make possible is showing a closed review as though the
+    line were settled."""
+
+    baseline_unchanged_note: str = BASELINE_IS_UNCHANGED
+    events: list[ReviewEventView]
+
+    @classmethod
+    def of(cls, item: ReviewQueueItem) -> "ReviewQueueItemView":
+        """Return the public view of one queue item."""
+        return cls(
+            run_id=item.run_id,
+            decision=DecisionView.of(item.decision),
+            decision_fingerprint=item.decision_fingerprint,
+            workflow_state=item.workflow_state,
+            baseline_status=item.decision.status,
+            events=[ReviewEventView.of(event) for event in item.events],
+        )
+
+
+class ReviewQueuePage(BaseModel):
+    """A page of the review queue for one recorded run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    review_contract_version: str = REVIEW_CONTRACT_VERSION
+    items: list[ReviewQueueItemView]
+    total: int
+    """How many reviewable decisions the run holds, not how many it has."""
+
+    open_total: int
+    """How many of those are not closed."""
+
+    limit: int = Field(ge=1, le=MAX_PAGE_SIZE)
+    offset: int = Field(ge=0)
+    baseline_unchanged_note: str = BASELINE_IS_UNCHANGED
+
+    @classmethod
+    def of(
+        cls, run_id: str, page: ReviewQueueSlice, *, limit: int, offset: int
+    ) -> "ReviewQueuePage":
+        """Return the public view of one page of the queue."""
+        return cls(
+            run_id=run_id,
+            items=[ReviewQueueItemView.of(item) for item in page.items],
+            total=page.total,
+            open_total=page.open_total,
+            limit=limit,
+            offset=offset,
+        )
+
+
+class ReviewEventCommand(BaseModel):
+    """A request to append one review event.
+
+    Every field is required except the note, and none of them names a status.
+    There is no field here that could carry a new conclusion, which is the
+    point: the request shape makes an override unexpressible rather than
+    refusing one that was asked for.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    action: ReviewAction
+    decision_fingerprint: str = Field(min_length=64, max_length=64)
+    """The fingerprint served with the item the reviewer was looking at."""
+
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    """The caller's key for this command. Retrying with it returns the original
+    event; reusing it for a different command is refused."""
+
+    note: str | None = Field(default=None, max_length=MAX_NOTE_LENGTH)
+
+
+class ReviewEventReceipt(BaseModel):
+    """What appending a review event produced."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event: ReviewEventView
+    workflow_state: ReviewWorkflowState
+    baseline_status: DecisionStatus
+    """The decision's status after the event, which is the status before it."""
+
+    baseline_unchanged_note: str = BASELINE_IS_UNCHANGED
+
+    @classmethod
+    def of(cls, appended: AppendedReviewEvent, status: DecisionStatus) -> "ReviewEventReceipt":
+        """Return the public view of an appended event."""
+        return cls(
+            event=ReviewEventView.of(appended.event),
+            workflow_state=appended.workflow_state,
+            baseline_status=status,
+        )

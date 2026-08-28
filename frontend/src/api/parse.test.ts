@@ -10,8 +10,25 @@
 import { describe, expect, it } from 'vitest';
 
 import { MalformedResponseError } from './errors';
-import { parseDecision, parseReceipt, parseRunSummary } from './parse';
-import { ACCEPTED_RECEIPT, RESOLVED_DECISION, RUN } from '../test/fixtures';
+import {
+  parseDecision,
+  parseReceipt,
+  parseReviewEventReceipt,
+  parseReviewQueueItem,
+  parseReviewQueuePage,
+  parseRunSummary,
+} from './parse';
+import {
+  ACCEPTED_RECEIPT,
+  BASELINE_NOTE,
+  CLOSED_ITEM,
+  EMPTY_REVIEW_QUEUE,
+  OPEN_ITEM,
+  RESOLVED_DECISION,
+  REVIEW_QUEUE,
+  RUN,
+  UNKNOWN_ITEM,
+} from '../test/fixtures';
 
 /** Return a copy of a payload with one field removed, as a truncated response would arrive. */
 function without<T extends object>(source: T | undefined, key: keyof T): Record<string, unknown> {
@@ -131,5 +148,105 @@ describe('parseReceipt', () => {
 
   it('keeps a null failure detail, which an accepted import has', () => {
     expect(parseReceipt(ACCEPTED_RECEIPT).failure_detail).toBeNull();
+  });
+});
+
+describe('parseReviewQueuePage', () => {
+  it('accepts a real queue', () => {
+    expect(parseReviewQueuePage(REVIEW_QUEUE)).toEqual(REVIEW_QUEUE);
+  });
+
+  it('accepts an empty queue', () => {
+    expect(parseReviewQueuePage(EMPTY_REVIEW_QUEUE)).toEqual(EMPTY_REVIEW_QUEUE);
+  });
+
+  it('refuses something that is not an object', () => {
+    expect(() => parseReviewQueuePage('a queue')).toThrow(/not an object/);
+  });
+
+  it('refuses a page missing its counts', () => {
+    expect(() => parseReviewQueuePage(without(REVIEW_QUEUE, 'total'))).toThrow(/total/);
+    expect(() => parseReviewQueuePage(without(REVIEW_QUEUE, 'open_total'))).toThrow(/open_total/);
+  });
+
+  it('refuses a page missing the note saying the baseline is unchanged', () => {
+    expect(() => parseReviewQueuePage(without(REVIEW_QUEUE, 'baseline_unchanged_note'))).toThrow(
+      /baseline_unchanged_note/,
+    );
+  });
+
+  it('refuses a page whose items are not a list', () => {
+    expect(() => parseReviewQueuePage({ ...REVIEW_QUEUE, items: 'none' })).toThrow(/items/);
+  });
+});
+
+describe('parseReviewQueueItem', () => {
+  it('accepts a real item with its timeline', () => {
+    expect(parseReviewQueueItem(UNKNOWN_ITEM)).toEqual(UNKNOWN_ITEM);
+  });
+
+  it('refuses an item missing its baseline status', () => {
+    expect(() => parseReviewQueueItem(without(OPEN_ITEM, 'baseline_status'))).toThrow(
+      /baseline_status/,
+    );
+  });
+
+  it('refuses an item missing its fingerprint', () => {
+    expect(() => parseReviewQueueItem(without(OPEN_ITEM, 'decision_fingerprint'))).toThrow(
+      /decision_fingerprint/,
+    );
+  });
+
+  it('refuses an item missing its workflow state', () => {
+    expect(() => parseReviewQueueItem(without(OPEN_ITEM, 'workflow_state'))).toThrow(
+      /workflow_state/,
+    );
+  });
+
+  it('refuses an event missing its sequence, which is what orders the timeline', () => {
+    const broken = {
+      ...UNKNOWN_ITEM,
+      events: [without(UNKNOWN_ITEM.events[0], 'sequence')],
+    };
+
+    expect(() => parseReviewQueueItem(broken)).toThrow(/sequence/);
+  });
+
+  it('accepts an event with no note', () => {
+    const item = parseReviewQueueItem(CLOSED_ITEM);
+
+    expect(item.events[0]?.note).toBeNull();
+  });
+
+  it('refuses a note that is not text', () => {
+    const broken = {
+      ...UNKNOWN_ITEM,
+      events: [{ ...UNKNOWN_ITEM.events[0], note: 7 }],
+    };
+
+    expect(() => parseReviewQueueItem(broken)).toThrow(/note/);
+  });
+});
+
+describe('parseReviewEventReceipt', () => {
+  it('accepts a real receipt', () => {
+    const receipt = {
+      event: UNKNOWN_ITEM.events[0],
+      workflow_state: 'WAITING_FOR_EVIDENCE',
+      baseline_status: 'INSUFFICIENT_EVIDENCE',
+      baseline_unchanged_note: BASELINE_NOTE,
+    };
+
+    expect(parseReviewEventReceipt(receipt)).toEqual(receipt);
+  });
+
+  it('refuses a receipt with no baseline status', () => {
+    const broken = {
+      event: UNKNOWN_ITEM.events[0],
+      workflow_state: 'ESCALATED',
+      baseline_unchanged_note: BASELINE_NOTE,
+    };
+
+    expect(() => parseReviewEventReceipt(broken)).toThrow(/baseline_status/);
   });
 });

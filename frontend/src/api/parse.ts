@@ -15,11 +15,18 @@
 
 import { MalformedResponseError } from './errors';
 import type {
+  DecisionStatus,
   DecisionView,
   EvidenceReference,
   ImportReceipt,
   ImportReceiptPage,
   InvariantCheck,
+  ReviewAction,
+  ReviewEventReceipt,
+  ReviewEventView,
+  ReviewQueueItem,
+  ReviewQueuePage,
+  ReviewWorkflowState,
   RowOutcomeView,
   RunDetail,
   RunPage,
@@ -232,5 +239,54 @@ export function parseReceiptPage(value: unknown): ImportReceiptPage {
     limit: num(raw, 'limit', 'receipt page'),
     offset: num(raw, 'offset', 'receipt page'),
     filtered: bool(raw, 'filtered', 'receipt page'),
+  };
+}
+
+function parseReviewEvent(value: unknown): ReviewEventView {
+  const raw = object(value, 'review event');
+  return {
+    event_id: str(raw, 'event_id', 'review event'),
+    sequence: num(raw, 'sequence', 'review event'),
+    action: str(raw, 'action', 'review event') as ReviewAction,
+    note: nullableStr(raw, 'note', 'review event'),
+    recorded_at: str(raw, 'recorded_at', 'review event'),
+    decision_fingerprint: str(raw, 'decision_fingerprint', 'review event'),
+  };
+}
+
+export function parseReviewQueueItem(value: unknown): ReviewQueueItem {
+  const raw = object(value, 'review queue item');
+  return {
+    run_id: str(raw, 'run_id', 'review queue item'),
+    decision: parseDecision(raw.decision),
+    decision_fingerprint: str(raw, 'decision_fingerprint', 'review queue item'),
+    workflow_state: str(raw, 'workflow_state', 'review queue item') as ReviewWorkflowState,
+    baseline_status: str(raw, 'baseline_status', 'review queue item') as DecisionStatus,
+    baseline_unchanged_note: str(raw, 'baseline_unchanged_note', 'review queue item'),
+    events: list(raw, 'events', 'review queue item', parseReviewEvent),
+  };
+}
+
+export function parseReviewQueuePage(value: unknown): ReviewQueuePage {
+  const raw = object(value, 'review queue');
+  return {
+    run_id: str(raw, 'run_id', 'review queue'),
+    review_contract_version: str(raw, 'review_contract_version', 'review queue'),
+    items: list(raw, 'items', 'review queue', parseReviewQueueItem),
+    total: num(raw, 'total', 'review queue'),
+    open_total: num(raw, 'open_total', 'review queue'),
+    limit: num(raw, 'limit', 'review queue'),
+    offset: num(raw, 'offset', 'review queue'),
+    baseline_unchanged_note: str(raw, 'baseline_unchanged_note', 'review queue'),
+  };
+}
+
+export function parseReviewEventReceipt(value: unknown): ReviewEventReceipt {
+  const raw = object(value, 'review event receipt');
+  return {
+    event: parseReviewEvent(raw.event),
+    workflow_state: str(raw, 'workflow_state', 'review event receipt') as ReviewWorkflowState,
+    baseline_status: str(raw, 'baseline_status', 'review event receipt') as DecisionStatus,
+    baseline_unchanged_note: str(raw, 'baseline_unchanged_note', 'review event receipt'),
   };
 }

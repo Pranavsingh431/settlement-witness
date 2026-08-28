@@ -165,6 +165,33 @@ A line is resolved only when its citations resolved and its required invariants
 held. Exceptions and insufficient evidence are shown as what they are, not
 folded into a success rate.
 
+## The human review queue
+
+The lines a run did not resolve, and what people are doing about them. Reachable
+from the overview and from any run's audit screen, at `/runs/<run id>/review`.
+
+A reviewer can record four things: acknowledge, request evidence, escalate, and
+close without override. There is no approve, no resolve and no override, and the
+last action is named the way it is because the name is the guarantee. A closed
+item still carries the `EXCEPTION` or `INSUFFICIENT_EVIDENCE` the baseline gave
+it, and both the API and the screen say so.
+
+That is not a missing feature. A settlement line is resolved when the records it
+cites are present and the invariants over them hold. If those records are
+absent, the only thing that changes it is the records arriving, imported and
+reconciled into a new run. A button that set the status would be asserting
+something about the world on no evidence.
+
+Review events are append-only, ordered by a sequence the database assigns, and
+stored beside a decision rather than inside it. They change no status, no code,
+no invariant result and no evidence, and a test compares every stored decision
+byte for byte before and after every action to prove it.
+
+**There is no reviewer recorded**, because this application has no
+authentication. That is a limitation and not a design choice: the log answers
+what happened and cannot answer who is accountable. See
+[ADR-015](docs/adr/ADR-015-review-events-annotate-they-do-not-decide.md).
+
 ## Running the shadow corpus against a hosted model
 
 Optional, and off by default. This is the only place the project calls a third
