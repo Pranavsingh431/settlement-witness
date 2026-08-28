@@ -42,6 +42,13 @@ and no resolve, because a click cannot make a line supported.
 records agree; whether a bank shows the money arriving is a separate conclusion
 from separate evidence, and both are shown without being conflated.
 
+**Phase 13** ran a pre-registered hosted-model shadow protocol over the
+generated corpus only. The boundary held: no model output reached a decision or
+the application database. Two planned runs completed and one was incomplete
+because the model exceeded the bounded response size, so no aggregate was
+published. That is a model-and-protocol observation, not reconciliation or
+production performance.
+
 There is no authentication and no multi-tenancy: this is a local and
 demonstration backend, and it must not be exposed to a network.
 
@@ -340,6 +347,11 @@ make docker-up
 This builds both images and starts them. The backend listens on port 8000 and the frontend is
 reachable on port 5173, the same addresses `make dev` uses.
 
+Compose binds both ports to `127.0.0.1`, not the machine's network interfaces,
+and keeps the SQLite audit trail in the named `settlement_witness_data` volume.
+An ordinary restart preserves that volume; `make docker-down` removes it
+deliberately so the next local demonstration starts clean.
+
 Neither container runs as root. The backend runs as UID 999, from a system user created in its
 Dockerfile. The frontend runs as UID 101, using the unprivileged nginx image rather than the
 standard one. That distinction matters: the standard nginx image starts its master process as
@@ -354,6 +366,11 @@ reads the UID inside each container to confirm it is not 0.
 
 The container images are production style, so they do not reload on file changes. Use `make dev`
 for that.
+
+Read [docs/deployment.md](docs/deployment.md) before sharing a running instance
+outside your machine. This project intentionally has no authentication, so the
+local Compose configuration is safe for a local demo and is **not** a public
+deployment recipe.
 
 ## Continuous integration
 
@@ -413,6 +430,8 @@ These are no longer aspirations. Phase 1 turned each one into code, and
   independent oracle, and the public and private evaluation boundary.
 - [docs/api.md](docs/api.md) documents the backend API, with real example responses and what it
   deliberately does not expose.
+- [docs/deployment.md](docs/deployment.md) names the controls required before a remote demo.
+- [docs/submission.md](docs/submission.md) is a fact-checked demo and submission outline.
 - [docs/evaluation-contract.md](docs/evaluation-contract.md) defines how the system will be
   graded. It was written before the system it grades.
 - [docs/schema/v5/](docs/schema/v5/) holds JSON Schema generated from the models by

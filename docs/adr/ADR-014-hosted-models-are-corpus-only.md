@@ -192,3 +192,26 @@ emptiness, not only to an empty `frozenset`.
 The general lesson, written down because it has now cost three phases: in this
 codebase a guarantee is whatever the runtime enforces. A docstring, an
 annotation and a caller's good manners are three ways of not enforcing it.
+
+## Amendment, Phase 13 credentialed execution
+
+The first pre-registered credentialed shadow protocol completed all three
+declared attempts against a corpus-only OpenAI-compatible host. Its boundary
+and non-interference proofs held: the provider saw only the allow-listed corpus
+pages, and the application database was identical before and after every
+attempt.
+
+It exposed a limitation that fixtures alone could not: asking for structured
+output is not evidence that a hosted model will reliably return an admissible
+selection. The deterministic validator rejected four to six pages per run as
+malformed, and one response exceeded the bounded response budget. The third
+attempt is therefore incomplete and the protocol correctly withholds its
+aggregate rather than averaging only the convenient runs.
+
+This does not widen the adapter or add a repair path. It strengthens the
+operational rule: a host/model combination is not suitable for a claim of
+reliable linking merely because it accepts an OpenAI-shaped request or a
+structured-output preference. It must demonstrate complete, bounded,
+validator-admissible runs under the pre-registered protocol. The exact observed
+measurements are recorded in [Phase 13](../phase-reports/phase-13.md); they are
+shadow-corpus observations, not reconciliation or production performance.

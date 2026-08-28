@@ -236,6 +236,18 @@ code,
   gap: var(--gap);
 }
 
+/*
+ * A grid item defaults to its content's minimum width. That is useful for a
+ * one-word label, but wrong for a panel whose table already has its own
+ * horizontal scroll container: on a narrow screen the panel would widen the
+ * document instead of containing that overflow. Let every grid child shrink
+ * to its track, then let the component that owns a wide value or table decide
+ * how it wraps or scrolls.
+ */
+.grid > * {
+  min-width: 0;
+}
+
 .grid--halves {
   grid-template-columns: 1fr 1fr;
 }
@@ -673,6 +685,14 @@ select {
 
 .check__title {
   font-weight: 600;
+}
+
+.check__title,
+.check__detail {
+  /* The cited record identity can be a long opaque token. It belongs in the
+     certificate, but it must not widen a phone-sized audit screen. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .check__detail {

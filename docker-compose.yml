@@ -11,7 +11,13 @@ services:
       SW_API_HOST: 0.0.0.0
       SW_API_PORT: 8000
     ports:
-      - "8000:8000"
+      # A local demonstration stack, not a public service. The frontend proxies
+      # the API, so only loopback access is needed on a developer machine.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Make the audit trail explicit and durable across ordinary restarts.
+      # `make docker-down` intentionally removes it for a clean local demo.
+      - settlement_witness_data:/srv/data
     healthcheck:
       test:
         - CMD
@@ -29,7 +35,10 @@ services:
       target: runtime
     image: settlement-witness-frontend:local
     ports:
-      - "5173:8080"
+      - "127.0.0.1:5173:8080"
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  settlement_witness_data:
