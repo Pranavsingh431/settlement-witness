@@ -11,6 +11,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.banking.audits import PersistedBankFinalityAudit
+from app.banking.finality import (
+    BANK_FINALITY_VERSION,
+    BankFinalityCertificate,
+    BankFinalityOutcome,
+)
+from app.domain.banking import BankDirection
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import DecisionStatus, ReconciliationDecision
 from app.domain.evidence import EvidenceOutcome
@@ -522,3 +529,156 @@ class ReviewEventReceipt(BaseModel):
             workflow_state=appended.workflow_state,
             baseline_status=status,
         )
+
+
+SETTLEMENT_AND_FINALITY_ARE_SEPARATE = (
+    "A settlement decision says whether the provider's own records agree. Bank "
+    "finality says whether a bank statement shows the payout arriving. They are "
+    "separate conclusions from separate evidence, and a line can be RESOLVED "
+    "with no bank evidence at all."
+)
+"""The sentence every bank finality response carries.
+
+On the wire rather than only in the interface, because a client written against
+this API by somebody who never sees the screen has to be told the same thing. A
+constant, so the API tests and the interface tests assert one string rather than
+two that could drift apart."""
+
+
+class BankFinalityAuditSummary(BaseModel):
+    """One bank finality audit, without its certificates."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    audit_id: str
+    snapshot_fingerprint: str
+    """The same digest the reconciliation run over these facts carries, so the
+    two conclusions about one moment can be put side by side."""
+
+    bank_finality_version: str
+    bank_statement_schema_version: str
+    created_at: datetime
+    as_of: datetime
+    fact_count: int
+    payout_count: int
+    bank_transaction_count: int
+    outcome_counts: dict[str, int]
+    verified_payout_count: int
+    """How many payouts a bank statement shows arriving. Never a rate.
+
+    A percentage here would invite somebody to read 90 percent as nearly
+    settled, and the ten percent is the part a merchant is missing money in."""
+
+    @classmethod
+    def of(cls, recorded: PersistedBankFinalityAudit) -> "BankFinalityAuditSummary":
+        """Return the public view of a persisted audit.
+
+        The audit key is deliberately not exposed, for the same reason the run
+        key is not: it is an idempotency identity, and publishing it would
+        invite callers to depend on how it is computed.
+        """
+        counts = dict(sorted(recorded.outcome_counts.items()))
+        return cls(
+            audit_id=recorded.audit_id,
+            snapshot_fingerprint=recorded.snapshot_fingerprint,
+            bank_finality_version=recorded.bank_finality_version,
+            bank_statement_schema_version=recorded.bank_statement_schema_version,
+            created_at=recorded.created_at,
+            as_of=recorded.as_of,
+            fact_count=recorded.fact_count,
+            payout_count=recorded.payout_count,
+            bank_transaction_count=recorded.bank_transaction_count,
+            outcome_counts=counts,
+            verified_payout_count=counts.get(BankFinalityOutcome.VERIFIED_BANK_CREDIT.value, 0),
+        )
+
+
+class BankFinalityCertificateView(BaseModel):
+    """One payout's bank evidence, and what it showed.
+
+    Carries the citations and the comparison rather than a summary, so a reader
+    holding the same facts can check the outcome instead of believing it.
+
+    There is no field here called `status` and no boolean called `resolved`. The
+    outcome is the outcome, and it is not the vocabulary a settlement decision
+    uses: no value of `BankFinalityOutcome` is a `DecisionStatus`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    payout_id: str
+    payout_source_record_id: str
+    bank_reference: str | None
+    """Null when the payout declared none, which is what makes it unlinkable."""
+
+    outcome: BankFinalityOutcome
+    evidence: list[EvidenceReference]
+    matched_bank_transaction_ids: list[str]
+    expected_amount_minor: int | None
+    expected_currency: str | None
+    observed_amount_minor: int | None
+    observed_currency: str | None
+    observed_direction: BankDirection | None
+    recorded_at: datetime
+    schema_version: str
+
+    @classmethod
+    def of(cls, certificate: BankFinalityCertificate) -> "BankFinalityCertificateView":
+        """Return the public view of one certificate."""
+        verification = {
+            result.source_record_id: result.outcome for result in certificate.evidence_verification
+        }
+        return cls(
+            payout_id=certificate.payout_id,
+            payout_source_record_id=certificate.payout_source_record_id,
+            bank_reference=certificate.bank_reference,
+            outcome=certificate.outcome,
+            evidence=[
+                EvidenceReference(
+                    source_record_id=reference.source_record_id,
+                    source_system=reference.source_system.value,
+                    payload_hash=reference.payload_hash,
+                    verification_outcome=verification.get(reference.source_record_id),
+                )
+                for reference in certificate.evidence
+            ],
+            matched_bank_transaction_ids=list(certificate.matched_bank_transaction_ids),
+            expected_amount_minor=certificate.expected_amount_minor,
+            expected_currency=certificate.expected_currency,
+            observed_amount_minor=certificate.observed_amount_minor,
+            observed_currency=certificate.observed_currency,
+            observed_direction=certificate.observed_direction,
+            recorded_at=certificate.recorded_at,
+            schema_version=certificate.schema_version,
+        )
+
+
+class BankFinalityAuditDetail(BaseModel):
+    """An audit and the certificates it produced."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    audit: BankFinalityAuditSummary
+    certificates: list[BankFinalityCertificateView]
+    filtered: bool
+    """True when an outcome filter narrowed the list.
+
+    Reported so a caller cannot mistake a filtered view for the whole audit."""
+
+    settlement_and_finality_are_separate: str = SETTLEMENT_AND_FINALITY_ARE_SEPARATE
+
+
+class BankFinalityAuditPage(BaseModel):
+    """A page of audit summaries, newest first."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    audits: list[BankFinalityAuditSummary]
+    total: int
+    limit: int = Field(ge=1, le=MAX_PAGE_SIZE)
+    offset: int = Field(ge=0)
+    filtered: bool
+    """True when a snapshot filter narrowed the list."""
+
+    bank_finality_version: str = BANK_FINALITY_VERSION
+    settlement_and_finality_are_separate: str = SETTLEMENT_AND_FINALITY_ARE_SEPARATE

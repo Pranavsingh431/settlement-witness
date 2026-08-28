@@ -11,8 +11,15 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NetworkError } from '../api/errors';
+import type { BankFinalityCertificate } from '../api/types';
 import {
+  AMOUNT_MISMATCH_CERTIFICATE,
+  BANK_AUDIT,
+  BANK_AUDITS,
+  BANK_AUDIT_DETAIL,
   EXCEPTION_DECISION,
+  NO_BANK_AUDITS,
+  VERIFIED_CERTIFICATE,
   INSUFFICIENT_DECISION,
   RESOLVED_DECISION,
   RUN,
@@ -55,6 +62,9 @@ function noCertificateLine(pattern: RegExp): void {
 beforeEach(() => {
   vi.resetAllMocks();
   client.getRun.mockResolvedValue({ run: RUN, decisions: ALL_DECISIONS, filtered: false });
+  client.listBankFinalityAudits.mockResolvedValue(NO_BANK_AUDITS);
+  client.getBankFinalityAudit.mockResolvedValue(BANK_AUDIT_DETAIL);
+  client.createBankFinalityAudit.mockResolvedValue({ audit: BANK_AUDIT, created: true });
 });
 
 afterEach(() => {
@@ -360,5 +370,177 @@ describe('reaching the review queue', () => {
     const link = await screen.findByRole('link', { name: /review queue/i });
 
     expect(link).toHaveAttribute('href', `/runs/${RUN.run_id}/review`);
+  });
+});
+
+describe('bank finality', () => {
+  /**
+   * The panel exists to keep two conclusions apart.
+   *
+   * A settlement decision says the provider's own records agree. Bank finality
+   * says a bank statement shows the money arriving. Only the second means the
+   * merchant has been paid, and a screen that let one be read as the other
+   * would be the most expensive kind of wrong this project can be.
+   */
+  async function auditedRun(): Promise<void> {
+    client.listBankFinalityAudits.mockResolvedValue(BANK_AUDITS);
+    render();
+    // Waits for the certificates rather than the panel, which is on screen
+    // before either request settles.
+    await screen.findByRole('group', { name: /bank finality summary/i });
+  }
+
+  it('says nothing has been checked when there is no audit', async () => {
+    render();
+
+    expect(
+      await screen.findByText(/no bank finality audit for this snapshot yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it('makes no claim about any payout without an audit', async () => {
+    render();
+
+    expect(
+      await screen.findByText(/this system makes no claim that any payout reached the merchant/i),
+    ).toBeInTheDocument();
+  });
+
+  it('looks the audit up by the run own snapshot fingerprint', async () => {
+    render();
+
+    await waitFor(() => {
+      expect(client.listBankFinalityAudits).toHaveBeenCalledWith({
+        snapshot_fingerprint: RUN.snapshot_fingerprint,
+        limit: 1,
+      });
+    });
+  });
+
+  it('records an audit when asked', async () => {
+    render();
+    await userEvent.click(await screen.findByRole('button', { name: /audit bank finality/i }));
+
+    await waitFor(() => {
+      expect(client.createBankFinalityAudit).toHaveBeenCalled();
+    });
+  });
+
+  it('reports a failure to record without hiding the run', async () => {
+    client.createBankFinalityAudit.mockRejectedValue(new NetworkError(new Error('offline')));
+    render();
+    await userEvent.click(await screen.findByRole('button', { name: /audit bank finality/i }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/run metadata/i)).toBeInTheDocument();
+  });
+
+  it('says the two conclusions are separate, above the outcomes', async () => {
+    await auditedRun();
+
+    expect(
+      await screen.findByText(/settlement decision and bank finality are separate conclusions/i),
+    ).toBeInTheDocument();
+  });
+
+  it('counts verified credits rather than rating them', async () => {
+    await auditedRun();
+    const stats = await screen.findByRole('group', { name: /bank finality summary/i });
+
+    expect(within(stats).getByText('Bank credits verified')).toBeInTheDocument();
+    expect(within(stats).queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it('shows what a verified credit was compared against', async () => {
+    await auditedRun();
+
+    expect(await screen.findByText(/bank credit verified/i)).toBeInTheDocument();
+    expect(screen.getByText('Payout says')).toBeInTheDocument();
+    expect(screen.getByText('Bank says')).toBeInTheDocument();
+    expect(screen.getByText('BANKTXN0001')).toBeInTheDocument();
+  });
+
+  it('shows the cited records with their payload hashes', async () => {
+    await auditedRun();
+
+    expect(await screen.findByText('9c2f1a4b:PSP_API:PAYOUT:2')).toBeInTheDocument();
+    expect(screen.getByText('3e7d5c1f:PSP_API:BANK_TRANSACTION:2')).toBeInTheDocument();
+  });
+
+  it('explains an unlinkable payout as a gap rather than a discrepancy', async () => {
+    await auditedRun();
+
+    expect(await screen.findByText(/no reference to match on/i)).toBeInTheDocument();
+    expect(screen.getByText(/none on the payout record/i)).toBeInTheDocument();
+  });
+
+  it('never renders a finality outcome as a settlement status badge', async () => {
+    await auditedRun();
+    await screen.findByText(/bank credit verified/i);
+
+    const badges = screen.getAllByText('Resolved');
+    for (const badge of badges) {
+      expect(badge.closest('.certificate')).toBeNull();
+    }
+  });
+
+  it('never uses the word resolved inside a certificate', async () => {
+    await auditedRun();
+    const certificate = (await screen.findByText(/bank credit verified/i)).closest('.certificate');
+
+    expect(certificate).not.toBeNull();
+    expect(certificate).not.toHaveTextContent(/resolved/i);
+  });
+
+  it('shows a mismatch as a mismatch with both numbers', async () => {
+    client.listBankFinalityAudits.mockResolvedValue(BANK_AUDITS);
+    client.getBankFinalityAudit.mockResolvedValue({
+      ...BANK_AUDIT_DETAIL,
+      certificates: [AMOUNT_MISMATCH_CERTIFICATE],
+    });
+    render();
+
+    expect(await screen.findByText(/amount differs/i)).toBeInTheDocument();
+    expect(screen.getByText(/no tolerance band/i)).toBeInTheDocument();
+    expect(screen.getByText(/1,220,500 INR/)).toBeInTheDocument();
+    expect(screen.getByText(/1,220,501 INR CREDIT/)).toBeInTheDocument();
+  });
+
+  it('does not offer to audit again once an audit exists', async () => {
+    await auditedRun();
+
+    expect(screen.queryByRole('button', { name: /audit bank finality/i })).not.toBeInTheDocument();
+  });
+
+  it('reports a failure to read the audit list', async () => {
+    client.listBankFinalityAudits.mockRejectedValue(new NetworkError(new Error('offline')));
+    render();
+
+    expect(await screen.findByText(/could not load the bank finality audit/i)).toBeInTheDocument();
+  });
+});
+
+describe('a bank finality outcome this build has not heard of', () => {
+  /**
+   * The backend owns this vocabulary and can add to it.
+   *
+   * Refusing to render a whole audit because one certificate carries a code
+   * this build predates would be worse than showing the code as it arrived.
+   */
+  it('shows the code rather than a blank', async () => {
+    client.listBankFinalityAudits.mockResolvedValue(BANK_AUDITS);
+    client.getBankFinalityAudit.mockResolvedValue({
+      ...BANK_AUDIT_DETAIL,
+      certificates: [
+        {
+          ...VERIFIED_CERTIFICATE,
+          outcome: 'BANK_ACCOUNT_CLOSED' as BankFinalityCertificate['outcome'],
+        },
+      ],
+    });
+    render();
+
+    const codes = await screen.findAllByText('BANK_ACCOUNT_CLOSED');
+    expect(codes.length).toBeGreaterThan(0);
   });
 });

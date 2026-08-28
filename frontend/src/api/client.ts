@@ -13,6 +13,9 @@
 
 import { MalformedResponseError, NetworkError, toApiError } from './errors';
 import {
+  parseBankFinalityAuditDetail,
+  parseBankFinalityAuditPage,
+  parseBankFinalityAuditSummary,
   parseReceipt,
   parseReceiptPage,
   parseReviewEventReceipt,
@@ -23,6 +26,9 @@ import {
   parseRunSummary,
 } from './parse';
 import type {
+  BankFinalityAuditCreation,
+  BankFinalityAuditDetail,
+  BankFinalityAuditPage,
   ImportReceipt,
   ImportReceiptPage,
   ReviewAction,
@@ -37,6 +43,7 @@ import type {
 const IMPORTS = '/v1/imports';
 const RUNS = '/v1/reconciliation/runs';
 const REVIEW = '/v1/review/runs';
+const BANK_FINALITY = '/v1/bank-finality/audits';
 
 interface Answer {
   readonly status: number;
@@ -233,4 +240,37 @@ export async function appendReviewEvent(
     },
   );
   return parseReviewEventReceipt(body);
+}
+
+/**
+ * Audit every payout against the imported bank statement rows.
+ *
+ * Idempotent on the server: the same facts under the same bank finality rules
+ * return the audit already recorded rather than writing a second one. Importing
+ * a statement later does not change an earlier audit; it makes a new snapshot,
+ * and this records a new audit beside the old one.
+ */
+export async function createBankFinalityAudit(): Promise<BankFinalityAuditCreation> {
+  const { status, body } = await send(BANK_FINALITY, { method: 'POST' });
+  return { audit: parseBankFinalityAuditSummary(body), created: status === 201 };
+}
+
+export interface BankFinalityFilters {
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+  readonly snapshot_fingerprint?: string | undefined;
+}
+
+/** Return a page of bank finality audits, newest first. */
+export async function listBankFinalityAudits(
+  filters: BankFinalityFilters = {},
+): Promise<BankFinalityAuditPage> {
+  const { body } = await send(`${BANK_FINALITY}${query({ ...filters })}`);
+  return parseBankFinalityAuditPage(body);
+}
+
+/** Return one audit with its certificates. */
+export async function getBankFinalityAudit(auditId: string): Promise<BankFinalityAuditDetail> {
+  const { body } = await send(`${BANK_FINALITY}/${encodeURIComponent(auditId)}`);
+  return parseBankFinalityAuditDetail(body);
 }

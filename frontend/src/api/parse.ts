@@ -15,6 +15,12 @@
 
 import { MalformedResponseError } from './errors';
 import type {
+  BankDirection,
+  BankFinalityAuditDetail,
+  BankFinalityAuditPage,
+  BankFinalityAuditSummary,
+  BankFinalityCertificate,
+  BankFinalityOutcome,
   DecisionStatus,
   DecisionView,
   EvidenceReference,
@@ -288,5 +294,80 @@ export function parseReviewEventReceipt(value: unknown): ReviewEventReceipt {
     workflow_state: str(raw, 'workflow_state', 'review event receipt') as ReviewWorkflowState,
     baseline_status: str(raw, 'baseline_status', 'review event receipt') as DecisionStatus,
     baseline_unchanged_note: str(raw, 'baseline_unchanged_note', 'review event receipt'),
+  };
+}
+
+export function parseBankFinalityAuditSummary(value: unknown): BankFinalityAuditSummary {
+  const raw = object(value, 'bank finality audit');
+  return {
+    audit_id: str(raw, 'audit_id', 'bank finality audit'),
+    snapshot_fingerprint: str(raw, 'snapshot_fingerprint', 'bank finality audit'),
+    bank_finality_version: str(raw, 'bank_finality_version', 'bank finality audit'),
+    bank_statement_schema_version: str(raw, 'bank_statement_schema_version', 'bank finality audit'),
+    created_at: str(raw, 'created_at', 'bank finality audit'),
+    as_of: str(raw, 'as_of', 'bank finality audit'),
+    fact_count: num(raw, 'fact_count', 'bank finality audit'),
+    payout_count: num(raw, 'payout_count', 'bank finality audit'),
+    bank_transaction_count: num(raw, 'bank_transaction_count', 'bank finality audit'),
+    outcome_counts: counts(raw, 'outcome_counts', 'bank finality audit'),
+    verified_payout_count: num(raw, 'verified_payout_count', 'bank finality audit'),
+  };
+}
+
+export function parseBankFinalityCertificate(value: unknown): BankFinalityCertificate {
+  const raw = object(value, 'bank finality certificate');
+  return {
+    payout_id: str(raw, 'payout_id', 'bank finality certificate'),
+    payout_source_record_id: str(raw, 'payout_source_record_id', 'bank finality certificate'),
+    bank_reference: nullableStr(raw, 'bank_reference', 'bank finality certificate'),
+    outcome: str(raw, 'outcome', 'bank finality certificate') as BankFinalityOutcome,
+    evidence: list(raw, 'evidence', 'bank finality certificate', parseEvidence),
+    matched_bank_transaction_ids: strings(
+      raw,
+      'matched_bank_transaction_ids',
+      'bank finality certificate',
+    ),
+    expected_amount_minor: nullableNum(raw, 'expected_amount_minor', 'bank finality certificate'),
+    expected_currency: nullableStr(raw, 'expected_currency', 'bank finality certificate'),
+    observed_amount_minor: nullableNum(raw, 'observed_amount_minor', 'bank finality certificate'),
+    observed_currency: nullableStr(raw, 'observed_currency', 'bank finality certificate'),
+    observed_direction: nullableStr(
+      raw,
+      'observed_direction',
+      'bank finality certificate',
+    ) as BankDirection | null,
+    recorded_at: str(raw, 'recorded_at', 'bank finality certificate'),
+    schema_version: str(raw, 'schema_version', 'bank finality certificate'),
+  };
+}
+
+export function parseBankFinalityAuditDetail(value: unknown): BankFinalityAuditDetail {
+  const raw = object(value, 'bank finality audit');
+  return {
+    audit: parseBankFinalityAuditSummary(raw.audit),
+    certificates: list(raw, 'certificates', 'bank finality audit', parseBankFinalityCertificate),
+    filtered: bool(raw, 'filtered', 'bank finality audit'),
+    settlement_and_finality_are_separate: str(
+      raw,
+      'settlement_and_finality_are_separate',
+      'bank finality audit',
+    ),
+  };
+}
+
+export function parseBankFinalityAuditPage(value: unknown): BankFinalityAuditPage {
+  const raw = object(value, 'bank finality audits');
+  return {
+    audits: list(raw, 'audits', 'bank finality audits', parseBankFinalityAuditSummary),
+    total: num(raw, 'total', 'bank finality audits'),
+    limit: num(raw, 'limit', 'bank finality audits'),
+    offset: num(raw, 'offset', 'bank finality audits'),
+    filtered: bool(raw, 'filtered', 'bank finality audits'),
+    bank_finality_version: str(raw, 'bank_finality_version', 'bank finality audits'),
+    settlement_and_finality_are_separate: str(
+      raw,
+      'settlement_and_finality_are_separate',
+      'bank finality audits',
+    ),
   };
 }

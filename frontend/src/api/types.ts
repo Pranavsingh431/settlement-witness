@@ -42,12 +42,16 @@ export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
 /**
  * The record types the CSV parser has a schema for.
  *
- * `BANK_TRANSACTION` is a valid source record type in the domain contract and
- * the parser has no schema for it, so the import form must not offer it. The
- * server refuses it with 422 either way; not offering it is what stops a person
- * choosing it and being told no.
+ * All four the contract defines, since Phase 12 gave `BANK_TRANSACTION` a
+ * layout. A bank statement is the only document here the payment provider did
+ * not write, and it is the only evidence that can say a payout arrived.
  */
-export const IMPORTABLE_RECORD_TYPES = ['PAYMENT_EVENT', 'SETTLEMENT_LINE', 'PAYOUT'] as const;
+export const IMPORTABLE_RECORD_TYPES = [
+  'PAYMENT_EVENT',
+  'SETTLEMENT_LINE',
+  'PAYOUT',
+  'BANK_TRANSACTION',
+] as const;
 export type ImportableRecordType = (typeof IMPORTABLE_RECORD_TYPES)[number];
 
 export type EvidenceOutcome =
@@ -235,4 +239,86 @@ export interface ReviewEventReceipt {
   /** The status after the event, which is the status before it. */
   readonly baseline_status: DecisionStatus;
   readonly baseline_unchanged_note: string;
+}
+
+/**
+ * What the records say about one payout reaching the bank.
+ *
+ * Seven outcomes and no maybe. Deliberately sharing no value with
+ * `DecisionStatus`: a settlement decision and a bank finality outcome are
+ * different conclusions from different evidence, and a shared word would be the
+ * beginning of a screen that showed one where the other belongs.
+ */
+export type BankFinalityOutcome =
+  | 'VERIFIED_BANK_CREDIT'
+  | 'MISSING_BANK_EVIDENCE'
+  | 'UNLINKABLE_PAYOUT'
+  | 'AMBIGUOUS_BANK_EVIDENCE'
+  | 'BANK_DIRECTION_MISMATCH'
+  | 'BANK_AMOUNT_MISMATCH'
+  | 'BANK_CURRENCY_MISMATCH';
+
+export type BankDirection = 'CREDIT' | 'DEBIT';
+
+export interface BankFinalityCertificate {
+  readonly payout_id: string;
+  readonly payout_source_record_id: string;
+  /** Null when the payout declared none, which is what makes it unlinkable. */
+  readonly bank_reference: string | null;
+  readonly outcome: BankFinalityOutcome;
+  readonly evidence: readonly EvidenceReference[];
+  readonly matched_bank_transaction_ids: readonly string[];
+  readonly expected_amount_minor: number | null;
+  readonly expected_currency: string | null;
+  readonly observed_amount_minor: number | null;
+  readonly observed_currency: string | null;
+  readonly observed_direction: BankDirection | null;
+  readonly recorded_at: string;
+  readonly schema_version: string;
+}
+
+export interface BankFinalityAuditSummary {
+  readonly audit_id: string;
+  /** The same digest the reconciliation run over these facts carries. */
+  readonly snapshot_fingerprint: string;
+  readonly bank_finality_version: string;
+  readonly bank_statement_schema_version: string;
+  readonly created_at: string;
+  readonly as_of: string;
+  readonly fact_count: number;
+  readonly payout_count: number;
+  readonly bank_transaction_count: number;
+  readonly outcome_counts: Readonly<Record<string, number>>;
+  /** A count, never a rate. See the API docs for why. */
+  readonly verified_payout_count: number;
+}
+
+export interface BankFinalityAuditDetail {
+  readonly audit: BankFinalityAuditSummary;
+  readonly certificates: readonly BankFinalityCertificate[];
+  readonly filtered: boolean;
+  readonly settlement_and_finality_are_separate: string;
+}
+
+export interface BankFinalityAuditPage {
+  readonly audits: readonly BankFinalityAuditSummary[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly filtered: boolean;
+  readonly bank_finality_version: string;
+  readonly settlement_and_finality_are_separate: string;
+}
+
+/**
+ * The result of asking for a bank finality audit.
+ *
+ * 201 means a new immutable audit was recorded. 200 means an identical snapshot
+ * under the same bank finality rules already had one and it was returned rather
+ * than duplicated. Callers need to tell those apart, so the status is carried
+ * out rather than flattened into "it worked".
+ */
+export interface BankFinalityAuditCreation {
+  readonly audit: BankFinalityAuditSummary;
+  readonly created: boolean;
 }

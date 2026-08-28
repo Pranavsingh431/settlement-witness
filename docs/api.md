@@ -1,6 +1,6 @@
 # Backend API
 
-The import, reconciliation and human review API. Examples below are real
+The import, reconciliation, bank finality and human review API. Examples below are real
 responses, taken from a database holding the example documents in
 `data/fixtures/ingestion/`.
 
@@ -18,10 +18,18 @@ attribute it to. The review API is a workflow record and not an accountability
 one, and nothing in it answers "who decided this".
 
 **There is no endpoint that changes anything already stored.** Every route is a
-`GET` apart from the three that create something: an import receipt, a
-reconciliation run and a human review event. Facts, receipts, runs, decisions
-and review events are all append-only in the database, and the API adds no
-exception.
+`GET` apart from the four that create something: an import receipt, a
+reconciliation run, a bank finality audit and a human review event. Facts,
+receipts, runs, decisions, bank finality audits and review events are all
+append-only in the database, and the API adds no exception.
+
+**A settlement decision is not a claim that money arrived.** `RESOLVED` means
+the provider's own records agree with each other and with the invariants over
+them. Whether a bank shows the payout arriving is a separate conclusion from
+separate evidence, served under `/v1/bank-finality`, and a line can be
+`RESOLVED` with no bank evidence at all. The two vocabularies share no value, so
+neither can be rendered as the other. See
+[ADR-016](adr/ADR-016-settlement-agreement-is-not-bank-finality.md).
 
 **There is no endpoint that changes a stored decision.** Every reconciliation
 route is a `GET`, apart from the one that creates a run, and a test asserts no
@@ -216,8 +224,12 @@ These leave no receipt, because no import was attempted.
 | --- | --- |
 | Missing `file`, `source_system` or `record_type` | 422 |
 | A value that is not a member of its enum | 422 |
-| `record_type=BANK_TRANSACTION`, which has no CSV schema | 422 |
 | Body or document over `SW_MAX_UPLOAD_BYTES` | 413 |
+
+Every record type the contract defines now has a CSV schema, so nothing is
+refused for want of one. The refusal below remains for a record type added to
+the contract without a layout, so such a type fails as a clear 422 rather than
+as a rejected receipt blaming the caller's file:
 
 ```json
 {
@@ -563,6 +575,105 @@ There is no reviewer in this payload. See the note at the top of this document.
 
 Every one of them writes nothing.
 
+## `POST /v1/bank-finality/audits`
+
+Audit every payout against the imported bank statement rows.
+
+A payout verifies when exactly one statement row carries its reference, that row
+is a credit, and its amount and currency equal the payout's **exactly**. There
+is no tolerance band, no rounding, no nearest-amount search, no date window, no
+case folding of references and no probable match. One minor unit of difference
+is a mismatch.
+
+Idempotent, like a reconciliation run. The same facts under the same bank
+finality rules return the audit already recorded, with status 200 rather than
+201. Importing a statement later does not change an earlier audit: it makes a
+new snapshot, and this endpoint then records a new audit beside the old one.
+
+```json
+{
+  "audit_id": "a1f0c9443bb7e4e5fb4eee88a79b6dc7",
+  "snapshot_fingerprint": "7092df18a31c4b9386a3120e3134d6867f8728c1674a367bc73018f887cb84dc",
+  "bank_finality_version": "1.0.0",
+  "bank_statement_schema_version": "1.0.0",
+  "created_at": "2026-08-26T11:45:00Z",
+  "as_of": "2026-08-24T12:00:00Z",
+  "fact_count": 11,
+  "payout_count": 2,
+  "bank_transaction_count": 1,
+  "outcome_counts": { "VERIFIED_BANK_CREDIT": 1, "UNLINKABLE_PAYOUT": 1, "...": 0 },
+  "verified_payout_count": 1
+}
+```
+
+`snapshot_fingerprint` is the same digest a reconciliation run over these facts
+carries, which is how a run and its audit are put side by side.
+
+`verified_payout_count` is a count and never a rate. A percentage would invite
+reading ninety percent as nearly settled, and the ten percent is where a
+merchant is missing money.
+
+409 with `no_facts` when there is nothing to audit.
+
+## `GET /v1/bank-finality/audits`
+
+A page of audit summaries, newest first. `limit`, `offset`, and
+`snapshot_fingerprint` to narrow to one snapshot. `filtered` says which view a
+caller is looking at.
+
+## `GET /v1/bank-finality/audits/{audit_id}`
+
+One audit and its certificates, ordered by payout ID. `outcome` narrows the
+certificates and never the summary counts.
+
+```json
+{
+  "payout_id": "payout-0001",
+  "payout_source_record_id": "9c2f1a4b:PSP_API:PAYOUT:2",
+  "bank_reference": "UTR2026082100001",
+  "outcome": "VERIFIED_BANK_CREDIT",
+  "evidence": [
+    { "source_record_id": "9c2f1a4b:PSP_API:PAYOUT:2", "source_system": "PSP_API",
+      "payload_hash": "...", "verification_outcome": "VERIFIED" },
+    { "source_record_id": "3e7d5c1f:PSP_API:BANK_TRANSACTION:2", "source_system": "PSP_API",
+      "payload_hash": "...", "verification_outcome": "VERIFIED" }
+  ],
+  "matched_bank_transaction_ids": ["BANKTXN0001"],
+  "expected_amount_minor": 1220500,
+  "expected_currency": "INR",
+  "observed_amount_minor": 1220500,
+  "observed_currency": "INR",
+  "observed_direction": "CREDIT",
+  "recorded_at": "2026-08-24T12:00:00Z",
+  "schema_version": "1.0.0"
+}
+```
+
+There is no field called `status` and no boolean called `resolved`. The outcome
+is one of seven, and none of them is a `DecisionStatus`:
+
+| Outcome | What the records said |
+| --- | --- |
+| `VERIFIED_BANK_CREDIT` | Exactly one credit carrying this reference, for this exact amount and currency |
+| `MISSING_BANK_EVIDENCE` | The payout names a reference and no imported statement row carries it. Not a claim the money failed to arrive: a claim this system has not been shown it arriving |
+| `UNLINKABLE_PAYOUT` | The payout carries no bank reference, so no exact association is possible. A gap in the provider record, not a discrepancy |
+| `AMBIGUOUS_BANK_EVIDENCE` | Two or more rows carry the reference. Every candidate is cited, because choosing one would invent a fact |
+| `BANK_DIRECTION_MISMATCH` | The one row carrying the reference is a debit |
+| `BANK_AMOUNT_MISMATCH` | The credit is for a different number of minor units. Any difference |
+| `BANK_CURRENCY_MISMATCH` | The credit is in a different currency, so the amounts cannot be compared |
+
+`expected_*` and `observed_*` are filled in only when exactly one row was found,
+because a comparison against two rows or none is not a comparison.
+
+Every response carries `settlement_and_finality_are_separate`, which says in one
+sentence that these are two conclusions from two kinds of evidence.
+
+## `GET /v1/bank-finality/audits/{audit_id}/payouts/{payout_id}`
+
+One certificate, in the same shape as it appears in the audit detail. 404 if
+either the audit or the payout is unknown; the audit is checked first, so the
+message names the right thing.
+
 ## Errors
 
 Every failure has one shape: a code and a sentence, nested under `detail`.
@@ -590,8 +701,8 @@ broke, never by quoting what was sent:
 
 | Status | When |
 | --- | --- |
-| 404 | Unknown run, decision, import receipt or queue item |
-| 409 | Nothing to reconcile, or a review command refused (see above) |
+| 404 | Unknown run, decision, import receipt, queue item, audit or certificate |
+| 409 | Nothing to reconcile or audit, or a review command refused (see above) |
 | 413 | Body or uploaded document over `SW_MAX_UPLOAD_BYTES` |
 | 422 | Invalid parameter or form field, an unsupported record type, or a contract rule refusing something |
 
@@ -608,6 +719,7 @@ service appears here. See
 
 Two identical calls return identical bytes. Decisions are ordered by settlement
 line ID, matching how the baseline emits them, runs by created-at then run ID,
-and review queue items by settlement line ID again. A review timeline is ordered
+review queue items by settlement line ID again, and bank finality certificates
+by payout ID. A review timeline is ordered
 by the sequence the database assigned. The persisted run agrees with what the CLI prints for the same snapshot, and
 a test compares them.

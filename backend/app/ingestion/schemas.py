@@ -1,14 +1,21 @@
 """The CSV document schemas this system accepts.
 
-Three schemas, each tied to one record type. Headers are exact: a missing column
+Four schemas, each tied to one record type. Headers are exact: a missing column
 and an unexpected column are both errors. A file that is nearly right is more
 dangerous than one that is obviously wrong, because a silently ignored column is
 a field that quietly stopped being reconciled.
+
+The bank transaction schema is the only one describing a document the payment
+provider did not write, and it is deliberately the narrowest. It carries what
+bank finality has to compare exactly and nothing else: no description, no
+counterparty, no balance. A column that cannot be compared exactly is a column
+that invites a fuzzy match.
 """
 
 from enum import StrEnum
 from typing import Final
 
+from app.domain.banking import BankDirection
 from app.domain.facts import SourceRecordType
 
 PARSER_VERSION: Final = "3.0.0"
@@ -56,6 +63,13 @@ class ColumnKind(StrEnum):
     OPTIONAL_IDENTIFIER = "OPTIONAL_IDENTIFIER"
     """Identifier text, or empty to mean absent."""
 
+    BANK_DIRECTION = "BANK_DIRECTION"
+    """CREDIT or DEBIT, as the contract spells them.
+
+    A direction column rather than a signed amount. An amount whose sign carries
+    the direction lets a lost minus turn a payment out into a payment in, and
+    that is the one mistake a finality audit must never make."""
+
 
 #: Column layouts, in the order the documents declare them. The order is part of
 #: the contract: it is what a reader of the file sees, and it is checked.
@@ -94,18 +108,41 @@ PAYOUT_COLUMNS: Final[tuple[tuple[str, ColumnKind], ...]] = (
     ("occurred_at", ColumnKind.TIMESTAMP),
 )
 
+BANK_TRANSACTION_COLUMNS: Final[tuple[tuple[str, ColumnKind], ...]] = (
+    ("provider_event_id", ColumnKind.IDENTIFIER),
+    ("bank_transaction_id", ColumnKind.IDENTIFIER),
+    ("bank_reference", ColumnKind.IDENTIFIER),
+    ("direction", ColumnKind.BANK_DIRECTION),
+    ("amount_minor", ColumnKind.POSITIVE_AMOUNT_MINOR),
+    ("currency", ColumnKind.CURRENCY),
+    ("occurred_at", ColumnKind.TIMESTAMP),
+)
+"""The statement rows bank finality can use, and only those.
+
+`bank_reference` is required rather than optional. A statement row carrying no
+reference cannot be associated with any payout by exact matching, and exact
+matching is the only association this system performs, so storing such a row
+would store a fact nothing could ever cite. That is a real limitation of this
+schema and it is written down rather than worked around: a statement export
+whose rows have no reference cannot be imported here at all."""
+
 #: Which layout belongs to which record type. A document is read as exactly one
 #: record type, declared by the caller, so a file cannot be guessed at.
 COLUMNS_BY_RECORD_TYPE: Final[dict[SourceRecordType, tuple[tuple[str, ColumnKind], ...]]] = {
     SourceRecordType.PAYMENT_EVENT: PAYMENT_EVENT_COLUMNS,
     SourceRecordType.SETTLEMENT_LINE: SETTLEMENT_LINE_COLUMNS,
     SourceRecordType.PAYOUT: PAYOUT_COLUMNS,
+    SourceRecordType.BANK_TRANSACTION: BANK_TRANSACTION_COLUMNS,
 }
 
-#: Record types this parser can read. BANK_TRANSACTION is a valid source record
-#: type in the contract and has no CSV schema yet, so importing one is refused
-#: rather than approximated.
+#: Record types this parser can read. Every type the contract defines now has a
+#: schema, so nothing is refused for want of one. The set is still derived from
+#: the layouts rather than written out, so a type added without a layout is
+#: refused rather than silently unreadable.
 SUPPORTED_RECORD_TYPES: Final[frozenset[SourceRecordType]] = frozenset(COLUMNS_BY_RECORD_TYPE)
+
+BANK_DIRECTIONS: Final[tuple[str, ...]] = tuple(sorted(member.value for member in BankDirection))
+"""The directions a statement row may declare, for the parser's error message."""
 
 
 def expected_headers(record_type: SourceRecordType) -> tuple[str, ...]:

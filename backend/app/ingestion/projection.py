@@ -10,6 +10,10 @@ the ``source_record_id`` of the fact it came from, so every lifecycle record can
 be traced back to the row of the document that produced it.
 """
 
+from collections.abc import Callable
+from typing import Final
+
+from app.domain.banking import BankDirection, BankTransaction
 from app.domain.facts import SourceFact, SourceRecordType
 from app.domain.lifecycle import (
     PaymentEvent,
@@ -20,20 +24,7 @@ from app.domain.lifecycle import (
 from app.domain.money import Money, MoneyBreakdown
 from app.domain.primitives import CanonicalPayload
 
-type LifecycleRecord = PaymentEvent | SettlementLine | PayoutBatch
-
-
-class UnsupportedProjectionError(ValueError):
-    """Raised when a fact has no lifecycle projection defined.
-
-    ``BANK_TRANSACTION`` is a valid record type in the contract with no CSV
-    schema and no projection yet. Refusing is honest; inventing a shape for it
-    would not be.
-    """
-
-    def __init__(self, record_type: SourceRecordType) -> None:
-        super().__init__(f"no lifecycle projection is defined for {record_type.value}")
-        self.record_type = record_type
+type LifecycleRecord = PaymentEvent | SettlementLine | PayoutBatch | BankTransaction
 
 
 def _text(payload: CanonicalPayload, key: str) -> str:
@@ -114,16 +105,39 @@ def project_payout(fact: SourceFact) -> PayoutBatch:
     )
 
 
-def project(fact: SourceFact) -> LifecycleRecord:
-    """Return the lifecycle record a fact describes.
+def project_bank_transaction(fact: SourceFact) -> BankTransaction:
+    """Return the bank statement line a fact describes.
 
-    Raises:
-        UnsupportedProjectionError: If the record type has no projection.
+    The amount is carried as the magnitude the document declared, with the
+    direction beside it. Nothing here folds the two into a signed number: a
+    credit and a debit are different facts about the world, and a sign is one
+    lost character away from being the other.
     """
-    if fact.source_record_type is SourceRecordType.PAYMENT_EVENT:
-        return project_payment_event(fact)
-    if fact.source_record_type is SourceRecordType.SETTLEMENT_LINE:
-        return project_settlement_line(fact)
-    if fact.source_record_type is SourceRecordType.PAYOUT:
-        return project_payout(fact)
-    raise UnsupportedProjectionError(fact.source_record_type)
+    payload = fact.canonical_payload
+    return BankTransaction(
+        bank_transaction_id=_text(payload, "bank_transaction_id"),
+        bank_reference=_text(payload, "bank_reference"),
+        direction=BankDirection(_text(payload, "direction")),
+        amount_minor=_amount(payload, "amount_minor"),
+        currency=_text(payload, "currency"),
+        occurred_at=fact.occurred_at,
+        source_record_id=fact.source_record_id,
+    )
+
+
+#: One projection per record type the contract defines.
+#:
+#: A mapping rather than a chain of branches, so the day a fifth record type is
+#: added it is missing from here loudly rather than falling through to a default.
+#: `test_every_record_type_has_a_projection` asserts the mapping is total.
+PROJECTIONS: Final[dict[SourceRecordType, Callable[[SourceFact], LifecycleRecord]]] = {
+    SourceRecordType.PAYMENT_EVENT: project_payment_event,
+    SourceRecordType.SETTLEMENT_LINE: project_settlement_line,
+    SourceRecordType.PAYOUT: project_payout,
+    SourceRecordType.BANK_TRANSACTION: project_bank_transaction,
+}
+
+
+def project(fact: SourceFact) -> LifecycleRecord:
+    """Return the lifecycle record a fact describes."""
+    return PROJECTIONS[fact.source_record_type](fact)

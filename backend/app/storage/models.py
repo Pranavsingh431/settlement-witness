@@ -1,6 +1,6 @@
 """Database tables.
 
-Five tables, all append-only.
+Seven tables, all append-only.
 
 ``source_facts`` holds what the system believes. It is append-only: a row is
 inserted once and never updated or deleted. ``import_receipts`` holds what the
@@ -14,8 +14,13 @@ rule versions, and it is never revised. New facts, or a new rule version,
 produce a new run beside the old one, so the history of what was concluded and
 on what evidence stays intact.
 
+``bank_finality_audits`` and ``bank_finality_certificates`` hold a different
+conclusion about the same facts: whether a bank says a payout arrived. They are
+separate from the reconciliation tables because they answer a separate question
+from separate evidence, and nothing in them can change a decision.
+
 ``review_events`` holds what people did about those conclusions. It is the only
-table that is not about the ledger, and it changes nothing in the four above.
+table that is not about the ledger, and it changes nothing in the tables above.
 
 Every table here is protected by triggers that abort UPDATE and DELETE.
 """
@@ -259,3 +264,79 @@ class ReviewEventRow(Base):
     """What the command asked for, so a retry can be told from a reuse."""
 
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BankFinalityAuditRow(Base):
+    """One complete bank finality audit over one snapshot of facts.
+
+    Immutable, like a reconciliation run and for the same reason. New bank
+    evidence is a new snapshot and therefore a new audit beside the old one; the
+    earlier conclusion stays readable exactly as it was, which is what makes
+    "we had not been shown the statement yet" a recoverable fact rather than a
+    rewritten one.
+    """
+
+    __tablename__ = "bank_finality_audits"
+    __table_args__ = (
+        # The idempotency identity of an audit: these facts under these rules.
+        UniqueConstraint("audit_key", name="uq_bank_finality_audits_audit_key"),
+        CheckConstraint(
+            "length(snapshot_fingerprint) = 64", name="ck_bank_finality_audits_fingerprint"
+        ),
+        CheckConstraint("fact_count >= 0", name="ck_bank_finality_audits_fact_count"),
+    )
+
+    audit_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    audit_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    """Digest of the snapshot fingerprint and the bank finality rule versions.
+
+    Deliberately not the reconciliation run key. The two answer different
+    questions and move for different reasons: a baseline change makes a new run
+    and not a new audit, and a bank rule change makes a new audit and not a new
+    run."""
+
+    snapshot_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    """The same digest a reconciliation run over these facts carries, so the two
+    conclusions about one moment can be put side by side."""
+
+    bank_finality_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    bank_statement_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fact_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    payout_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    bank_transaction_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+
+
+class BankFinalityCertificateRow(Base):
+    """One payout's bank finality certificate within one audit.
+
+    The queried columns are stored as columns and the complete certificate is
+    stored as canonical JSON beside them, exactly as a decision is. The JSON is
+    the record: it round-trips through the model, so a stored certificate can be
+    recomputed from the same facts and compared rather than believed.
+    """
+
+    __tablename__ = "bank_finality_certificates"
+    __table_args__ = (
+        UniqueConstraint("audit_id", "payout_id", name="uq_bank_finality_certificates_payout"),
+        ForeignKeyConstraint(
+            ["audit_id"],
+            ["bank_finality_audits.audit_id"],
+            name="fk_bank_finality_certificates_audit",
+        ),
+    )
+
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    audit_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    payout_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    bank_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    """Null when the payout declared none, which is what makes it unlinkable."""
+
+    matched_bank_transaction_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    certificate_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    """The complete certificate, exactly as the model serialises it."""

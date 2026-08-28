@@ -34,6 +34,7 @@ DOCUMENTS: dict[SourceRecordType, str] = {
     SourceRecordType.PAYMENT_EVENT: "payment_events.csv",
     SourceRecordType.SETTLEMENT_LINE: "settlement_lines.csv",
     SourceRecordType.PAYOUT: "payouts.csv",
+    SourceRecordType.BANK_TRANSACTION: "bank_transactions.csv",
 }
 
 IMPORTS = "/v1/imports"
@@ -128,7 +129,7 @@ class TestAcceptingADocument:
         run = import_client.post("/v1/reconciliation/runs")
 
         assert run.status_code == 201
-        assert run.json()["fact_count"] == fact_count(api_engine) == 10
+        assert run.json()["fact_count"] == fact_count(api_engine) == 11
         assert run.json()["decision_count"] > 0
 
 
@@ -242,26 +243,51 @@ class TestRequestsThatNeverReachTheService:
     def _receipt_count(client: TestClient) -> int:
         return int(client.get(IMPORTS).json()["total"])
 
-    def test_an_unsupported_record_type_is_refused(self, import_client: TestClient) -> None:
-        """BANK_TRANSACTION is in the contract and has no CSV schema.
+    def test_a_record_type_without_a_schema_is_refused_at_the_boundary(
+        self, import_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every type has a layout now, so one is taken away to check.
 
-        Refused deliberately at the boundary rather than allowed through to
-        become a rejected receipt, so a caller learns the type is not importable
-        rather than that their file was bad.
+        The guard is not decoration. It is what makes a record type added to
+        the contract without a CSV layout a clear 422 rather than a rejected
+        receipt blaming the caller's file, and there is no way to reach it
+        without removing a layout, because the mapping is total.
         """
+        monkeypatch.setattr(
+            "app.api.imports.SUPPORTED_RECORD_TYPES",
+            SUPPORTED_RECORD_TYPES - {SourceRecordType.BANK_TRANSACTION},
+        )
+
         response = upload(import_client, b"anything", record_type="BANK_TRANSACTION")
 
         assert response.status_code == 422
         assert response.json()["detail"]["error"] == "unsupported_record_type"
         assert self._receipt_count(import_client) == 0
 
-    def test_the_refusal_names_what_is_supported(self, import_client: TestClient) -> None:
+    def test_that_refusal_names_what_is_supported(
+        self, import_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """So the caller can act on it without reading the source."""
+        monkeypatch.setattr(
+            "app.api.imports.SUPPORTED_RECORD_TYPES",
+            SUPPORTED_RECORD_TYPES - {SourceRecordType.BANK_TRANSACTION},
+        )
+
         detail = upload(import_client, b"x", record_type="BANK_TRANSACTION").json()["detail"]
 
         assert "PAYMENT_EVENT" in detail["detail"]
         assert "SETTLEMENT_LINE" in detail["detail"]
         assert "PAYOUT" in detail["detail"]
+
+    def test_every_contract_record_type_now_has_a_schema(self) -> None:
+        """This replaces a test asserting BANK_TRANSACTION had none.
+
+        It had none until Phase 12 gave it one. The refusal path is still there
+        and still tested, in `tests/ingestion/test_parsing.py`, against a type
+        with its layout removed. What is asserted here is the property that
+        matters to a caller: nothing the contract names is unimportable.
+        """
+        assert set(SUPPORTED_RECORD_TYPES) == set(SourceRecordType)
 
     def test_an_unreadable_record_type_is_refused(self, import_client: TestClient) -> None:
         """Not an enum member at all."""
@@ -416,10 +442,17 @@ class TestNamingTheDocument:
 class TestListingReceipts:
     """The import history, which is the audit trail made readable."""
 
+    #: One attempt per record type, plus a duplicate and a refusal.
+    #:
+    #: Derived rather than written out, so adding a record type to the contract
+    #: does not silently leave these tests asserting a stale count.
+    ATTEMPTS = len(SUPPORTED_RECORD_TYPES) + 2
+
     @pytest.fixture
     def history(self, import_client: TestClient) -> TestClient:
-        """Return a client whose database holds five attempts of four kinds."""
-        for record_type in SUPPORTED_RECORD_TYPES:
+        """Return a client whose database holds one attempt of every kind,
+        plus a duplicate and a document that was refused."""
+        for record_type in sorted(SUPPORTED_RECORD_TYPES):
             upload_fixture(import_client, record_type)
         upload_fixture(import_client, SourceRecordType.PAYOUT)
         upload(import_client, b"rubbish", record_type="PAYMENT_EVENT")
@@ -429,8 +462,8 @@ class TestListingReceipts:
         """Including the ones that wrote nothing."""
         body = history.get(IMPORTS).json()
 
-        assert body["total"] == 5
-        assert len(body["receipts"]) == 5
+        assert body["total"] == self.ATTEMPTS
+        assert len(body["receipts"]) == self.ATTEMPTS
 
     def test_the_newest_attempt_comes_first(self, history: TestClient) -> None:
         """Newest first by the order the attempts were made in."""
@@ -464,24 +497,25 @@ class TestListingReceipts:
         body = history.get(IMPORTS, params={"limit": 2}).json()
 
         assert len(body["receipts"]) == 2
-        assert body["total"] == 5
+        assert body["total"] == self.ATTEMPTS
         assert body["limit"] == 2
 
     def test_an_offset_continues_the_list(self, history: TestClient) -> None:
         """Paging through gives every receipt exactly once."""
-        first = history.get(IMPORTS, params={"limit": 3, "offset": 0}).json()["receipts"]
-        second = history.get(IMPORTS, params={"limit": 3, "offset": 3}).json()["receipts"]
+        size = self.ATTEMPTS // 2 + 1
+        first = history.get(IMPORTS, params={"limit": size, "offset": 0}).json()["receipts"]
+        second = history.get(IMPORTS, params={"limit": size, "offset": size}).json()["receipts"]
 
         identifiers = [receipt["receipt_id"] for receipt in first + second]
-        assert len(identifiers) == 5
-        assert len(set(identifiers)) == 5
+        assert len(identifiers) == self.ATTEMPTS
+        assert len(set(identifiers)) == self.ATTEMPTS
 
     def test_an_offset_past_the_end_is_empty(self, history: TestClient) -> None:
         """Not an error, and the total still describes the whole list."""
         body = history.get(IMPORTS, params={"offset": 500}).json()
 
         assert body["receipts"] == []
-        assert body["total"] == 5
+        assert body["total"] == self.ATTEMPTS
 
     @pytest.mark.parametrize(
         ("parameter", "value"), [("limit", 0), ("limit", 1000), ("offset", -1)]
@@ -500,7 +534,7 @@ class TestListingReceipts:
         """And the total describes the filtered list, not the table."""
         body = history.get(IMPORTS, params={"outcome": "ACCEPTED"}).json()
 
-        assert body["total"] == 3
+        assert body["total"] == len(SUPPORTED_RECORD_TYPES)
         assert {receipt["outcome"] for receipt in body["receipts"]} == {"ACCEPTED"}
         assert body["filtered"] is True
 
@@ -513,7 +547,10 @@ class TestListingReceipts:
 
     def test_filtering_by_source_system(self, history: TestClient) -> None:
         """Every attempt here declared the same system."""
-        assert history.get(IMPORTS, params={"source_system": "PSP_API"}).json()["total"] == 5
+        assert (
+            history.get(IMPORTS, params={"source_system": "PSP_API"}).json()["total"]
+            == self.ATTEMPTS
+        )
         assert history.get(IMPORTS, params={"source_system": "BANK_STATEMENT"}).json()["total"] == 0
 
     def test_filters_combine(self, history: TestClient) -> None:
@@ -531,7 +568,7 @@ class TestListingReceipts:
         body = history.get(IMPORTS, params={"outcome": "ACCEPTED", "limit": 1}).json()
 
         assert len(body["receipts"]) == 1
-        assert body["total"] == 3
+        assert body["total"] == len(SUPPORTED_RECORD_TYPES)
 
 
 class TestReadingOneReceipt:
@@ -724,7 +761,7 @@ class TestTheApiAgreesWithTheCommandLine:
             over_cli = SourceFactRepository(session).all_facts()
         cli_engine.dispose()
 
-        assert len(over_http) == 10
+        assert len(over_http) == 11
         assert [fact.model_dump(exclude={"observed_at"}) for fact in over_http] == [
             fact.model_dump(exclude={"observed_at"}) for fact in over_cli
         ]

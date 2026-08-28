@@ -6,6 +6,9 @@
  */
 
 import type {
+  BankFinalityAuditDetail,
+  BankFinalityAuditPage,
+  BankFinalityCertificate,
   DecisionView,
   ImportReceipt,
   ReviewQueueItem,
@@ -306,4 +309,114 @@ export const EMPTY_REVIEW_QUEUE: ReviewQueuePage = {
   items: [],
   total: 0,
   open_total: 0,
+};
+
+/** The sentence the server sends with every bank finality response. */
+export const SEPARATE_NOTE =
+  "A settlement decision says whether the provider's own records agree. Bank " +
+  'finality says whether a bank statement shows the payout arriving. They are ' +
+  'separate conclusions from separate evidence, and a line can be RESOLVED ' +
+  'with no bank evidence at all.';
+
+export const NO_BANK_AUDITS: BankFinalityAuditPage = {
+  audits: [],
+  total: 0,
+  limit: 1,
+  offset: 0,
+  filtered: true,
+  bank_finality_version: '1.0.0',
+  settlement_and_finality_are_separate: SEPARATE_NOTE,
+};
+
+export const BANK_AUDIT: BankFinalityAuditPage['audits'][number] = {
+  audit_id: 'a1f0c9443bb7e4e5fb4eee88a79b6dc7',
+  snapshot_fingerprint: RUN.snapshot_fingerprint,
+  bank_finality_version: '1.0.0',
+  bank_statement_schema_version: '1.0.0',
+  created_at: '2026-08-26T11:45:00Z',
+  as_of: '2026-08-24T12:00:00Z',
+  fact_count: 11,
+  payout_count: 2,
+  bank_transaction_count: 1,
+  outcome_counts: {
+    VERIFIED_BANK_CREDIT: 1,
+    MISSING_BANK_EVIDENCE: 0,
+    UNLINKABLE_PAYOUT: 1,
+    AMBIGUOUS_BANK_EVIDENCE: 0,
+    BANK_DIRECTION_MISMATCH: 0,
+    BANK_AMOUNT_MISMATCH: 0,
+    BANK_CURRENCY_MISMATCH: 0,
+  },
+  verified_payout_count: 1,
+};
+
+export const BANK_AUDITS: BankFinalityAuditPage = {
+  ...NO_BANK_AUDITS,
+  audits: [BANK_AUDIT],
+  total: 1,
+};
+
+export const VERIFIED_CERTIFICATE: BankFinalityCertificate = {
+  payout_id: 'payout-0001',
+  payout_source_record_id: '9c2f1a4b:PSP_API:PAYOUT:2',
+  bank_reference: 'UTR2026082100001',
+  outcome: 'VERIFIED_BANK_CREDIT',
+  evidence: [
+    {
+      source_record_id: '9c2f1a4b:PSP_API:PAYOUT:2',
+      source_system: 'PSP_API',
+      payload_hash: 'aa18b0a10d3dafe583cdd97022a7c6de651e311c173b21b1abf78d7b8bad2d87',
+      verification_outcome: 'VERIFIED',
+    },
+    {
+      source_record_id: '3e7d5c1f:PSP_API:BANK_TRANSACTION:2',
+      source_system: 'PSP_API',
+      payload_hash: 'bb18b0a10d3dafe583cdd97022a7c6de651e311c173b21b1abf78d7b8bad2d87',
+      verification_outcome: 'VERIFIED',
+    },
+  ],
+  matched_bank_transaction_ids: ['BANKTXN0001'],
+  expected_amount_minor: 1220500,
+  expected_currency: 'INR',
+  observed_amount_minor: 1220500,
+  observed_currency: 'INR',
+  observed_direction: 'CREDIT',
+  recorded_at: '2026-08-24T12:00:00Z',
+  schema_version: '1.0.0',
+};
+
+export const UNLINKABLE_CERTIFICATE: BankFinalityCertificate = {
+  ...VERIFIED_CERTIFICATE,
+  payout_id: 'payout-0002',
+  payout_source_record_id: '9c2f1a4b:PSP_API:PAYOUT:3',
+  bank_reference: null,
+  outcome: 'UNLINKABLE_PAYOUT',
+  evidence: [
+    {
+      source_record_id: '9c2f1a4b:PSP_API:PAYOUT:3',
+      source_system: 'PSP_API',
+      payload_hash: 'cc18b0a10d3dafe583cdd97022a7c6de651e311c173b21b1abf78d7b8bad2d87',
+      verification_outcome: 'VERIFIED',
+    },
+  ],
+  matched_bank_transaction_ids: [],
+  expected_amount_minor: null,
+  expected_currency: null,
+  observed_amount_minor: null,
+  observed_currency: null,
+  observed_direction: null,
+};
+
+/** A one-minor-unit difference, which is a mismatch and not a rounding. */
+export const AMOUNT_MISMATCH_CERTIFICATE: BankFinalityCertificate = {
+  ...VERIFIED_CERTIFICATE,
+  outcome: 'BANK_AMOUNT_MISMATCH',
+  observed_amount_minor: 1220501,
+};
+
+export const BANK_AUDIT_DETAIL: BankFinalityAuditDetail = {
+  audit: BANK_AUDIT,
+  certificates: [VERIFIED_CERTIFICATE, UNLINKABLE_CERTIFICATE],
+  filtered: false,
+  settlement_and_finality_are_separate: SEPARATE_NOTE,
 };

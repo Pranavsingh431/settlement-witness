@@ -13,11 +13,17 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { getRun } from '../api/client';
+import {
+  createBankFinalityAudit,
+  getBankFinalityAudit,
+  getRun,
+  listBankFinalityAudits,
+} from '../api/client';
 import { DECISION_STATUSES } from '../api/types';
 import { formatMinorUnits, formatTimestamp } from '../format';
 import { useLoad } from '../hooks';
 import { DecisionCertificate } from '../components/DecisionCertificate';
+import { BankFinalityCertificateView, SeparateConclusionsNotice } from '../components/BankFinality';
 import {
   EmptyState,
   ErrorNotice,
@@ -28,6 +34,7 @@ import {
   Stats,
   StatusBadge,
 } from '../components/ui';
+import { describeError } from '../api/errors';
 
 export function RunAuditPage() {
   const { runId = '' } = useParams<{ runId: string }>();
@@ -267,6 +274,112 @@ export function RunAuditPage() {
           )}
         </Panel>
       </div>
+
+      <BankFinalityPanel snapshotFingerprint={run.snapshot_fingerprint} />
     </>
+  );
+}
+
+/**
+ * The bank finality panel for one run's snapshot.
+ *
+ * A separate panel rather than a column in the decisions table, because the two
+ * are separate conclusions about different evidence and putting a finality
+ * outcome beside a settlement status in one row is exactly the conflation this
+ * phase exists to prevent. A payout is also not a settlement line: one payout
+ * covers many lines, so there is no row to put it in.
+ *
+ * The audit is found by the run's own snapshot fingerprint. Both are computed
+ * over the same accepted facts, so the join is exact rather than by time.
+ */
+export function BankFinalityPanel({ snapshotFingerprint }: { snapshotFingerprint: string }) {
+  const [reloads, setReloads] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+
+  const found = useLoad(
+    () => listBankFinalityAudits({ snapshot_fingerprint: snapshotFingerprint, limit: 1 }),
+    `${snapshotFingerprint}|bank-finality|${String(reloads)}`,
+  );
+  const auditId = found.data?.audits[0]?.audit_id ?? null;
+
+  const detail = useLoad(
+    () => (auditId === null ? Promise.resolve(null) : getBankFinalityAudit(auditId)),
+    `${auditId ?? 'none'}|bank-finality-detail`,
+  );
+
+  async function audit(): Promise<void> {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await createBankFinalityAudit();
+      setReloads((previous) => previous + 1);
+    } catch (cause) {
+      setFailure(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const certificates = detail.data?.certificates ?? [];
+  const summary = detail.data?.audit ?? null;
+
+  return (
+    <Panel
+      title="Bank finality"
+      note="Whether a bank statement shows each payout arriving. A separate conclusion from the settlement decisions above."
+      actions={
+        auditId === null ? (
+          <button
+            type="button"
+            className="button button--quiet button--small"
+            disabled={busy}
+            onClick={() => void audit()}
+          >
+            {busy ? 'Auditing…' : 'Audit bank finality'}
+          </button>
+        ) : null
+      }
+    >
+      {found.loading ? <Loading what="the bank finality audit" /> : null}
+      {found.error ? (
+        <ErrorNotice error={found.error} onRetry={found.reload} what="the bank finality audit" />
+      ) : null}
+      {failure === null ? null : (
+        <p className="notice notice--error" role="alert">
+          {describeError(failure)}
+        </p>
+      )}
+
+      {!found.loading && !found.error && auditId === null ? (
+        <EmptyState title="No bank finality audit for this snapshot yet">
+          Nothing here has been checked against a bank statement. Until it is, this system makes no
+          claim that any payout reached the merchant, whatever the settlement decisions above say.
+        </EmptyState>
+      ) : null}
+
+      {detail.data && summary ? (
+        <>
+          <SeparateConclusionsNotice note={detail.data.settlement_and_finality_are_separate} />
+          <Stats label="Bank finality summary">
+            <Stat label="Payouts audited" value={formatMinorUnits(summary.payout_count)} />
+            <Stat label="Statement rows" value={formatMinorUnits(summary.bank_transaction_count)} />
+            <Stat
+              label="Bank credits verified"
+              value={formatMinorUnits(summary.verified_payout_count)}
+            />
+          </Stats>
+          <p className="panel__note" style={{ marginTop: 12 }}>
+            Audited {formatTimestamp(summary.created_at)} · rules {summary.bank_finality_version} ·
+            statement schema {summary.bank_statement_schema_version}
+          </p>
+          <div className="certificates">
+            {certificates.map((certificate) => (
+              <BankFinalityCertificateView key={certificate.payout_id} certificate={certificate} />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </Panel>
   );
 }

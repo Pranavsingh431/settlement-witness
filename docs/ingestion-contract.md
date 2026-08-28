@@ -1,4 +1,4 @@
-# Ingestion contract, parser version 3.0.0
+# Ingestion contract, parser version 3.0.0, bank statement schema 1.0.0
 
 This describes the CSV documents Settlement Witness accepts and what it does
 with them. The code in `backend/app/ingestion/` is the definition; this page
@@ -7,7 +7,7 @@ explains it.
 Ingestion reads, validates and normalises. It decides nothing about
 reconciliation, and it never edits a fact that is already stored.
 
-## The three documents
+## The four documents
 
 A document is read as exactly one record type, declared by the caller. It is
 never guessed from the file name or the contents.
@@ -54,6 +54,33 @@ occurred_at
 
 `utr` may be empty, meaning the bank reference was not available when the
 document was produced. Every other column is required.
+
+A payout with no `utr` cannot be associated with a bank statement row by exact
+matching, and this system does not associate them any other way. Bank finality
+reports such a payout as `UNLINKABLE_PAYOUT` rather than guessing.
+
+### Bank transactions
+
+```text
+provider_event_id, bank_transaction_id, bank_reference, direction,
+amount_minor, currency, occurred_at
+```
+
+The only document here the payment provider did not write, and deliberately the
+narrowest. It carries what bank finality has to compare exactly and nothing
+else: no description, no counterparty, no balance. A column that cannot be
+compared exactly is a column that invites a fuzzy match.
+
+`direction` is `CREDIT` or `DEBIT`. `amount_minor` is a magnitude and must be
+strictly greater than zero in both directions: an amount whose sign carried the
+direction would let a lost minus turn a payment out into a payment in, and that
+is the one mistake a finality audit must never make.
+
+`bank_reference` is **required**, unlike the payout's `utr`. A statement row
+carrying no reference could never be cited by any payout, so storing it would
+store a fact nothing can ever use. That is a real limitation of this schema
+rather than a convenience: a statement export whose rows carry no reference
+cannot be imported here at all.
 
 ## Column rules
 
@@ -322,7 +349,7 @@ that it handles them.
 
 ## Parser version
 
-`PARSER_VERSION` is `2.0.0` and is recorded on every receipt, so a fact can
+`PARSER_VERSION` is `3.0.0` and is recorded on every receipt, so a fact can
 always be traced to the rules that produced it. It changes when a header set, a
 coercion rule, or the source-record ID derivation changes.
 
@@ -331,3 +358,22 @@ refusing a payment event amount of zero. Each is a major step because documents
 the previous version accepted can be refused by the next. Facts already stored
 are unaffected in both cases: the change is to what is accepted, not to how an
 accepted row is represented.
+
+### Why the bank transaction schema did not move it
+
+Phase 12 added a fourth header set and left `PARSER_VERSION` at 3.0.0. That is a
+deliberate exception to the rule above, and the reason is what the version is
+used for rather than what it is called.
+
+`PARSER_VERSION` is an input to the reconciliation run key, because a parser
+change can change a conclusion about the payment records. Adding a layout for a
+record type that no invariant reads cannot change one. Bumping it would have
+created a new reconciliation run for every existing database, with different
+decision identifiers, for a change no decision can observe.
+
+Every rule that applies to a previously supported row is unchanged, so the
+version still means exactly what it meant for every fact it has ever applied to.
+The bank layout is versioned separately by `BANK_STATEMENT_SCHEMA_VERSION`,
+which starts at 1.0.0 and is recorded on every bank finality audit, so a bank
+fact is still traceable to the rules that produced it. See
+[ADR-016](adr/ADR-016-settlement-agreement-is-not-bank-finality.md).

@@ -1,7 +1,7 @@
 """FastAPI application factory for the Settlement Witness backend.
 
-Exposes a health endpoint, the CSV import API, the reconciliation run API and
-the human review queue.
+Exposes a health endpoint, the CSV import API, the reconciliation run API, the
+bank finality audit API and the human review queue.
 
 Uploads are bounded twice. `RequestBodyLimit` counts the bytes of an import
 request before anything parses them, which is what stops a client that sends no
@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine
 
 from app import __version__
+from app.api.bank_finality import router as bank_finality_router
 from app.api.body_limit import RequestBodyLimit, post_to
 from app.api.imports import IMPORTS_PATH
 from app.api.imports import router as imports_router
@@ -142,6 +143,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     application.include_router(imports_router)
     application.include_router(reconciliation_router)
     application.include_router(review_router)
+    application.include_router(bank_finality_router)
     return application
 
 

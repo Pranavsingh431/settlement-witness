@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.domain.facts import SourceRecordType, SourceSystem
 from app.domain.lifecycle import PaymentEvent, PaymentEventType, PayoutBatch, SettlementLine
 from app.ingestion.projection import (
-    UnsupportedProjectionError,
+    PROJECTIONS,
     project,
     project_settlement_line,
 )
@@ -172,20 +172,15 @@ class TestPayoutProjection:
 class TestUnsupportedProjection:
     """A record type with no projection is refused, not approximated."""
 
-    def test_a_bank_transaction_has_no_projection_yet(self, session: Session) -> None:
-        """It is a valid record type in the contract with no shape defined here."""
-        ImportService(session, now=FIXED_NOW).import_document(
-            read_fixture("payment_events.csv"),
-            source_system=PSP,
-            record_type=SourceRecordType.PAYMENT_EVENT,
-            document_name="payment_events.csv",
-        )
-        fact = SourceFactRepository(session).all_facts()[0]
-        recast = fact.model_copy(update={"source_record_type": SourceRecordType.BANK_TRANSACTION})
+    def test_every_record_type_has_a_projection(self) -> None:
+        """Total dispatch, asserted as a set rather than assumed.
 
-        with pytest.raises(UnsupportedProjectionError) as caught:
-            project(recast)
-        assert caught.value.record_type is SourceRecordType.BANK_TRANSACTION
+        This replaces a test that asserted `BANK_TRANSACTION` had no projection,
+        which was true until Phase 12 gave it one. The stronger property is that
+        the mapping covers the contract: a fifth record type added without a
+        projection fails here rather than at the first fact that needs one.
+        """
+        assert set(PROJECTIONS) == set(SourceRecordType)
 
     def test_a_payload_with_a_non_integer_amount_is_refused(self, session: Session) -> None:
         """Defence in depth against a payload that bypassed the parser."""

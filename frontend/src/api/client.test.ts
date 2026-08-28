@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ACCEPTED_RECEIPT,
+  BANK_AUDIT,
+  BANK_AUDITS,
+  BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   EXCEPTION_DECISION,
   OPEN_ITEM,
@@ -19,12 +22,15 @@ import {
 } from '../test/fixtures';
 import {
   appendReviewEvent,
+  createBankFinalityAudit,
   createRun,
   getImport,
   getReviewItem,
+  getBankFinalityAudit,
   getReviewQueue,
   getRun,
   importDocument,
+  listBankFinalityAudits,
   listImports,
   listRuns,
 } from './client';
@@ -489,5 +495,56 @@ describe('appending a review event', () => {
     fetchMock.mockResolvedValue(answer({ event: {} }, 201));
 
     await expect(record()).rejects.toThrow(MalformedResponseError);
+  });
+});
+
+describe('bank finality', () => {
+  it('records an audit at a same-origin path', async () => {
+    fetchMock.mockResolvedValue(answer(BANK_AUDIT, 201));
+
+    const created = await createBankFinalityAudit();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/bank-finality/audits');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+    expect(created.created).toBe(true);
+  });
+
+  it('reports a 200 as an audit that already existed', async () => {
+    fetchMock.mockResolvedValue(answer(BANK_AUDIT, 200));
+
+    expect((await createBankFinalityAudit()).created).toBe(false);
+  });
+
+  it('refuses to audit an empty store, in the backend words', async () => {
+    fetchMock.mockResolvedValue(
+      answer(envelope('no_facts', 'the store holds no accepted source facts to audit'), 409),
+    );
+
+    await expect(createBankFinalityAudit()).rejects.toThrow(/no accepted source facts/);
+  });
+
+  it('lists audits for one snapshot', async () => {
+    fetchMock.mockResolvedValue(answer(BANK_AUDITS));
+
+    await listBankFinalityAudits({ snapshot_fingerprint: RUN.snapshot_fingerprint, limit: 1 });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `/v1/bank-finality/audits?snapshot_fingerprint=${RUN.snapshot_fingerprint}&limit=1`,
+    );
+  });
+
+  it('reads one audit with its certificates', async () => {
+    fetchMock.mockResolvedValue(answer(BANK_AUDIT_DETAIL));
+
+    const detail = await getBankFinalityAudit(BANK_AUDIT.audit_id);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/v1/bank-finality/audits/${BANK_AUDIT.audit_id}`);
+    expect(detail.certificates).toHaveLength(2);
+  });
+
+  it('checks the audit rather than casting it', async () => {
+    fetchMock.mockResolvedValue(answer({ audit: {} }));
+
+    await expect(getBankFinalityAudit('a1')).rejects.toThrow(MalformedResponseError);
   });
 });

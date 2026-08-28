@@ -19,6 +19,7 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from app.domain.banking import BankDirection
 from app.domain.facts import (
     SourceFact,
     SourceLocator,
@@ -31,6 +32,7 @@ from app.domain.lifecycle import PaymentEventType
 from app.domain.primitives import CanonicalPayload, JsonValue, to_utc
 from app.ingestion.errors import DocumentError, DocumentErrorCode, RowError, RowErrorCode
 from app.ingestion.schemas import (
+    BANK_DIRECTIONS,
     COLUMNS_BY_RECORD_TYPE,
     PARSER_VERSION,
     ColumnKind,
@@ -219,6 +221,15 @@ def _coerce_cell(
             return fail(
                 RowErrorCode.INVALID_ENUM,
                 f"{column} must be one of {allowed}, got {text!r}",
+            )
+
+    if kind is ColumnKind.BANK_DIRECTION:
+        try:
+            return BankDirection(text).value, None
+        except ValueError:
+            return fail(
+                RowErrorCode.INVALID_ENUM,
+                f"{column} must be one of {list(BANK_DIRECTIONS)}, got {text!r}",
             )
 
     return _coerce_timestamp(text, column, row_number)

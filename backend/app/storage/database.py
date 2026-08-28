@@ -69,6 +69,8 @@ APPEND_ONLY_TABLES: tuple[str, ...] = (
     "import_receipts",
     "reconciliation_runs",
     "reconciliation_decisions",
+    "bank_finality_audits",
+    "bank_finality_certificates",
     "review_events",
 )
 

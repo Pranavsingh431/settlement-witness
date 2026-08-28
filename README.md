@@ -8,44 +8,46 @@ decision. Every case ends in one of three states: matched, exception, or insuffi
 
 ## Status
 
-This repository is at phase 1. Two things exist.
+Phase 12. Seven append-only tables, four documented CSV schemas, two independent
+evidence-backed conclusions, and no model output that can reach either of them.
 
-Phase 0 built the foundation: dependency locking, formatting, linting, strict type checking,
-tests with coverage gates, container images, and a continuous integration pipeline.
+**Phases 0 to 2** built the foundation and the contract. `backend/app/domain/`
+defines what a fact, an amount, a lifecycle event, an invariant, an exception
+and a decision mean, and enforces those meanings: a decision's status is derived
+from its backing and never chosen. Documented CSV documents become immutable
+source facts in SQLite, an import is accepted whole or not at all, and every
+attempt leaves a receipt whether it succeeded or not.
 
-Phase 1 froze the domain contract. `backend/app/domain/` defines what a fact, an amount, a
-lifecycle event, an invariant, an exception and a decision mean, and enforces those meanings.
+**Phases 3 to 5** built the deterministic baseline, the seeded evaluation
+harness, and durable runs. The baseline matches on exact references only. On the
+demo fixtures one of three settlement lines resolves, which is the honest
+number: a baseline that resolved all three would be guessing at two of them.
+Runs are persisted immutably and served by a typed HTTP API, and schema changes
+go through real migrations.
 
-A decision's status is derived from its backing, never chosen: one that disagrees with what its
-evidence, invariant results and exception codes imply cannot be constructed. `RESOLVED` also
-requires every evidence reference to have been resolved against a real source fact, by record ID,
-source system and payload hash. That check needs the facts, so it happens at an explicit boundary
-rather than inside a validator.
+**Phases 6 and 7** added the CSV import API and the evidence-first dashboard.
+The interface shows what a decision rests on rather than a green tick.
 
-Phase 2 built ingestion and storage. Documented CSV documents become immutable source facts in
-SQLite. An import is accepted whole or not at all, every attempt leaves an audit receipt whether
-it succeeded or not, and storage supplies the complete fact index that verification needs.
+**Phases 8 to 10** added bounded AI link proposals in shadow mode. A model may
+point at candidate records and never decide: the verifier judges every proposal
+by the same deterministic rules, and no model output can reach a decision, a run
+or the database. A hosted model is reachable only from one command, only against
+a generated corpus, and never with imported merchant data.
 
-Phase 3 built the deterministic reconciliation baseline. It matches on exact references only, and
-produces evidence-backed decisions for direct, unambiguous links. On the demo fixtures one of
-three settlement lines resolves, which is the honest number: a baseline that resolved all three
-would be guessing at two of them.
+**Phase 11** added the human review queue. A person can acknowledge, request
+evidence, escalate, or close an exception without override. There is no approve
+and no resolve, because a click cannot make a line supported.
 
-Phase 4 built the seeded scenario generator and the evaluator harness. It generates controlled
-synthetic cases, runs them through the real ingestion and reconciliation paths, and grades the
-result against an oracle reasoned from the contract rather than read off a run. That gives the
-baseline a measured floor for a later AI-assisted method to beat.
+**Phase 12** added bank finality. A `RESOLVED` line means the provider's own
+records agree; whether a bank shows the money arriving is a separate conclusion
+from separate evidence, and both are shown without being conflated.
 
-Phase 5 made reconciliation durable and queryable. Runs are persisted immutably, re-running the
-same facts returns the run already recorded rather than writing a duplicate, and a typed HTTP API
-serves runs and decisions with their evidence certificates. Schema changes now go through real
-migrations, so an existing database can be brought forward without losing a row.
+There is no authentication and no multi-tenancy: this is a local and
+demonstration backend, and it must not be exposed to a network.
 
-There is still no model call and no user interface. There is also no authentication: this is a
-local and demonstration backend, and it must not be exposed to a network.
-
-See [docs/domain-contract.md](docs/domain-contract.md) for what the contract says, and the
-[phase reports](docs/phase-reports/) for exactly what was built and verified in each phase.
+See [docs/domain-contract.md](docs/domain-contract.md) for what the contract
+says, and the [phase reports](docs/phase-reports/) for exactly what was built and
+verified in each phase.
 
 ## Prerequisites
 
@@ -164,6 +166,50 @@ Then follow the evidence from a CSV file to a decision:
 A line is resolved only when its citations resolved and its required invariants
 held. Exceptions and insufficient evidence are shown as what they are, not
 folded into a success rate.
+
+## Bank finality: did the money actually arrive
+
+A `RESOLVED` settlement line means the provider's own records agree with each
+other and with the invariants over them. **It does not mean the merchant has the
+money.** A provider can be internally consistent while the transfer fails,
+bounces, goes to a closed account, or was never made.
+
+The only record that can say money arrived is a bank statement, so this system
+reads one and audits it separately. Import a bank statement as
+`BANK_TRANSACTION`, then record an audit from the run screen or with:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/bank-finality/audits
+```
+
+A payout verifies when exactly one statement row carries its reference, that row
+is a credit, and its amount and currency equal the payout's exactly. There is no
+tolerance band, no rounding, no nearest-amount search, no date window and no
+probable match. One minor unit of difference is a mismatch.
+
+Seven outcomes, kept apart because the action a person takes differs for each:
+
+| Outcome | Means |
+| --- | --- |
+| `VERIFIED_BANK_CREDIT` | A bank shows this exact credit arriving |
+| `MISSING_BANK_EVIDENCE` | This system has not been shown it arriving. Not a claim that it did not |
+| `UNLINKABLE_PAYOUT` | The payout carries no bank reference, so nothing can be matched exactly |
+| `AMBIGUOUS_BANK_EVIDENCE` | Two or more rows carry the reference, and choosing one would invent a fact |
+| `BANK_DIRECTION_MISMATCH` | The row is a debit |
+| `BANK_AMOUNT_MISMATCH` | The credit is for a different amount |
+| `BANK_CURRENCY_MISMATCH` | The credit is in a different currency |
+
+None of those is a `DecisionStatus`, the two vocabularies share no value, and
+the interface shows them in visibly different badges with a sentence between
+them saying they are separate conclusions. Audits are immutable: importing a
+statement later records a new audit beside the old one rather than rewriting
+what was known before.
+
+**The standing limitation.** Exact-reference matching cannot verify a payout
+whose provider record and bank record share no reference. That is not a defect
+to be fixed with a cleverer matcher; closing it needs a shared reference in the
+data. See
+[ADR-016](docs/adr/ADR-016-settlement-agreement-is-not-bank-finality.md).
 
 ## The human review queue
 
@@ -338,10 +384,13 @@ These are no longer aspirations. Phase 1 turned each one into code, and
 
 - [docs/domain-contract.md](docs/domain-contract.md) explains the domain contract. The models in
   `backend/app/domain/` are the definition; that page describes them.
-- [docs/ingestion-contract.md](docs/ingestion-contract.md) explains the three CSV schemas, the
+- [docs/ingestion-contract.md](docs/ingestion-contract.md) explains the four CSV schemas, the
   refusal rules, and how imports are made atomic and auditable.
 - [docs/reconciliation-baseline.md](docs/reconciliation-baseline.md) explains what the baseline
   matches, what it refuses to match, and what a result does and does not mean.
+- [ADR-016](docs/adr/ADR-016-settlement-agreement-is-not-bank-finality.md) explains why bank
+  finality is a separate conclusion from a settlement decision, and why nothing here matches
+  approximately.
 - [docs/evaluation-harness.md](docs/evaluation-harness.md) explains the seeded generator, the
   independent oracle, and the public and private evaluation boundary.
 - [docs/api.md](docs/api.md) documents the backend API, with real example responses and what it

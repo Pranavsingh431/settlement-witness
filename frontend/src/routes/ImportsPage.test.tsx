@@ -65,15 +65,14 @@ describe('the upload form', () => {
     expect(await screen.findByRole('button', { name: /import document/i })).toBeDisabled();
   });
 
-  it('offers only the record types the parser has a schema for', async () => {
+  it('offers every record type the parser has a schema for', async () => {
     renderScreen(<ImportsPage />);
     const select = await screen.findByLabelText(/declared record type/i);
 
     const options = within(select)
       .getAllByRole('option')
       .map((one) => one.textContent);
-    expect(options).toEqual(['PAYMENT_EVENT', 'SETTLEMENT_LINE', 'PAYOUT']);
-    expect(options).not.toContain('BANK_TRANSACTION');
+    expect(options).toEqual(['PAYMENT_EVENT', 'SETTLEMENT_LINE', 'PAYOUT', 'BANK_TRANSACTION']);
   });
 
   it('says plainly that neither declaration is inferred from the file', async () => {

@@ -1,0 +1,2 @@
+provider_event_id,bank_transaction_id,bank_reference,direction,amount_minor,currency,occurred_at
+bt-0001,BANKTXN0001,UTR2026082100001,CREDIT,1220500,USD,2026-08-21T20:05:00+05:30

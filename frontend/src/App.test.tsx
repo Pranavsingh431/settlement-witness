@@ -13,6 +13,15 @@ const client = vi.mocked(await import('./api/client'));
 
 beforeEach(() => {
   vi.resetAllMocks();
+  client.listBankFinalityAudits.mockResolvedValue({
+    audits: [],
+    total: 0,
+    limit: 1,
+    offset: 0,
+    filtered: true,
+    bank_finality_version: '1.0.0',
+    settlement_and_finality_are_separate: 'separate conclusions',
+  });
   client.listRuns.mockResolvedValue({ runs: [], total: 0, limit: 1, offset: 0 });
   client.listImports.mockResolvedValue({
     receipts: [],

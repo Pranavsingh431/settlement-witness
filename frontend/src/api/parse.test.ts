@@ -11,6 +11,9 @@ import { describe, expect, it } from 'vitest';
 
 import { MalformedResponseError } from './errors';
 import {
+  parseBankFinalityAuditDetail,
+  parseBankFinalityAuditPage,
+  parseBankFinalityCertificate,
   parseDecision,
   parseReceipt,
   parseReviewEventReceipt,
@@ -20,14 +23,20 @@ import {
 } from './parse';
 import {
   ACCEPTED_RECEIPT,
+  BANK_AUDIT,
+  BANK_AUDITS,
+  BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   CLOSED_ITEM,
   EMPTY_REVIEW_QUEUE,
   OPEN_ITEM,
   RESOLVED_DECISION,
   REVIEW_QUEUE,
+  NO_BANK_AUDITS,
   RUN,
   UNKNOWN_ITEM,
+  UNLINKABLE_CERTIFICATE,
+  VERIFIED_CERTIFICATE,
 } from '../test/fixtures';
 
 /** Return a copy of a payload with one field removed, as a truncated response would arrive. */
@@ -248,5 +257,80 @@ describe('parseReviewEventReceipt', () => {
     };
 
     expect(() => parseReviewEventReceipt(broken)).toThrow(/baseline_status/);
+  });
+});
+
+describe('parseBankFinalityAuditPage', () => {
+  it('accepts a real page', () => {
+    expect(parseBankFinalityAuditPage(BANK_AUDITS)).toEqual(BANK_AUDITS);
+  });
+
+  it('accepts a page with no audits', () => {
+    expect(parseBankFinalityAuditPage(NO_BANK_AUDITS)).toEqual(NO_BANK_AUDITS);
+  });
+
+  it('refuses a page missing the note saying the two are separate', () => {
+    expect(() =>
+      parseBankFinalityAuditPage(without(BANK_AUDITS, 'settlement_and_finality_are_separate')),
+    ).toThrow(/settlement_and_finality_are_separate/);
+  });
+
+  it('refuses an audit missing its verified count', () => {
+    const broken = { ...BANK_AUDITS, audits: [without(BANK_AUDIT, 'verified_payout_count')] };
+
+    expect(() => parseBankFinalityAuditPage(broken)).toThrow(/verified_payout_count/);
+  });
+
+  it('refuses an audit whose outcome counts are not numbers', () => {
+    const broken = {
+      ...BANK_AUDITS,
+      audits: [{ ...BANK_AUDIT, outcome_counts: { VERIFIED_BANK_CREDIT: 'one' } }],
+    };
+
+    expect(() => parseBankFinalityAuditPage(broken)).toThrow(/non-numeric count/);
+  });
+});
+
+describe('parseBankFinalityAuditDetail', () => {
+  it('accepts a real audit with its certificates', () => {
+    expect(parseBankFinalityAuditDetail(BANK_AUDIT_DETAIL)).toEqual(BANK_AUDIT_DETAIL);
+  });
+
+  it('refuses an audit whose certificates are not a list', () => {
+    expect(() =>
+      parseBankFinalityAuditDetail({ ...BANK_AUDIT_DETAIL, certificates: 'none' }),
+    ).toThrow(/certificates/);
+  });
+});
+
+describe('parseBankFinalityCertificate', () => {
+  it('accepts a verified certificate', () => {
+    expect(parseBankFinalityCertificate(VERIFIED_CERTIFICATE)).toEqual(VERIFIED_CERTIFICATE);
+  });
+
+  it('accepts a certificate that compared nothing', () => {
+    const parsed = parseBankFinalityCertificate(UNLINKABLE_CERTIFICATE);
+
+    expect(parsed.bank_reference).toBeNull();
+    expect(parsed.observed_amount_minor).toBeNull();
+    expect(parsed.observed_direction).toBeNull();
+  });
+
+  it('refuses a certificate missing its outcome', () => {
+    expect(() => parseBankFinalityCertificate(without(VERIFIED_CERTIFICATE, 'outcome'))).toThrow(
+      /outcome/,
+    );
+  });
+
+  it('refuses a certificate whose matched ids are not text', () => {
+    const broken = { ...VERIFIED_CERTIFICATE, matched_bank_transaction_ids: [7] };
+
+    expect(() => parseBankFinalityCertificate(broken)).toThrow(/non-text entry/);
+  });
+
+  it('refuses a certificate whose observed amount is not a number', () => {
+    const broken = { ...VERIFIED_CERTIFICATE, observed_amount_minor: '1220500' };
+
+    expect(() => parseBankFinalityCertificate(broken)).toThrow(/observed_amount_minor/);
   });
 });

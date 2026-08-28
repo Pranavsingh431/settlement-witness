@@ -144,11 +144,19 @@ class TestDocumentLevelRefusals:
             list(iter_document_rows(payment_document(), SourceRecordType.PAYMENT_EVENT))
         assert caught.value.code is DocumentErrorCode.NO_ROWS
 
-    def test_a_record_type_with_no_schema_is_refused(self) -> None:
-        """BANK_TRANSACTION is a valid record type with no CSV schema yet."""
-        assert SourceRecordType.BANK_TRANSACTION not in SUPPORTED_RECORD_TYPES
+    def test_a_record_type_with_no_schema_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Every record type has a layout now, so one is taken away to check.
+
+        The guard is not decoration. It is what makes a record type added to the
+        contract without a CSV layout fail loudly at the first document rather
+        than being read against some other type's columns, and there is no way
+        to reach it without removing a layout, because the mapping is total.
+        """
+        monkeypatch.delitem(COLUMNS_BY_RECORD_TYPE, SourceRecordType.BANK_TRANSACTION)
+
         with pytest.raises(DocumentError) as caught:
             list(iter_document_rows(b"a\n", SourceRecordType.BANK_TRANSACTION))
+
         assert caught.value.code is DocumentErrorCode.UNSUPPORTED_RECORD_TYPE
 
     def test_row_numbers_start_at_two(self) -> None:
@@ -312,13 +320,13 @@ class TestNormalisation:
 class TestSchemaDefinitions:
     """The three documented schemas."""
 
-    def test_three_record_types_are_supported(self) -> None:
-        """Payment events, settlement lines and payouts."""
-        assert {member.value for member in SUPPORTED_RECORD_TYPES} == {
-            "PAYMENT_EVENT",
-            "SETTLEMENT_LINE",
-            "PAYOUT",
-        }
+    def test_every_record_type_in_the_contract_is_supported(self) -> None:
+        """Payment events, settlement lines, payouts and bank transactions.
+
+        Asserted against the contract's own enum rather than a written-out list,
+        so a fifth record type is a failure here until it has a layout.
+        """
+        assert set(SUPPORTED_RECORD_TYPES) == set(SourceRecordType)
 
     def test_every_schema_starts_with_the_provider_event_id(self) -> None:
         """It is half the idempotency identity, so every document must carry it."""

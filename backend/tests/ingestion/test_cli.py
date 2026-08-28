@@ -6,6 +6,7 @@ import pytest
 
 from app.domain.facts import SourceRecordType, SourceSystem
 from app.ingest_cli import build_parser, describe, run
+from app.ingestion.schemas import SUPPORTED_RECORD_TYPES
 from app.ingestion.service import ImportOutcome, ImportReceipt, RowOutcome, RowResult
 from app.storage.database import create_database_engine, database_url_for, session_factory
 from app.storage.repository import ImportReceiptRepository, SourceFactRepository
@@ -38,8 +39,25 @@ class TestArgumentParsing:
         with pytest.raises(SystemExit):
             build_parser().parse_args([fixture_path("payment_events.csv")])
 
-    def test_only_record_types_with_a_schema_are_offered(self) -> None:
-        """BANK_TRANSACTION has no CSV schema, so it is not a choice."""
+    def test_every_supported_record_type_is_offered(self) -> None:
+        """The choices are the layouts, so the two cannot drift apart."""
+        for record_type in SUPPORTED_RECORD_TYPES:
+            parsed = build_parser().parse_args(
+                [
+                    "x.csv",
+                    "--database",
+                    "db.sqlite",
+                    "--source-system",
+                    "PSP_API",
+                    "--record-type",
+                    record_type.value,
+                ]
+            )
+
+            assert parsed.record_type == record_type.value
+
+    def test_a_record_type_outside_the_contract_is_not_a_choice(self) -> None:
+        """argparse refuses it before anything opens a file."""
         with pytest.raises(SystemExit):
             build_parser().parse_args(
                 [
@@ -49,7 +67,7 @@ class TestArgumentParsing:
                     "--source-system",
                     "PSP_API",
                     "--record-type",
-                    "BANK_TRANSACTION",
+                    "NOT_A_RECORD_TYPE",
                 ]
             )
 
