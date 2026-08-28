@@ -6,6 +6,7 @@
 - Shadow link harness 5.0.0, shadow corpus 1.0.0, both unchanged
 - Live receipt 1.0.0 to 2.0.0
 - `ADR-014` amended; `docs/phase-reports/phase-10.md` annotated, not rewritten
+- **One claim below was corrected in [Phase 10.2](phase-10-2.md).** See "Corrected later".
 
 ## No hosted run occurred
 
@@ -125,6 +126,11 @@ Measured, with a 1000 byte budget and 4096 byte chunks:
 non-empty `frozenset[str]` of authorised request fingerprints. An empty one
 raises `NothingAuthorised`; a missing one is a `TypeError`. There is no
 permissive default, in the adapter or in the test helper.
+
+> Corrected in Phase 10.2. `frozenset[str]` was an annotation, and Python does
+> not check annotations. A caller passing an ordinary `set` kept a live handle
+> on the provider's own scope and could widen it mid-run. The provider now
+> copies whatever it is given into a `frozenset` it owns.
 
 `propose` checks membership first, before the budget, before any header is
 built and before the client is touched, and returns the new
@@ -349,6 +355,9 @@ tell it something else. What changed is that such a caller must say so in code,
 in a required argument, rather than inheriting a permissive default. A test
 asserts the two sets match today.
 
+> And the adapter enforced what it was told only until the caller changed its
+> mind. See the correction below.
+
 **One chunk is still one chunk.** The bound is the budget plus whatever the
 transport hands over in a single read. That is bounded and it is not exact, and
 a host choosing enormous chunks makes the overshoot larger. Bounding it exactly
@@ -391,6 +400,23 @@ reason to migrate a local artifact of a run that already happened.
 | No AI endpoint, persistence, production mode, retries, or path to reconciliation | Passed | Isolation suite; no route, table or writer added |
 | Full CI, typing, 100% coverage, schema, containers, baseline | Passed | Commands above |
 | A live hosted run with a real score | **Not performed** | No credentials configured. No number invented. |
+
+## Corrected later
+
+One claim here was true of the annotation and not of the code.
+
+| Claimed here | What was true | Fixed in |
+| --- | --- | --- |
+| "a required, keyword-only, non-empty `frozenset[str]`", and "Immutable, so a caller cannot widen it after construction" | The parameter was annotated `frozenset[str]` and never checked. A caller passing a plain `set` kept a live reference to the provider's allow-list and could add to it at any point during a run, and the provider would then send the added page. | [Phase 10.2](phase-10-2.md) |
+
+The exit-gate row "Non-empty immutable allow-list required at construction"
+should be read as: non-empty was required and checked, immutable was written
+down and not. Phase 10.2 reproduces the widening as a failing test first.
+
+This is the same mistake as the one this phase was written to fix. Phase 10
+relied on the CLI having no data argument and called that structural. Phase 10.1
+moved the check into the adapter and relied on a type annotation, which Python
+does not enforce, and called that structural too.
 
 ## Unresolved
 

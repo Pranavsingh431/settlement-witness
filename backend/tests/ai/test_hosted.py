@@ -12,7 +12,7 @@ API key appears in nothing.
 """
 
 import json
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from typing import Final
 
 import httpx2
@@ -34,6 +34,7 @@ from app.ai.hosted import (
     HostedLinkProposalProvider,
     HostedProviderConfig,
     MissingConfiguration,
+    NotFingerprints,
     NothingAuthorised,
     presentation_payload,
 )
@@ -1161,15 +1162,6 @@ class TestOnlyAuthorisedPagesAreAsked:
         assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
         assert seen == []
 
-    def test_it_cannot_be_built_with_an_empty_allow_list(
-        self, config: HostedProviderConfig
-    ) -> None:
-        """There is no permissive default, including the empty one."""
-        with pytest.raises(NothingAuthorised) as raised:
-            HostedLinkProposalProvider(config, authorised_requests=frozenset())
-
-        assert "permissive default" in str(raised.value)
-
     def test_it_cannot_be_built_without_an_allow_list_at_all(
         self, config: HostedProviderConfig
     ) -> None:
@@ -1177,21 +1169,146 @@ class TestOnlyAuthorisedPagesAreAsked:
         with pytest.raises(TypeError):
             HostedLinkProposalProvider(config)  # type: ignore[call-arg]
 
-    def test_the_allow_list_cannot_be_widened_after_construction(
-        self, config: HostedProviderConfig, authorised: frozenset[str], page: LinkProposalRequest
+    def test_a_caller_cannot_widen_the_scope_through_a_mutable_set(
+        self,
+        config: HostedProviderConfig,
+        corpus_pages: tuple[LinkProposalRequest, ...],
     ) -> None:
-        """It is a frozenset, so a caller holding a reference cannot add to it."""
+        """The one that matters: a plain `set`, widened after construction.
+
+        An annotation saying `frozenset[str]` is not a runtime contract. Python
+        does not check it, so a caller passing an ordinary set kept a live
+        handle on the provider's own scope and could add to it at any point in
+        a run. The provider takes its own copy, so there is nothing to widen.
+        """
+        first, second = corpus_pages[0], corpus_pages[1]
+        mutable = {first.request_fingerprint}
         seen, handler = self._counting()
 
         with HostedLinkProposalProvider(
-            config, authorised_requests=authorised, transport=httpx2.MockTransport(handler)
+            config, authorised_requests=mutable, transport=httpx2.MockTransport(handler)
         ) as provider:
-            with pytest.raises(AttributeError):
-                authorised.add(page.request_fingerprint)  # type: ignore[attr-defined]
-            result = provider.propose(page)
+            mutable.add(second.request_fingerprint)
+            result = provider.propose(second)
+
+            assert provider.requests_made == 0
 
         assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
         assert seen == []
+
+    def test_the_page_it_was_built_with_still_works_afterwards(
+        self,
+        config: HostedProviderConfig,
+        corpus_pages: tuple[LinkProposalRequest, ...],
+    ) -> None:
+        """The copy is a copy of what was passed, not a refusal of everything."""
+        first, second = corpus_pages[0], corpus_pages[1]
+        mutable = {first.request_fingerprint}
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=mutable, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            mutable.add(second.request_fingerprint)
+            mutable.discard(first.request_fingerprint)
+            result = provider.propose(first)
+
+        assert result == {"outcome": "ABSTAIN", "selected_source_record_ids": []}
+        assert len(seen) == 1
+
+    def test_a_list_is_snapshotted_too(
+        self,
+        config: HostedProviderConfig,
+        corpus_pages: tuple[LinkProposalRequest, ...],
+    ) -> None:
+        """Any collection is accepted and none of them is retained."""
+        first, second = corpus_pages[0], corpus_pages[1]
+        supplied = [first.request_fingerprint]
+        seen, handler = self._counting()
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=supplied, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            supplied.append(second.request_fingerprint)
+            result = provider.propose(second)
+
+        assert isinstance(result, ProviderFailure)
+        assert result.kind is FailureKind.REQUEST_NOT_AUTHORIZED
+        assert seen == []
+
+    def test_a_frozenset_authorises_every_canonical_corpus_page(
+        self,
+        config: HostedProviderConfig,
+        corpus_pages: tuple[LinkProposalRequest, ...],
+    ) -> None:
+        """The ordinary case, passed the way the command passes it."""
+        seen, handler = self._counting()
+        supplied = frozenset(one.request_fingerprint for one in corpus_pages)
+
+        with HostedLinkProposalProvider(
+            config, authorised_requests=supplied, transport=httpx2.MockTransport(handler)
+        ) as provider:
+            results = [provider.propose(one) for one in corpus_pages]
+
+            assert provider.requests_made == 24
+
+        assert len(seen) == 24
+        assert all(
+            one == {"outcome": "ABSTAIN", "selected_source_record_ids": []} for one in results
+        )
+
+    @pytest.mark.parametrize("empty", [frozenset(), set(), [], (), {}])
+    def test_an_empty_collection_of_any_kind_is_refused(
+        self, config: HostedProviderConfig, empty: Collection[str]
+    ) -> None:
+        """The no-permissive-default rule, whatever shape the emptiness arrives in."""
+        with pytest.raises(NothingAuthorised) as raised:
+            HostedLinkProposalProvider(config, authorised_requests=empty)
+
+        assert "permissive default" in str(raised.value)
+
+    def test_a_bare_string_is_refused_rather_than_split_into_letters(
+        self, config: HostedProviderConfig, corpus_pages: tuple[LinkProposalRequest, ...]
+    ) -> None:
+        """A string is a collection of characters, which is the trap.
+
+        Snapshotting one would build an allow-list of single letters: immutable,
+        non-empty, and refusing every real page. The provider would look built
+        and every page of the run would come back unauthorised.
+        """
+        with pytest.raises(NotFingerprints) as raised:
+            HostedLinkProposalProvider(
+                config, authorised_requests=corpus_pages[0].request_fingerprint
+            )
+
+        assert "not a single string" in str(raised.value)
+
+    def test_bytes_are_refused_for_the_same_reason(self, config: HostedProviderConfig) -> None:
+        """The same trap, one type along.
+
+        mypy catches this one and does not catch the `str` above, because a
+        `str` really is a `Collection[str]`. Which is the argument for the
+        runtime guard: the type checker agrees with the annotation and the
+        annotation is not the guarantee.
+        """
+        with pytest.raises(NotFingerprints):
+            HostedLinkProposalProvider(
+                config,
+                authorised_requests=b"a" * 64,  # type: ignore[arg-type]
+            )
+
+    def test_a_member_that_is_not_a_fingerprint_is_refused(
+        self, config: HostedProviderConfig
+    ) -> None:
+        """Silently never matching would look like a model that refused everything."""
+        with pytest.raises(NotFingerprints) as raised:
+            HostedLinkProposalProvider(
+                config,
+                authorised_requests=frozenset({"a" * 64, 7}),  # type: ignore[arg-type]
+            )
+
+        assert "fingerprint string" in str(raised.value)
 
 
 class TestTheAdapterCountsItsOwnFailures:

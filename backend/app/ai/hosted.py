@@ -23,10 +23,12 @@ nothing is retried. A repaired answer is partly the model's and partly ours, and
 a report over those cannot say which.
 
 **It may only ask about pages it was authorised to ask about.** A provider is
-built with an allow-list of request fingerprints and refuses anything outside
-it before a header exists or a socket is opened. The command that uses this
-derives that list from `build_corpus()`, so corpus-only is a property of the
-adapter rather than a property of which arguments the command happens to
+built with an allow-list of request fingerprints, copies it into a `frozenset`
+of its own, and refuses anything outside that before a header exists or a
+socket is opened. The copy matters as much as the check: a provider holding the
+caller's own object has a scope the caller can widen mid-run. The command that
+uses this derives the list from `build_corpus()`, so corpus-only is a property
+of the adapter rather than a property of which arguments the command happens to
 offer.
 
 **It reads a bounded number of bytes.** The response is streamed and abandoned
@@ -42,7 +44,7 @@ are places a token is put and the endpoint is copied into a run receipt.
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any, Final, Self
 from urllib.parse import urlparse
 
@@ -136,6 +138,16 @@ class NothingAuthorised(ValueError):
     There is no permissive default. A provider that could ask about anything is
     exactly the provider this design does not have, so an empty list is a
     programming error rather than a permissive configuration.
+    """
+
+
+class NotFingerprints(TypeError):
+    """Raised when the allow-list is not a collection of fingerprint strings.
+
+    A `str` is a collection of characters, so passing one would quietly
+    authorise a set of single letters and refuse every real page. That is a
+    programming error that would look like a working provider until every page
+    of a run came back refused, so it is named here instead.
     """
 
 
@@ -323,7 +335,7 @@ class HostedLinkProposalProvider:
         self,
         config: HostedProviderConfig,
         *,
-        authorised_requests: frozenset[str],
+        authorised_requests: Collection[str],
         transport: httpx2.BaseTransport | None = None,
     ) -> None:
         """Build a client for one run.
@@ -334,22 +346,42 @@ class HostedLinkProposalProvider:
             authorised_requests: The `request_fingerprint` of every page this
                 provider may ask about. Required and keyword only, because a
                 provider that will accept any page is the one thing this class
-                must not be able to become by accident. Immutable, so a caller
-                cannot widen it after construction.
+                must not be able to become by accident.
+
+                Any collection of fingerprint strings. It is copied into a
+                `frozenset` the provider owns, so what the caller passed is
+                never consulted again and mutating it afterwards changes
+                nothing here. An annotation cannot do that: Python does not
+                check it, and a caller who passed a plain `set` kept a live
+                handle on the provider's own scope.
             transport: Injected in tests so nothing reaches the network. In a
                 live run this is None and httpx opens real connections.
 
         Raises:
+            NotFingerprints: When the allow-list is a string, or holds anything
+                that is not one.
             NothingAuthorised: When the allow-list is empty.
         """
-        if not authorised_requests:
+        if isinstance(authorised_requests, str | bytes):
+            message = (
+                "authorised_requests must be a collection of request "
+                "fingerprints, not a single string"
+            )
+            raise NotFingerprints(message)
+        # The copy is the guarantee. Taken before anything else is set up, so a
+        # provider never exists holding an object somebody else can change.
+        authorised = frozenset(authorised_requests)
+        if not authorised:
             message = (
                 "a hosted provider needs the fingerprints of the pages it may "
                 "ask about; there is no permissive default"
             )
             raise NothingAuthorised(message)
+        if not all(isinstance(one, str) for one in authorised):
+            message = "every authorised request must be a fingerprint string"
+            raise NotFingerprints(message)
         self._config = config
-        self._authorised = authorised_requests
+        self._authorised = authorised
         self._client = httpx2.Client(
             timeout=config.timeout_seconds,
             transport=transport,

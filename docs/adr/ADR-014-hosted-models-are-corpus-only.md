@@ -153,3 +153,42 @@ That last part is why `MissingConfiguration` is a `RuntimeError` rather than a
 `ValueError`: pydantic wraps a `ValueError` raised inside a validator into a
 message that quotes the input it was given, which for this field is the thing
 that must not be quoted.
+
+## Amendment, Phase 10.2
+
+The amendment above says the adapter "requires a non-empty immutable allow-list
+of request fingerprints at construction". It required a non-empty one and
+checked that. Immutable was a type annotation, `frozenset[str]`, and Python does
+not check annotations. A caller who passed an ordinary `set` still held the
+object the provider was reading, and adding a fingerprint to it after
+construction widened the provider's scope mid-run.
+
+This is the third time the same error has been made in this design. Phase 10
+made corpus-only a property of which arguments the CLI offered. Phase 10.1 moved
+it into the adapter and made it a property of what the annotation said. Both
+times the guarantee lived somewhere the runtime never looked.
+
+**The provider now copies the allow-list into a `frozenset` it owns.** The
+parameter accepts any `Collection[str]`, the copy is taken before anything else
+in the constructor runs, and what the caller passed is never consulted again. A
+caller cannot widen the scope after construction because nothing the caller
+holds is the scope.
+
+Two guards go with the copy, because a snapshot of the wrong thing is still
+immutable and still wrong:
+
+- A `str` or `bytes` is refused rather than snapshotted. A string is a
+  collection of characters, so copying one would build a non-empty immutable
+  allow-list of single letters, which would refuse every real page while looking
+  like a working provider. mypy does not catch this, because a `str` genuinely
+  is a `Collection[str]`.
+- A member that is not a string is refused, for the same reason: it would never
+  match, and a run where every page came back unauthorised would look like a
+  scope problem rather than a typo.
+
+The no-permissive-default rule is unchanged and now applies to every shape of
+emptiness, not only to an empty `frozenset`.
+
+The general lesson, written down because it has now cost three phases: in this
+codebase a guarantee is whatever the runtime enforces. A docstring, an
+annotation and a caller's good manners are three ways of not enforcing it.
