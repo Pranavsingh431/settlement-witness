@@ -5,6 +5,7 @@
 - Domain contract 5.0.0, parser 3.0.0, baseline 1.0.0, all unchanged
 - New: review contract 1.0.0, migration `0003_review_events`, `ADR-015`
 - Baseline output byte-identical before and after this phase
+- **Two claims below were corrected in [Phase 11.1](phase-11-1.md).** See "Corrected later".
 
 ## What this phase is, in one paragraph
 
@@ -282,6 +283,10 @@ ID and a run's decisions never change, which is a stronger guarantee than most
 offset paging has. It would not survive a queue whose membership changed under
 the reader, and this one cannot.
 
+> This says the API pages. The screen did not: it asked for offset 0 with a
+> limit of 20 and offered no way to reach item 21. Corrected in
+> [Phase 11.1](phase-11-1.md).
+
 **The queue has no filters.** No filtering by workflow state, no assignment, no
 due dates, no bulk actions. Deferred rather than forgotten.
 
@@ -316,6 +321,21 @@ gitleaks read a high-entropy string beside the word "key" as a credential. It
 was never one. The example now describes the command it belongs to, which is
 also better advice, and the prose says the key is not a credential. Fixed in the
 commit after this phase's.
+
+## Corrected later
+
+Two claims here were true of the server and not of the screen in front of a
+reviewer. They are left where they are, with this section saying what was
+actually the case.
+
+| Claimed here | What was true | Fixed in |
+| --- | --- | --- |
+| "fresh idempotency key per submission", tested and treated as a feature | A fresh key on every click means the client cannot safely retry a request whose outcome is unknown. A request can fail after the server has written the row; the next click then sent a new key and appended a second event for one intended action. The server's idempotency was sound and unreachable. | [Phase 11.1](phase-11-1.md), part A |
+| "Stable pagination and deterministic ordering" on the queue endpoint | True of the endpoint. The screen always asked for offset 0 with a limit of 20, displayed "20 of 21 shown", and offered no next control, so a run with 21 or more reviewable decisions hid work from the reviewer. | [Phase 11.1](phase-11-1.md), part B |
+
+The exit-gate row "Stable queue endpoint" was about the endpoint and was
+correct. There was no row asserting the interface could reach the whole queue,
+which is how the gap passed the gate.
 
 ## Exit gate status
 

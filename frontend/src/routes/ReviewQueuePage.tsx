@@ -46,13 +46,45 @@ import {
 const PAGE_SIZE = 20;
 
 /**
- * A key for one command attempt.
+ * One command, with the key it will be sent under.
  *
- * Generated per submission rather than per component, so a reviewer who presses
- * the button twice sends two commands and the second is a new event, while a
- * retry of a request that timed out reuses nothing and cannot be mistaken for
- * the first. `crypto.randomUUID` is available in every browser this targets and
- * in the test environment.
+ * The key belongs to the command rather than to the click. That is the whole
+ * point: a request that fails may still have been recorded, because the answer
+ * can be lost after the server has written the row. Sending a new key on the
+ * next click would then append a second event for one intended action, and the
+ * reviewer would have no way to tell.
+ *
+ * So the command is kept while it is uncertain, and retrying the same input
+ * sends the same key, which the server answers with the original event. A
+ * different command gets a different key, because it is a different action.
+ */
+interface PendingCommand {
+  readonly action: ReviewAction;
+  /** Normalised, matching what the server stores and fingerprints. */
+  readonly note: string;
+  readonly decisionId: string;
+  readonly fingerprint: string;
+  readonly key: string;
+}
+
+/** What the form is currently asking for, without a key yet. */
+type CommandInput = Omit<PendingCommand, 'key'>;
+
+function sameCommand(pending: PendingCommand, wanted: CommandInput): boolean {
+  return (
+    pending.action === wanted.action &&
+    pending.note === wanted.note &&
+    pending.decisionId === wanted.decisionId &&
+    pending.fingerprint === wanted.fingerprint
+  );
+}
+
+/**
+ * A key for one command.
+ *
+ * `crypto.randomUUID` is available in every browser this targets and in the
+ * test environment. The value is not a credential and nothing authenticates
+ * with it; it only has to be unique per intended action.
  */
 function newIdempotencyKey(): string {
   return crypto.randomUUID();
@@ -72,23 +104,46 @@ function ReviewForm({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const [recorded, setRecorded] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
+
+  const wanted: CommandInput = {
+    action,
+    note: note.trim(),
+    decisionId: item.decision.decision_id,
+    fingerprint: item.decision_fingerprint,
+  };
+  // True when the next submission would repeat a command whose outcome is
+  // unknown. Derived rather than stored, so editing the note or choosing
+  // another action stops it being a retry the moment the input changes.
+  const retrying = pending !== null && sameCommand(pending, wanted);
 
   async function submit(event: React.SyntheticEvent): Promise<void> {
     event.preventDefault();
+    // The command is decided here, before the request, so the key is a property
+    // of what is being asked for rather than of when the button was pressed.
+    const command: PendingCommand =
+      pending !== null && sameCommand(pending, wanted)
+        ? pending
+        : { ...wanted, key: newIdempotencyKey() };
+    setPending(command);
     setBusy(true);
     setFailure(null);
     setRecorded(null);
     try {
-      const receipt = await appendReviewEvent(runId, item.decision.decision_id, {
-        action,
-        decisionFingerprint: item.decision_fingerprint,
-        idempotencyKey: newIdempotencyKey(),
-        note,
+      const receipt = await appendReviewEvent(runId, command.decisionId, {
+        action: command.action,
+        decisionFingerprint: command.fingerprint,
+        idempotencyKey: command.key,
+        note: command.note,
       });
+      // Confirmed. The command is finished, so the next one is a new command
+      // and gets a new key.
+      setPending(null);
       setNote('');
       setRecorded(receipt.baseline_status);
       onRecorded();
     } catch (cause) {
+      // Kept. Whether the server recorded it is exactly what is not known.
       setFailure(cause);
     } finally {
       setBusy(false);
@@ -143,9 +198,18 @@ function ReviewForm({
 
       <div className="form-row">
         <button type="submit" className="button" disabled={busy}>
-          {busy ? 'Recording…' : 'Record this action'}
+          {busy ? 'Recording…' : retrying ? 'Retry this same action' : 'Record this action'}
         </button>
       </div>
+
+      {retrying && !busy ? (
+        <p className="notice notice--info" role="note">
+          <strong>This retries the same action, not a second one.</strong> The request above may
+          have reached the server before the answer was lost, so it is sent again under the same
+          key. If it was recorded, you get that event back rather than a duplicate. Change the
+          action or the note and it becomes a different action instead.
+        </p>
+      ) : null}
 
       {recorded === null ? null : (
         <p className="notice notice--info" role="status">
@@ -165,11 +229,12 @@ function ReviewForm({
 export function ReviewQueuePage() {
   const { runId = '' } = useParams<{ runId: string }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
   const [reloads, setReloads] = useState(0);
 
   const queue = useLoad(
-    () => getReviewQueue(runId, { limit: PAGE_SIZE }),
-    `${runId}|review|${String(reloads)}`,
+    () => getReviewQueue(runId, { limit: PAGE_SIZE, offset }),
+    `${runId}|review|${String(offset)}|${String(reloads)}`,
   );
 
   // The last page that arrived, kept across a reload.
@@ -185,7 +250,29 @@ export function ReviewQueuePage() {
   }
 
   const items = shown?.items ?? [];
+  // A selection is kept only while the item it names is on the page in front of
+  // the reviewer. Paging away and back would otherwise resurrect a selection
+  // they had left behind, and the workspace would be showing a line the list is
+  // not highlighting.
+  if (
+    selectedId !== null &&
+    items.length > 0 &&
+    !items.some((one) => one.decision.decision_id === selectedId)
+  ) {
+    setSelectedId(null);
+  }
   const selected = items.find((one) => one.decision.decision_id === selectedId) ?? items[0] ?? null;
+
+  const total = shown?.total ?? 0;
+  const onFirstPage = offset === 0;
+  const onLastPage = offset + items.length >= total;
+
+  function goTo(next: number): void {
+    // The selection is not cleared here. The check above owns that, and owning
+    // it in one place means it also covers a page that comes back without the
+    // selected item for some other reason, such as a reload after an action.
+    setOffset(next);
+  }
 
   if (queue.loading && shown === null) {
     return <Loading what="the review queue" />;
@@ -251,12 +338,13 @@ export function ReviewQueuePage() {
         <div className="grid grid--audit">
           <Panel
             title="Lines needing a person"
-            note="Ordered by settlement line ID, so the order does not move when somebody acts on an item."
+            note="Ordered by settlement line ID. The order does not move when somebody acts on an item, so a page boundary lands in the same place on every call."
           >
             <div className="table-scroll">
               <table>
                 <caption>
-                  {formatMinorUnits(items.length)} of {formatMinorUnits(shown.total)} shown. The
+                  Showing {formatMinorUnits(offset + 1)} to{' '}
+                  {formatMinorUnits(offset + items.length)} of {formatMinorUnits(shown.total)}. The
                   baseline status and the workflow state are two different facts.
                 </caption>
                 <thead>
@@ -298,6 +386,37 @@ export function ReviewQueuePage() {
                 </tbody>
               </table>
             </div>
+            <nav className="pager" aria-label="Review queue pages">
+              <button
+                type="button"
+                className="button button--quiet button--small"
+                disabled={onFirstPage}
+                onClick={() => {
+                  goTo(Math.max(0, offset - PAGE_SIZE));
+                }}
+              >
+                Previous page
+              </button>
+              {/*
+                Plain text, not a live region. The table caption above carries
+                the same range and changes with the page, and two live regions
+                competing on one screen is noise rather than access.
+              */}
+              <p className="pager__where">
+                Items {formatMinorUnits(offset + 1)} to {formatMinorUnits(offset + items.length)} of{' '}
+                {formatMinorUnits(shown.total)}
+              </p>
+              <button
+                type="button"
+                className="button button--quiet button--small"
+                disabled={onLastPage}
+                onClick={() => {
+                  goTo(offset + PAGE_SIZE);
+                }}
+              >
+                Next page
+              </button>
+            </nav>
           </Panel>
 
           {selected === null ? null : (

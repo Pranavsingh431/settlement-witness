@@ -23,12 +23,15 @@ import {
   UNKNOWN_ITEM,
 } from '../test/fixtures';
 import { renderRoute } from '../test/render';
+import type { ReviewQueuePage as QueuePayload } from '../api/types';
 import { ReviewQueuePage } from './ReviewQueuePage';
 
 vi.mock('../api/client');
 const client = vi.mocked(await import('../api/client'));
 
 const AT = `/runs/${RUN.run_id}/review`;
+/** The page size the screen asks for. Mirrors the constant in the screen. */
+const PAGE_SIZE = 20;
 const PATTERN = '/runs/:runId/review';
 
 function open(): RenderResult {
@@ -146,6 +149,42 @@ describe('the workspace', () => {
     expect(await screen.findByText('need the 3 March bank statement')).toBeInTheDocument();
   });
 
+  it('orders the timeline by sequence, whatever order it arrived in', async () => {
+    const at = '2026-08-27T09:15:00Z';
+    client.getReviewQueue.mockResolvedValue({
+      ...REVIEW_QUEUE,
+      items: [
+        {
+          ...OPEN_ITEM,
+          events: [
+            {
+              event_id: 'second',
+              sequence: 2,
+              action: 'ESCALATED' as const,
+              note: 'passed to the bank team',
+              recorded_at: at,
+              decision_fingerprint: OPEN_ITEM.decision_fingerprint,
+            },
+            {
+              event_id: 'first',
+              sequence: 1,
+              action: 'ACKNOWLEDGED' as const,
+              note: 'picked this up',
+              recorded_at: at,
+              decision_fingerprint: OPEN_ITEM.decision_fingerprint,
+            },
+          ],
+        },
+      ],
+      total: 1,
+    });
+    open();
+
+    const entries = await screen.findAllByRole('listitem');
+    expect(entries[0]).toHaveTextContent('picked this up');
+    expect(entries[1]).toHaveTextContent('passed to the bank team');
+  });
+
   it('renders a note containing markup as characters, not as markup', async () => {
     client.getReviewQueue.mockResolvedValue({
       ...REVIEW_QUEUE,
@@ -240,7 +279,7 @@ describe('recording an action', () => {
     });
   });
 
-  it('sends a fresh idempotency key for each submission', async () => {
+  it('sends a fresh idempotency key for a deliberate second action', async () => {
     open();
     await userEvent.click(await screen.findByRole('button', { name: /record this action/i }));
     await waitFor(() => {
@@ -311,7 +350,7 @@ describe('recording an action', () => {
     await userEvent.click(await screen.findByRole('button', { name: /record this action/i }));
 
     await screen.findByRole('alert');
-    expect(screen.getByRole('button', { name: /record this action/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /retry this same action/i })).toBeEnabled();
   });
 });
 
@@ -352,5 +391,294 @@ describe('a closed review', () => {
 
     const notes = await screen.findAllByText(/human workflow state does not change the baseline/i);
     expect(notes.length).toBeGreaterThan(0);
+  });
+});
+
+describe('retrying a submission whose outcome is unknown', () => {
+  /**
+   * The case this whole block exists for.
+   *
+   * A request can fail after the server has written the row: the answer is lost
+   * on the way back. The reviewer sees an error and presses the button again.
+   * If that sent a new key, the server would append a second event for one
+   * intended action, and nothing on either side would say so.
+   */
+  async function submitAndFail(): Promise<void> {
+    client.appendReviewEvent.mockRejectedValueOnce(new NetworkError(new Error('answer lost')));
+    open();
+    await userEvent.click(await screen.findByRole('button', { name: /record this action/i }));
+    await screen.findByRole('alert');
+  }
+
+  function keysSent(): string[] {
+    return client.appendReviewEvent.mock.calls.map((call) => call[2].idempotencyKey);
+  }
+
+  it('reuses the key when unchanged input is retried', async () => {
+    await submitAndFail();
+
+    await userEvent.click(screen.getByRole('button', { name: /retry this same action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = keysSent();
+    expect(second).toBe(first);
+  });
+
+  it('sends an identical command payload on the retry', async () => {
+    await submitAndFail();
+
+    await userEvent.click(screen.getByRole('button', { name: /retry this same action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = client.appendReviewEvent.mock.calls;
+    expect(second).toEqual(first);
+  });
+
+  it('labels the retry as the same action rather than a second one', async () => {
+    await submitAndFail();
+
+    expect(screen.getByRole('button', { name: /retry this same action/i })).toBeInTheDocument();
+    expect(screen.getByText(/this retries the same action, not a second one/i)).toBeInTheDocument();
+  });
+
+  it('keeps the baseline-unchanged notice while retrying', async () => {
+    await submitAndFail();
+
+    const notes = screen.getAllByText(/human workflow state does not change the baseline/i);
+    expect(notes.length).toBeGreaterThan(0);
+  });
+
+  it('stops being a retry when the action is changed', async () => {
+    await submitAndFail();
+
+    await userEvent.click(screen.getByRole('radio', { name: /escalate/i }));
+
+    expect(
+      screen.queryByRole('button', { name: /retry this same action/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /record this action/i })).toBeInTheDocument();
+  });
+
+  it('sends a new key when the action is changed after a failure', async () => {
+    await submitAndFail();
+
+    await userEvent.click(screen.getByRole('radio', { name: /escalate/i }));
+    await userEvent.click(screen.getByRole('button', { name: /record this action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = keysSent();
+    expect(second).not.toBe(first);
+  });
+
+  it('sends a new key when the note is changed after a failure', async () => {
+    await submitAndFail();
+
+    await userEvent.type(screen.getByLabelText(/note \(optional\)/i), 'chasing the bank');
+    await userEvent.click(screen.getByRole('button', { name: /record this action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = keysSent();
+    expect(second).not.toBe(first);
+  });
+
+  it('treats a note that differs only by surrounding space as the same command', async () => {
+    client.appendReviewEvent.mockRejectedValueOnce(new NetworkError(new Error('answer lost')));
+    open();
+    await userEvent.type(await screen.findByLabelText(/note \(optional\)/i), 'chasing');
+    await userEvent.click(screen.getByRole('button', { name: /record this action/i }));
+    await screen.findByRole('alert');
+
+    await userEvent.type(screen.getByLabelText(/note \(optional\)/i), '  ');
+    await userEvent.click(screen.getByRole('button', { name: /retry this same action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = keysSent();
+    expect(second).toBe(first);
+  });
+
+  it('sends a new key for the next action once one is confirmed', async () => {
+    await submitAndFail();
+
+    await userEvent.click(screen.getByRole('button', { name: /retry this same action/i }));
+    await screen.findByRole('status');
+    await userEvent.click(screen.getByRole('button', { name: /record this action/i }));
+
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledTimes(3);
+    });
+    const [first, second, third] = keysSent();
+    expect(second).toBe(first);
+    expect(third).not.toBe(first);
+  });
+});
+
+describe('paging through a long queue', () => {
+  const TOTAL = 21;
+
+  function page(offset: number): QueuePayload {
+    const size = Math.min(PAGE_SIZE, TOTAL - offset);
+    return {
+      ...REVIEW_QUEUE,
+      items: Array.from({ length: size }, (_unused, index) => ({
+        ...OPEN_ITEM,
+        decision: {
+          ...OPEN_ITEM.decision,
+          decision_id: `d-${String(offset + index)}`,
+          subject_settlement_line_id: `line-${String(offset + index).padStart(4, '0')}`,
+        },
+      })),
+      total: TOTAL,
+      open_total: TOTAL,
+      limit: PAGE_SIZE,
+      offset,
+    };
+  }
+
+  beforeEach(() => {
+    client.getReviewQueue.mockImplementation((_runId, filters) =>
+      Promise.resolve(page(filters?.offset ?? 0)),
+    );
+  });
+
+  async function next(): Promise<void> {
+    await userEvent.click(screen.getByRole('button', { name: /next page/i }));
+  }
+
+  it('asks for the first page with an explicit offset', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    expect(client.getReviewQueue).toHaveBeenCalledWith(RUN.run_id, { limit: 20, offset: 0 });
+  });
+
+  it('asks for offset twenty when the next page is chosen', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    await next();
+
+    await waitFor(() => {
+      expect(client.getReviewQueue).toHaveBeenCalledWith(RUN.run_id, { limit: 20, offset: 20 });
+    });
+  });
+
+  it('reaches the twenty-first item, which the first page hides', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    await next();
+
+    expect(await screen.findByRole('button', { name: 'line-0020' })).toBeInTheDocument();
+  });
+
+  it('returns to offset zero on previous', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+    await next();
+    await screen.findByRole('button', { name: 'line-0020' });
+
+    await userEvent.click(screen.getByRole('button', { name: /previous page/i }));
+
+    expect(await screen.findByRole('button', { name: 'line-0000' })).toBeInTheDocument();
+  });
+
+  it('disables previous on the first page', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    expect(screen.getByRole('button', { name: /previous page/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /next page/i })).toBeEnabled();
+  });
+
+  it('disables next on the last page', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+    await next();
+    await screen.findByRole('button', { name: 'line-0020' });
+
+    expect(screen.getByRole('button', { name: /next page/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /previous page/i })).toBeEnabled();
+  });
+
+  it('says which items are on screen and how many there are in total', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    expect(screen.getByText(/items 1 to 20 of 21/i)).toBeInTheDocument();
+
+    await next();
+    await screen.findByRole('button', { name: 'line-0020' });
+
+    expect(screen.getByText(/items 21 to 21 of 21/i)).toBeInTheDocument();
+  });
+
+  it('offers the pager under a named landmark', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+
+    expect(screen.getByRole('navigation', { name: /review queue pages/i })).toBeInTheDocument();
+  });
+
+  it('selects the first item of a page the previous selection is not on', async () => {
+    open();
+    await userEvent.click(await screen.findByRole('button', { name: 'line-0005' }));
+    expect(screen.getByRole('button', { name: 'line-0005' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await next();
+    await screen.findByRole('button', { name: 'line-0020' });
+
+    expect(screen.getByRole('button', { name: 'line-0020' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('keeps the baseline status and the workflow state apart on every page', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+    await next();
+    const row = (await screen.findByRole('button', { name: 'line-0020' })).closest('tr');
+
+    expect(within(row as HTMLElement).getByText('Exception')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText('Not yet picked up')).toBeInTheDocument();
+  });
+
+  it('stays on the same page after an action is recorded', async () => {
+    open();
+    await screen.findByRole('button', { name: 'line-0000' });
+    await next();
+    await screen.findByRole('button', { name: 'line-0020' });
+
+    await userEvent.click(screen.getByRole('button', { name: /record this action/i }));
+
+    await waitFor(() => {
+      expect(client.getReviewQueue).toHaveBeenLastCalledWith(RUN.run_id, {
+        limit: 20,
+        offset: 20,
+      });
+    });
+    expect(screen.getByRole('button', { name: 'line-0020' })).toBeInTheDocument();
+  });
+
+  it('offers no pager on a queue that fits one page', async () => {
+    client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+    open();
+    await screen.findByRole('button', { name: 'line-0001' });
+
+    expect(screen.getByRole('button', { name: /next page/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /previous page/i })).toBeDisabled();
   });
 });

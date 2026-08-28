@@ -891,3 +891,18 @@ select {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.pager__where {
+  color: var(--ink-faint);
+  font-size: 0.86rem;
+}

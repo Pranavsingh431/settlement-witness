@@ -515,6 +515,13 @@ It is not a credential and nothing authenticates with it. Any string a caller
 can regenerate for the same command works, and one describing the command, as
 above, is easier to reason about than a random identifier.
 
+A client should hold the key for as long as the outcome is unknown. A request
+can fail after this endpoint has written the row, because the answer can be lost
+on the way back, and retrying that command under a new key would append a second
+event for one intended action. The key belongs to the command, not to the
+attempt: retry unchanged input under the same key and a different command under
+a different one.
+
 `note` is optional, at most 500 characters, stored and served as plain text.
 Blank is the same as absent.
 
