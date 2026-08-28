@@ -60,6 +60,12 @@ Empty means canonical throughout, which is what every caller outside the shadow
 corpus uses. The corpus supplies a styling to make selection a real task rather
 than string equality."""
 
+_ABSENT = b"\x01absent"
+"""What a withheld field contributes to a digest.
+
+A distinct marker rather than an empty string, so a reference that was withheld
+and one that happened to render empty do not produce the same fingerprint."""
+
 MAX_CANDIDATE_PAGE = MAX_SELECTED_RECORDS
 """The most candidates one page may offer.
 
@@ -152,6 +158,53 @@ class LinkProposalRequest(BaseModel):
     def candidate_ids(self) -> frozenset[str]:
         """Return the selectable record IDs on this page, for membership checks."""
         return frozenset(candidate.source_record_id for candidate in self.candidates)
+
+    @property
+    def request_fingerprint(self) -> str:
+        """Return a digest of everything this page shows a provider.
+
+        The environment fingerprint identifies which records the universe holds.
+        This identifies what a provider was shown about them, which is not the
+        same thing: the same universe rendered canonically, truncated and
+        withheld produces three different questions and three different tasks,
+        and under the environment fingerprint alone all three were one.
+
+        Built from the styled subject references, every rendered field of every
+        candidate in page order, the page ordinal and count, the environment
+        fingerprint and the snapshot fingerprint, in that order.
+
+        It carries nothing private. No scenario label, no expected action, no
+        canonical answer and no provider output goes into it, because all of
+        those are things a request does not contain.
+        """
+        digest = hashlib.sha256()
+        for part in (
+            self.subject_settlement_line_id,
+            self.subject_payment_id,
+            self.subject_payout_id,
+        ):
+            digest.update(_ABSENT if part is None else part.encode("utf-8"))
+            digest.update(b"\x00")
+        for candidate in self.candidates:
+            for field in (
+                candidate.source_record_id,
+                candidate.record_type.value,
+                candidate.payment_id,
+                candidate.payout_id,
+                candidate.event_type,
+                candidate.occurred_at,
+            ):
+                digest.update(_ABSENT if field is None else field.encode("utf-8"))
+                digest.update(b"\x00")
+        for part in (
+            str(self.page_ordinal),
+            str(self.page_count),
+            self.environment_fingerprint,
+            self.snapshot_fingerprint,
+        ):
+            digest.update(part.encode("utf-8"))
+            digest.update(b"\x00")
+        return digest.hexdigest()
 
 
 def _shown(value: str, record_id: str, styling: Styling) -> str | None:
@@ -316,7 +369,7 @@ def truth_for(request: LinkProposalRequest, snapshot: FactSnapshot) -> frozenset
     correct answer is.
 
     Narrowed to the page, because a page can only be answered with what it
-    offers. `line_truth_for` is the whole-line figure that recall is measured
+    offers. `truth_for_line` is the whole-line figure that recall is measured
     over.
 
     The subject line's own record is excluded, matching the candidate set.
@@ -324,28 +377,31 @@ def truth_for(request: LinkProposalRequest, snapshot: FactSnapshot) -> frozenset
     return frozenset(line_truth_for(request, snapshot) & request.candidate_ids)
 
 
-def line_truth_for(request: LinkProposalRequest, snapshot: FactSnapshot) -> frozenset[str]:
-    """Return every record the baseline links to this line, across every page.
+def truth_for_line(line_id: str, snapshot: FactSnapshot) -> frozenset[str]:
+    """Return every record the baseline links to one settlement line.
 
     What strict recall is measured over. A true link on a page the provider
-    never answered is still a true link it did not return.
+    never answered is still a true link it did not return, and a line that was
+    never asked about because it has no candidates still has whatever links it
+    has.
 
-    Read from the canonical line in the snapshot, never from the request's own
+    Read from the canonical line in the snapshot, never from a request's
     reference fields. Those are renderings, and a rendering can be reformatted,
     altered or withheld: an oracle built from them would agree with whatever the
     provider was shown, which is the opposite of an oracle.
     """
-    line = next(
-        one
-        for one in snapshot.settlement_lines
-        if one.settlement_line_id == request.subject_settlement_line_id
-    )
+    line = next(one for one in snapshot.settlement_lines if one.settlement_line_id == line_id)
     events = snapshot.events_for_payment(line.payment_id)
     payout = snapshot.payout_for(line.payout_id)
     linked = {event.source_record_id for event in events}
     if payout is not None:
         linked.add(payout.source_record_id)
     return frozenset(linked)
+
+
+def line_truth_for(request: LinkProposalRequest, snapshot: FactSnapshot) -> frozenset[str]:
+    """Return every record the baseline links to the line one page belongs to."""
+    return truth_for_line(request.subject_settlement_line_id, snapshot)
 
 
 def selectable_records(requests: Sequence[LinkProposalRequest]) -> frozenset[str]:

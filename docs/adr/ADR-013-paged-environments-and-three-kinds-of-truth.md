@@ -50,7 +50,21 @@ was: the candidate set is the set that was offered.
 
 Page ordinal and environment fingerprint join the server-owned metadata, and
 both are part of a proposal's derived identity. Without them, two pages of one
-line in one snapshot would be filed under one ID. Raw model output still carries
+line in one snapshot would be filed under one ID.
+
+So does a third: the request fingerprint. The environment fingerprint identifies
+**which records** a universe holds. It says nothing about **what was shown**
+about them, and the same universe rendered canonically, truncated and withheld
+is three different questions and three different tasks. Under the environment
+fingerprint alone all three shared one identity, so a run over withheld
+references looked like a replay of a run over canonical ones.
+
+The request fingerprint is built from the styled subject references, every
+rendered field of every candidate in page order, the page ordinal and count, the
+environment fingerprint and the snapshot fingerprint. It carries nothing
+private, because it is built from a request and a request holds nothing private.
+`ShadowReport` carries the ordered digest of every page request for the same
+reason at the level of a whole run. Raw model output still carries
 an outcome and a list of IDs and nothing else; a response supplying a page
 number or an environment fingerprint is refused as an extra, exactly as one
 supplying a provider identity is.
@@ -100,8 +114,8 @@ whoever is reading the report, not to an average computed before they see it.
 
 ## Consequences
 
-- A shadow report is not comparable across harness versions. The page-aware
-  harness is 3.0.0 and asks a different set of questions from 2.0.0.
+- A shadow report is not comparable across harness versions, and not comparable
+  across presentations within one. The request-set fingerprint is what says so.
 - The abstention and invalid rates are per page and are named for it. A line
   measure would have hidden a provider that declined one page of four.
 - Exact-set accuracy is over a line's aggregate selection across every page, so

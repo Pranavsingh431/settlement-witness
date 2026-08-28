@@ -82,10 +82,11 @@ class RawLinkSelection(BaseModel):
     lie about.
 
     `extra="forbid"` therefore refuses more than the obviously dangerous keys. A
-    response carrying `provider`, `snapshot_fingerprint`, `page_ordinal` or
-    `environment_fingerprint` is refused too, even though a correct value for
-    each exists, because a provider supplying one has misunderstood what it is
-    being asked and the rest of its answer is not worth salvaging.
+    response carrying `provider`, `snapshot_fingerprint`, `page_ordinal`,
+    `environment_fingerprint` or `request_fingerprint` is refused too, even
+    though a correct value for each exists, because a provider supplying one
+    has misunderstood what it is being asked and the rest of its answer is not
+    worth salvaging.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -165,6 +166,15 @@ class LinkProposal(BaseModel):
     """Which page of that universe was asked. Part of the identity: without it,
     two pages of one line in one snapshot would be the same record."""
 
+    request_fingerprint: str = Field(min_length=64, max_length=64)
+    """A digest of everything the page showed the provider.
+
+    The environment fingerprint says which records the universe held. This says
+    what was shown about them, which is a different question and a different
+    task: the same records rendered canonically, truncated and withheld are
+    three questions, and under the environment fingerprint alone all three were
+    one record."""
+
     outcome: ProposalOutcome
     selected_source_record_ids: tuple[str, ...] = ()
     """Ordered, because the order a provider returned is part of what it said.
@@ -212,6 +222,7 @@ def proposal_id_for(
     subject_settlement_line_id: str,
     environment_fingerprint: str,
     page_ordinal: int,
+    request_fingerprint: str,
     provider: ProviderIdentity,
 ) -> str:
     """Return the identity of one proposal attempt.
@@ -224,6 +235,11 @@ def proposal_id_for(
     The page and the environment are part of the question, so they are part of
     the identity. Without them, every page of one line would be filed under the
     same ID and a report would carry several records claiming to be one.
+
+    So is what the page showed. The same provider, line, snapshot and page under
+    two different renderings answered two different questions, and filing both
+    under one ID would make a report over one presentation look like a replay of
+    a report over another.
     """
     digest = hashlib.sha256()
     for part in (
@@ -231,6 +247,7 @@ def proposal_id_for(
         subject_settlement_line_id,
         environment_fingerprint,
         str(page_ordinal),
+        request_fingerprint,
         provider.name,
         provider.version,
     ):
@@ -246,6 +263,7 @@ def bind(
     snapshot_fingerprint: str,
     environment_fingerprint: str,
     page_ordinal: int,
+    request_fingerprint: str,
     provider: ProviderIdentity,
 ) -> LinkProposal:
     """Attach a raw selection to the question and the provider it came from.
@@ -268,6 +286,7 @@ def bind(
         snapshot_fingerprint: The snapshot the request was against.
         environment_fingerprint: The candidate universe the page was cut from.
         page_ordinal: Which page of that universe was asked.
+        request_fingerprint: A digest of what the page showed the provider.
         provider: The identity read from the provider object that was called,
             never from its response.
 
@@ -280,12 +299,14 @@ def bind(
             subject_settlement_line_id=subject_settlement_line_id,
             environment_fingerprint=environment_fingerprint,
             page_ordinal=page_ordinal,
+            request_fingerprint=request_fingerprint,
             provider=provider,
         ),
         subject_settlement_line_id=subject_settlement_line_id,
         snapshot_fingerprint=snapshot_fingerprint,
         environment_fingerprint=environment_fingerprint,
         page_ordinal=page_ordinal,
+        request_fingerprint=request_fingerprint,
         outcome=selection.outcome,
         selected_source_record_ids=selection.selected_source_record_ids,
         provider=provider,

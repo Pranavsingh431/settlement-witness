@@ -151,6 +151,29 @@ Selecting everything still scores perfect recall and is still caught by
 precision at 0.127 and a false-link rate of 0.873. Abstaining everywhere reports
 recall 0.000 where truth exists, with precision null rather than perfect.
 
+## Corrected in Phase 9.1
+
+Three claims in this report were wrong, and the numbers in the table above were
+computed under all three.
+
+**Safe abstention did not require abstaining.** It counted any expected-ABSTAIN
+line where the provider selected nothing, so a provider returning malformed
+output on every page reported `safe_abstention_recall` 1.000 alongside
+`invalid_page_rate` 1.000. Both cannot be true of one line. The matcher's 1.000
+in the table is genuine, because it did abstain; the metric was simply unable to
+tell that apart from failing.
+
+**Identity did not distinguish what the provider saw.** Canonical, truncated and
+withheld renderings of one snapshot produce visibly different requests and
+shared one environment fingerprint, one set of proposal IDs, and reports that
+looked directly comparable.
+
+**A settlement line with no candidates disappeared.** Line outcomes were built
+from the requests, so a snapshot holding one settlement line and nothing else
+reported `line_count = 0`.
+
+See [phase-9-1.md](phase-9-1.md).
+
 ## Harness version
 
 `SHADOW_HARNESS_VERSION` is `3.0.0`. A 2.0.0 report asked one question per line;
@@ -265,6 +288,7 @@ nothing.
 | `answered_link_recall` retained under that name | Passed | Stays 1.000 when a page is skipped |
 | Exact set over the aggregate selection | Passed | Missing a page fails it |
 | `page_count` reported | Passed | On the report |
+| Every settlement line accounted for | Wrong | A line with no candidates was absent. Corrected in Phase 9.1 |
 | `abstention_page_rate` and `invalid_page_rate` | Passed | Named for pages; line measure named separately |
 | Harness version bumped | Passed | 3.0.0, with the reason in the constant |
 | Control: three pages, perfect provider | Passed | 1.000 recall and exact set |
@@ -278,7 +302,7 @@ nothing.
 | Private oracle from canonical facts | Passed | Manifest and baseline compared |
 | Oracle isolation under corrupted presentation | Passed | Near-miss and withheld renderings |
 | `ExpectedProviderAction` private to the evaluator | Passed | Never in a request; asserted |
-| Safe-abstention metrics reported separately | Passed | And never averaged with recall |
+| Safe-abstention metrics reported separately | Partly wrong | Reported separately, and credited any line with no selection. Corrected in Phase 9.1 |
 | Perturbation changes the score | Passed | Four behaviours, four distinct reports |
 | No money, CSV, prose, codes, statuses or rationale | Passed | Field sets asserted |
 | Nothing persisted, no endpoint | Passed | Schema and module source asserted |

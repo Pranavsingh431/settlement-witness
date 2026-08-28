@@ -116,6 +116,7 @@ class TestTheMetadataIsBoundNotAccepted:
             subject_settlement_line_id="line-sl-1",
             environment_fingerprint=request_for_line_one.environment_fingerprint,
             page_ordinal=request_for_line_one.page_ordinal,
+            request_fingerprint=request_for_line_one.request_fingerprint,
             provider=real,
         )
 
@@ -128,6 +129,7 @@ class TestTheMetadataIsBoundNotAccepted:
             ("snapshot_fingerprint", "f" * 64),
             ("page_ordinal", 2),
             ("environment_fingerprint", "f" * 64),
+            ("request_fingerprint", "9" * 64),
         ],
     )
     def test_supplying_metadata_is_refused(

@@ -26,6 +26,7 @@ from tests.ai.conftest import FIXTURE
 
 FINGERPRINT = "a" * 64
 ENVIRONMENT = "e" * 64
+REQUEST = "r" * 64
 
 
 def selection(**overrides: object) -> RawLinkSelection:
@@ -133,6 +134,7 @@ class TestWhatAProviderMayNotSay:
             "snapshot_fingerprint",
             "page_ordinal",
             "environment_fingerprint",
+            "request_fingerprint",
         ],
     )
     def test_a_metadata_field_is_refused(self, field: str) -> None:
@@ -213,6 +215,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=FIXTURE,
         )
 
@@ -229,6 +232,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=real,
         )
 
@@ -244,6 +248,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=real,
         )
 
@@ -252,6 +257,7 @@ class TestBindingIsWhereMetadataComesFrom:
             subject_settlement_line_id="line-7",
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=real,
         )
 
@@ -265,6 +271,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=FIXTURE,
         )
 
@@ -280,6 +287,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=ProviderIdentity(name="one", version="1"),
         )
         second = bind(
@@ -288,6 +296,7 @@ class TestBindingIsWhereMetadataComesFrom:
             snapshot_fingerprint=FINGERPRINT,
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=ProviderIdentity(name="two", version="1"),
         )
 
@@ -302,6 +311,7 @@ class TestBindingIsWhereMetadataComesFrom:
             "snapshot_fingerprint",
             "environment_fingerprint",
             "page_ordinal",
+            "request_fingerprint",
             "outcome",
             "selected_source_record_ids",
             "provider",
@@ -338,6 +348,7 @@ class TestProposalIdentity:
             subject_settlement_line_id="line-1",
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=FIXTURE,
         )
         second = proposal_id_for(
@@ -345,6 +356,7 @@ class TestProposalIdentity:
             subject_settlement_line_id="line-1",
             environment_fingerprint=ENVIRONMENT,
             page_ordinal=1,
+            request_fingerprint=REQUEST,
             provider=FIXTURE,
         )
 
@@ -357,6 +369,7 @@ class TestProposalIdentity:
             ("subject_settlement_line_id", "line-2"),
             ("environment_fingerprint", "f" * 64),
             ("page_ordinal", 2),
+            ("request_fingerprint", "9" * 64),
             ("provider", ProviderIdentity(name="fixture", version="2")),
         ],
     )
@@ -367,6 +380,7 @@ class TestProposalIdentity:
             "subject_settlement_line_id": "line-1",
             "environment_fingerprint": ENVIRONMENT,
             "page_ordinal": 1,
+            "request_fingerprint": REQUEST,
             "provider": FIXTURE,
         }
 
@@ -390,6 +404,7 @@ class TestTheEnvelopeChecksItselfToo:
             "snapshot_fingerprint": FINGERPRINT,
             "environment_fingerprint": ENVIRONMENT,
             "page_ordinal": 1,
+            "request_fingerprint": REQUEST,
             "outcome": ProposalOutcome.PROPOSE,
             "selected_source_record_ids": ("rec-1",),
             "provider": FIXTURE,

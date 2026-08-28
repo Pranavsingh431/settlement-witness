@@ -143,6 +143,7 @@ def validate_selection(
             snapshot_fingerprint=request.snapshot_fingerprint,
             environment_fingerprint=request.environment_fingerprint,
             page_ordinal=request.page_ordinal,
+            request_fingerprint=request.request_fingerprint,
             provider=provider,
         )
     )

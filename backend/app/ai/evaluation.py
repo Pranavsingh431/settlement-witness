@@ -51,6 +51,8 @@ One deterministic fake provider, asked once per page. There is no sampling, no
 temperature and no second attempt, so pass@k would be pass@1 reported k times.
 """
 
+import hashlib
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 
@@ -60,8 +62,8 @@ from app.ai.candidates import (
     LinkProposalRequest,
     Styling,
     build_requests,
-    line_truth_for,
     truth_for,
+    truth_for_line,
 )
 from app.ai.proposals import ProviderIdentity
 from app.ai.provider import LinkProposalProvider, ProviderFailure
@@ -69,7 +71,7 @@ from app.ai.validation import RejectedProposal, RejectionCode, parse_proposal
 from app.benchmark.metrics import Rate
 from app.reconciliation.snapshot import FactSnapshot
 
-SHADOW_HARNESS_VERSION = "3.0.0"
+SHADOW_HARNESS_VERSION = "4.0.0"
 """Version of these definitions.
 
 Changes when a metric's meaning changes, so two reports carrying different
@@ -80,7 +82,15 @@ lines. 3.0.0 made the harness page-aware: a provider is asked once per candidate
 page rather than once per line, the abstention and invalid rates became
 explicitly per-page, and exact-set accuracy became an aggregate over every page
 of a line. A 2.0.0 report asked a different set of questions and is not
-comparable with one from here."""
+comparable with one from here.
+
+4.0.0 corrected three things. Safe abstention now requires the provider to have
+actually abstained on every page, where before any line with no selection
+counted, so returning malformed output on every page scored as safely
+abstaining. Report and proposal identity now include what the provider was
+shown, so two runs over one snapshot under different renderings are visibly
+different. And a settlement line with no candidates appears in the report as an
+unaskable line rather than not appearing at all."""
 
 
 class ExpectedProviderAction(StrEnum):
@@ -100,6 +110,30 @@ class ExpectedProviderAction(StrEnum):
     """The visible references do not identify the linked records safely, even
     though the private oracle knows them. Abstaining is correct and selecting
     anything is unsafe."""
+
+
+class LineAbstention(StrEnum):
+    """How a line where abstaining was safe actually turned out.
+
+    Three outcomes that partition the expected-abstention denominator exactly,
+    so every such line is counted once and the three numerators sum to it.
+    """
+
+    SAFE = "SAFE"
+    """The provider abstained on every page, and there was at least one page."""
+
+    UNSAFE_SELECTION = "UNSAFE_SELECTION"
+    """It selected at least one record. A link asserted from information that
+    does not identify a record."""
+
+    UNUSABLE = "UNUSABLE"
+    """Neither. Some page was malformed, failed, was rejected, or the line had
+    no pages at all.
+
+    Kept apart from a safe abstention because a provider that returned nothing
+    usable did not decline: it did not answer. Counting that as safe was the
+    defect this outcome exists to remove, and it flattered exactly the providers
+    that deserve it least."""
 
 
 class PageOutcome(BaseModel):
@@ -141,7 +175,23 @@ class LineOutcome(BaseModel):
 
     page_count: int
     answered_page_count: int
+    abstained_page_count: int
+    """Pages where the provider returned a valid abstention."""
+
+    unusable_page_count: int
+    """Pages that were rejected or where the provider failed."""
+
     expected_action: ExpectedProviderAction
+
+    @property
+    def askable(self) -> bool:
+        """Return whether this line had any candidate page at all.
+
+        False for a line with no payment events and no payout in the snapshot.
+        No question was put to a provider about it, so there is no answer to
+        judge, and it must not be scored as though there were.
+        """
+        return self.page_count > 0
 
     @property
     def true_positives(self) -> int:
@@ -160,8 +210,25 @@ class LineOutcome(BaseModel):
         Over every page. A line answered perfectly on three pages and never on
         the fourth is not exact, because the records on the fourth page were
         never returned.
+
+        A line nobody was asked about is never exact. Its truth and its selection
+        are both empty, so comparing them would say yes, and a corpus of lines
+        with no candidates would score perfectly for having asked nothing.
         """
-        return set(self.selected) == set(self.truth)
+        return self.askable and set(self.selected) == set(self.truth)
+
+    @property
+    def abstention_outcome(self) -> LineAbstention:
+        """Return how this line turned out, for a line where abstaining is safe.
+
+        Computed for every line and only counted for the ones that expect an
+        abstention, so the three outcomes partition that denominator exactly.
+        """
+        if self.selected_anything:
+            return LineAbstention.UNSAFE_SELECTION
+        if self.askable and self.abstained_page_count == self.page_count:
+            return LineAbstention.SAFE
+        return LineAbstention.UNUSABLE
 
     @property
     def selected_anything(self) -> bool:
@@ -183,7 +250,22 @@ class ShadowReport(BaseModel):
     snapshot_fingerprint: str
     provider: ProviderIdentity
     line_count: int
+    """Every settlement line in the snapshot, including ones with no pages."""
+
     page_count: int
+    unaskable_line_count: int
+    """Lines with no payment event and no payout in the snapshot.
+
+    No candidate page exists for them, so no request was made and no provider
+    was asked. They are reported rather than dropped: a line that vanishes from
+    a report is one nobody notices was never evaluated."""
+
+    request_set_fingerprint: str
+    """A digest of every page request, in order.
+
+    Identifies what the provider was actually shown across the whole run. Two
+    reports over one canonical snapshot under different renderings carry
+    different values here, so they cannot be read as comparable."""
 
     link_precision: Rate
     """Of the records selected, how many the baseline also links.
@@ -230,7 +312,11 @@ class ShadowReport(BaseModel):
     when nothing in the records says it is."""
 
     safe_abstention_recall: Rate
-    """Of the lines where abstaining was the safe answer, how many abstained.
+    """Of the lines where abstaining was the safe answer, how many did abstain.
+
+    Requires a valid abstention on every page of the line. A provider that
+    returned nothing usable did not decline, and counting it here would flatter
+    exactly the providers that deserve it least.
 
     Reported apart from linking. An abstention on such a line is correct and
     still lowers strict recall, and averaging the two would hide exactly that
@@ -241,6 +327,14 @@ class ShadowReport(BaseModel):
 
     The harm this pair exists to measure: a link asserted from information that
     does not identify a record."""
+
+    unusable_expected_abstention_rate: Rate
+    """Of the same lines, how many neither abstained nor selected.
+
+    A malformed page, a provider failure, a mix of abstentions and rejections,
+    or a line with no pages at all. Together with the two above this partitions
+    the denominator exactly, and a test requires the three numerators to sum to
+    it."""
 
     line_outcomes: tuple[LineOutcome, ...]
     """Every line, in settlement line ID order."""
@@ -318,35 +412,55 @@ def evaluate(
     requests = build_requests(snapshot, styling)
     pages = tuple(_evaluate_page(request, snapshot, provider) for request in requests)
     lines = _aggregate(requests, pages, snapshot, expected or {})
-    return _report(snapshot, provider.identity, lines, pages)
+    return _report(snapshot, provider.identity, lines, pages, requests)
 
 
 def _aggregate(
-    requests: Sequence[LinkProposalRequest],
+    _requests: Sequence[LinkProposalRequest],
     pages: Sequence[PageOutcome],
     snapshot: FactSnapshot,
     expected: Mapping[str, ExpectedProviderAction],
 ) -> tuple[LineOutcome, ...]:
-    """Fold page outcomes into one outcome per settlement line."""
-    by_line: dict[str, LinkProposalRequest] = {}
-    for request in requests:
-        by_line.setdefault(request.subject_settlement_line_id, request)
+    """Fold page outcomes into one outcome per settlement line.
 
+    Iterates the snapshot's settlement lines rather than the requests, so a line
+    with no candidate page still appears. Built from the requests, such a line
+    would produce no request and therefore no outcome, and would be missing from
+    the report entirely: `line_count` would not match the snapshot and nobody
+    would see that the line had never been evaluated.
+    """
     outcomes: list[LineOutcome] = []
-    for line_id in sorted(by_line):
+    for line in sorted(snapshot.settlement_lines, key=lambda one: one.settlement_line_id):
+        line_id = line.settlement_line_id
         of_line = [page for page in pages if page.subject_settlement_line_id == line_id]
         selected = sorted({record for page in of_line for record in page.selected})
         outcomes.append(
             LineOutcome(
                 subject_settlement_line_id=line_id,
-                truth=tuple(sorted(line_truth_for(by_line[line_id], snapshot))),
+                truth=tuple(sorted(truth_for_line(line_id, snapshot))),
                 selected=tuple(selected),
                 page_count=len(of_line),
                 answered_page_count=sum(1 for page in of_line if page.answered),
+                abstained_page_count=sum(1 for page in of_line if page.abstained),
+                unusable_page_count=sum(1 for page in of_line if page.rejection is not None),
                 expected_action=expected.get(line_id, ExpectedProviderAction.SELECT_EXACTLY),
             )
         )
     return tuple(outcomes)
+
+
+def request_set_fingerprint(requests: Sequence[LinkProposalRequest]) -> str:
+    """Return a digest of every page request, in the order they were asked.
+
+    Identifies what a provider was shown across a whole run, so two reports over
+    one canonical snapshot under different renderings are visibly different
+    things rather than two attempts at one thing.
+    """
+    digest = hashlib.sha256()
+    for request in requests:
+        digest.update(request.request_fingerprint.encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
 
 
 def _report(
@@ -354,6 +468,7 @@ def _report(
     provider: ProviderIdentity,
     lines: Sequence[LineOutcome],
     pages: Sequence[PageOutcome],
+    requests: Sequence[LinkProposalRequest],
 ) -> ShadowReport:
     """Assemble the rates from the per-line and per-page outcomes."""
     selected_total = sum(len(line.selected) for line in lines)
@@ -373,6 +488,7 @@ def _report(
     expecting_abstention = [
         line for line in lines if line.expected_action is ExpectedProviderAction.ABSTAIN
     ]
+    by_outcome = Counter(line.abstention_outcome for line in expecting_abstention)
 
     return ShadowReport(
         harness_version=SHADOW_HARNESS_VERSION,
@@ -380,6 +496,8 @@ def _report(
         provider=provider,
         line_count=len(lines),
         page_count=len(pages),
+        unaskable_line_count=sum(1 for line in lines if not line.askable),
+        request_set_fingerprint=request_set_fingerprint(requests),
         link_precision=Rate.of(true_positives, selected_total),
         link_recall=Rate.of(true_positives, linkable),
         answered_link_recall=Rate.of(answered_true_positives, answered_linkable),
@@ -392,13 +510,12 @@ def _report(
             sum(1 for line in lines if not line.selected_anything), len(lines)
         ),
         false_link_rate=Rate.of(false_links, selected_total),
-        safe_abstention_recall=Rate.of(
-            sum(1 for line in expecting_abstention if not line.selected_anything),
-            len(expecting_abstention),
-        ),
+        safe_abstention_recall=Rate.of(by_outcome[LineAbstention.SAFE], len(expecting_abstention)),
         unsafe_selection_rate=Rate.of(
-            sum(1 for line in expecting_abstention if line.selected_anything),
-            len(expecting_abstention),
+            by_outcome[LineAbstention.UNSAFE_SELECTION], len(expecting_abstention)
+        ),
+        unusable_expected_abstention_rate=Rate.of(
+            by_outcome[LineAbstention.UNUSABLE], len(expecting_abstention)
         ),
         line_outcomes=tuple(lines),
         page_outcomes=tuple(pages),
