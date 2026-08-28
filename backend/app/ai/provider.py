@@ -29,11 +29,48 @@ from app.ai.proposals import ProposalOutcome, ProviderIdentity
 
 
 class FailureKind(StrEnum):
-    """How a provider failed to answer."""
+    """How a provider failed to answer.
+
+    Every one of these is a provider that did not answer. None is retried and
+    none is repaired into a selection: a caller records the failure and moves
+    on, because a repaired answer would be partly the provider's and partly
+    ours and nobody could say which part was which.
+    """
 
     TIMED_OUT = "TIMED_OUT"
+    """It did not answer within the configured timeout."""
+
     RAISED = "RAISED"
+    """It raised something the adapter did not expect."""
+
     RETURNED_NOTHING = "RETURNED_NOTHING"
+    """It answered with nothing at all."""
+
+    CONNECTION_FAILED = "CONNECTION_FAILED"
+    """The endpoint could not be reached."""
+
+    REFUSED_BY_PROVIDER = "REFUSED_BY_PROVIDER"
+    """It answered with a status outside 2xx.
+
+    Carries no body and no status text. A provider's own error prose is not
+    something to store or display beside a reconciliation result, and a rate
+    limit and an authentication failure are the same fact here: no answer."""
+
+    RESPONSE_TOO_LARGE = "RESPONSE_TOO_LARGE"
+    """The body passed the configured byte budget and was abandoned unread."""
+
+    UNREADABLE_RESPONSE = "UNREADABLE_RESPONSE"
+    """The body was not JSON, or was JSON in a shape the adapter does not know.
+
+    Distinct from a malformed selection. This is the envelope being wrong, not
+    the answer inside it; a well-formed envelope carrying a bad selection goes
+    through the ordinary validator and is rejected there."""
+
+    BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+    """The run had already made as many requests as it was allowed.
+
+    A stop rather than a failure of the provider, recorded the same way because
+    the effect on the page is the same: no answer, and nothing invented."""
 
 
 class ProviderFailure(BaseModel):

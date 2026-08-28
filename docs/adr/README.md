@@ -25,3 +25,4 @@ Rules:
 | [ADR-011](ADR-011-same-origin-api-instead-of-cors.md) | The browser reaches the API through its own origin, not through CORS | Accepted |
 | [ADR-012](ADR-012-the-model-points-the-verifier-decides.md) | The model points, the verifier decides | Accepted |
 | [ADR-013](ADR-013-paged-environments-and-three-kinds-of-truth.md) | Paged finite environments, and three kinds of truth | Accepted |
+| [ADR-014](ADR-014-hosted-models-are-corpus-only.md) | A hosted model sees the shadow corpus and nothing else | Accepted |

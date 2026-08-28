@@ -32,3 +32,4 @@ so.
 | 9 | [phase-9.md](phase-9.md) | Passed |
 | 9.1 | [phase-9-1.md](phase-9-1.md) | Passed |
 | 9.2 | [phase-9-2.md](phase-9-2.md) | Passed |
+| 10 | [phase-10.md](phase-10.md) | Passed, with no live run |

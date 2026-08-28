@@ -10,9 +10,10 @@ themselves, so a value changed inside a fact would be caught as well as a fact
 appearing.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import httpx2
 import pytest
 from sqlalchemy import Engine
 
@@ -42,6 +43,9 @@ from app.storage.database import (
 from app.storage.repository import SourceFactRepository
 from tests.ai.conftest import FIXTURE, payload_for, store_state
 from tests.api.conftest import FIXTURE_DOCUMENTS, import_fixtures
+
+type Handler = Callable[[httpx2.Request], httpx2.Response]
+"""What an in-process transport calls for each request."""
 
 
 @pytest.fixture
@@ -281,4 +285,93 @@ class TestTheGeneratedCorpusIsAlsoInert:
             word in name
             for name in tables
             for word in ("scenario", "oracle", "corpus", "proposal", "page")
+        )
+
+
+class TestTheHostedAdapterIsAlsoInert:
+    """A hosted model changes nothing either, however it behaves.
+
+    Served in process, so no request leaves the machine. What is under test is
+    that a hosted answer, a hosted refusal and a hosted failure all travel the
+    same path as a fixture's and reach nothing they should not.
+    """
+
+    @staticmethod
+    def _handlers() -> dict[str, Handler]:
+        """Return one handler per hosted behaviour worth proving harmless."""
+        from tests.ai.test_hosted import completion
+
+        def answer(content: str) -> Handler:
+            return lambda _request: completion(content)
+
+        return {
+            "abstains": answer('{"outcome": "ABSTAIN", "selected_source_record_ids": []}'),
+            "selects an unknown record": answer(
+                '{"outcome": "PROPOSE", "selected_source_record_ids": ["nope"]}'
+            ),
+            "returns prose": answer("I think none of these belong."),
+            "returns an extra field": answer(
+                '{"outcome": "ABSTAIN", "selected_source_record_ids": [], "why": "x"}'
+            ),
+            "returns a status": answer(
+                '{"outcome": "PROPOSE", "selected_source_record_ids": ["a"], "status": "RESOLVED"}'
+            ),
+            "rate limited": lambda _request: httpx2.Response(429, json={}),
+            "server error": lambda _request: httpx2.Response(500, json={}),
+            "empty body": lambda _request: httpx2.Response(200, content=b""),
+            "malformed envelope": lambda _request: httpx2.Response(200, json={"nope": True}),
+        }
+
+    def test_every_hosted_behaviour_leaves_the_store_untouched(self, loaded_engine: Engine) -> None:
+        """Against a real database holding facts, receipts and a recorded run."""
+        import httpx2
+
+        from app.ai.corpus import build_corpus
+        from app.ai.hosted import HostedLinkProposalProvider, HostedProviderConfig
+        from tests.ai.test_hosted import ENVIRONMENT
+
+        corpus = build_corpus()
+        corpus_snapshot = FactSnapshot.from_index(corpus.index)
+        config = HostedProviderConfig.from_environment(ENVIRONMENT)
+        before = store_state(loaded_engine)
+
+        for name, handler in self._handlers().items():
+            with HostedLinkProposalProvider(
+                config, transport=httpx2.MockTransport(handler)
+            ) as provider:
+                evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
+            assert store_state(loaded_engine) == before, f"{name} changed the store"
+
+    def test_the_baseline_is_identical_afterwards(self, loaded_engine: Engine) -> None:
+        """Every stored decision, field for field."""
+        import httpx2
+
+        from app.ai.corpus import build_corpus
+        from app.ai.hosted import HostedLinkProposalProvider, HostedProviderConfig
+        from tests.ai.test_hosted import ENVIRONMENT
+
+        corpus = build_corpus()
+        corpus_snapshot = FactSnapshot.from_index(corpus.index)
+        config = HostedProviderConfig.from_environment(ENVIRONMENT)
+        before = baseline_decisions(loaded_engine)
+
+        for handler in self._handlers().values():
+            with HostedLinkProposalProvider(
+                config, transport=httpx2.MockTransport(handler)
+            ) as provider:
+                evaluate(corpus_snapshot, provider, corpus.expected_actions, corpus.styling)
+
+        assert baseline_decisions(loaded_engine) == before
+        assert before
+
+    def test_no_hosted_run_writes_a_proposal_anywhere(self, loaded_engine: Engine) -> None:
+        """The schema is what it was, and holds nothing about a model."""
+        from sqlalchemy import inspect
+
+        tables = set(inspect(loaded_engine).get_table_names())
+
+        assert not any(
+            word in name
+            for name in tables
+            for word in ("proposal", "model", "hosted", "live", "shadow")
         )

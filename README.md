@@ -165,6 +165,45 @@ A line is resolved only when its citations resolved and its required invariants
 held. Exceptions and insufficient evidence are shown as what they are, not
 folded into a success rate.
 
+## Running the shadow corpus against a hosted model
+
+Optional, and off by default. This is the only place the project calls a third
+party, and it evaluates a generated corpus rather than anything imported.
+
+```bash
+cp .env.ai.example .env.ai
+```
+
+Fill in the base URL, key and model in `.env.ai`, which is ignored by git, then:
+
+```bash
+set -a; source .env.ai; set +a
+```
+
+```bash
+cd backend && uv run python -m app.ai.live_shadow --allow-network --output ../results/live.json
+```
+
+`--allow-network` is required. Without it the command stops before it reads any
+credential, so a run started by accident cannot send one.
+
+**What leaves the machine.** The corpus is generated in memory from a fixed seed
+and every identifier in it is a digest, so the request carries opaque tokens and
+their rendered reference fields. No canonical fact, no payload hash, no money, no
+CSV, no document text, and nothing that was ever imported. The command has no
+database, file or snapshot argument, and neither it nor the adapter imports
+anything that could read the store.
+
+**What comes back.** Only a selection, judged by the same validator a fixture's
+answer meets. Nothing is repaired and nothing is retried. The model cannot
+produce a decision, a run, or a row in any table.
+
+The receipt records the model, the settings and the metrics. It carries no
+prompt, no response, no header and no key. `results/` is ignored by git.
+
+See [ADR-014](docs/adr/ADR-014-hosted-models-are-corpus-only.md) for why this is
+corpus only.
+
 ## Repository layout
 
 ```text
