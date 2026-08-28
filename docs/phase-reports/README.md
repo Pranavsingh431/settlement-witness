@@ -39,3 +39,4 @@ so.
 | 11.1 | [phase-11-1.md](phase-11-1.md) | Passed |
 | 12 | [phase-12.md](phase-12.md) | Passed |
 | 12.1 | [phase-12-1.md](phase-12-1.md) | Passed |
+| 13 | [phase-13.md](phase-13.md) | Protocol passed; no hosted run (local configuration absent) |

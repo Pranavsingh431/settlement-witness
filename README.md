@@ -247,18 +247,35 @@ party, and it evaluates a generated corpus rather than anything imported.
 cp .env.ai.example .env.ai
 ```
 
-Fill in the base URL, key and model in `.env.ai`, which is ignored by git, then:
+Fill in all six required settings in `.env.ai`, which is ignored by git, then
+run the fixed Phase 13 protocol:
 
 ```bash
-set -a; source .env.ai; set +a
+make phase-13
 ```
 
-```bash
-cd backend && uv run python -m app.ai.live_shadow --allow-network --output ../results/live.json
-```
+It loads the local file without echoing it, freezes a plan before any hosted
+call, then performs **exactly three** independent calls through
+`python -m app.ai.live_shadow --allow-network`. The run count is a committed
+constant, not a flag. A missing or invalid configuration stops before a plan,
+request or score exists. A typed provider failure is recorded as an incomplete
+run; it is not retried and it is not blended into a successful aggregate.
 
-`--allow-network` is required. Without it the command stops before it reads any
-credential, so a run started by accident cannot send one.
+Every local artifact goes under ignored `results/phase-13/`: the frozen plan,
+the three raw receipts, a before/after proof around each call, three safe run
+records and one summary. The publishable records include only the provider
+hostname, model identity, settings, corpus/hash/version, metrics and counts.
+They exclude the key, endpoint path, prompts, response bodies, source-record
+identifiers and provider error prose.
+
+The database proof hashes the complete SQLite file set (including WAL sidecars)
+and separately hashes `source_facts`, `import_receipts`, reconciliation runs
+and decisions, review events, bank audits and bank certificates. These hashes
+are local proof only: the hosted request is still built solely from the
+generated corpus, and no database value reaches the provider.
+
+`--allow-network` remains required. Without it the hosted command stops before
+it reads any credential, so a run started by accident cannot send one.
 
 **What leaves the machine.** The corpus is generated in memory from a fixed seed
 and every identifier in it is a digest, so the request carries opaque tokens and
@@ -271,10 +288,11 @@ anything that could read the store.
 answer meets. Nothing is repaired and nothing is retried. The model cannot
 produce a decision, a run, or a row in any table.
 
-The receipt records the model, the settings, the metrics and two sets of failure
-counts: what the shared report rejected, and what the adapter itself typed each
-failure as, so a rate limit does not read as an unreachable host. It carries no
-prompt, no response, no header and no key. `results/` is ignored by git.
+The protocol reports strict link recall, answered-link recall, precision,
+exact-set accuracy, false-link rate, safe abstention, unsafe selection,
+invalid-page rate, typed failure counts and request count. It deliberately has
+no generic headline score. This is a generated regression/shadow corpus, not a
+representative production dataset or evidence of real-merchant performance.
 
 See [ADR-014](docs/adr/ADR-014-hosted-models-are-corpus-only.md) for why this is
 corpus only.

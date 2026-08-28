@@ -20,7 +20,7 @@ PNPM     ?= pnpm
         format format-backend format-frontend \
         typecheck typecheck-backend typecheck-frontend \
         build schema db-setup api import-fixtures import-fixtures-http reconcile-fixtures \
-        benchmark-generate benchmark-evaluate benchmark-evaluate-private audit ci \
+        benchmark-generate benchmark-evaluate benchmark-evaluate-private phase-13 audit ci \
         verify verify-containers clean \
         docker-build docker-up docker-down
 
@@ -149,6 +149,9 @@ benchmark-evaluate: ## Evaluate the baseline on the public synthetic corpus
 benchmark-evaluate-private: ## Evaluate an externally supplied config: make benchmark-evaluate-private CONFIG=path
 	@test -n "$(CONFIG)" || (echo "set CONFIG=path/to/private-corpus.json" && exit 1)
 	cd $(BACKEND) && $(UV) run python -m app.benchmark_cli evaluate --config ../$(CONFIG)
+
+phase-13: ## Run the fixed three-attempt hosted shadow-evaluation protocol
+	@bash scripts/run-phase-13.sh
 
 audit: ## Report known vulnerabilities in the locked dependencies (needs network)
 	cd $(BACKEND) && $(UV) run --with pip-audit pip-audit
