@@ -310,6 +310,13 @@ Migration and legacy-adoption suites run inside `uv run pytest`. Both were
 extended: the new revision is asserted to create the table, to leave it empty,
 and to protect it with the same two triggers as every other append-only table.
 
+One thing failed and is recorded rather than tidied away. The first push failed
+CI's secret scan: the example idempotency key in `docs/api.md` was a UUID, and
+gitleaks read a high-entropy string beside the word "key" as a credential. It
+was never one. The example now describes the command it belongs to, which is
+also better advice, and the prose says the key is not a credential. Fixed in the
+commit after this phase's.
+
 ## Exit gate status
 
 | Requirement | Status | Evidence |
