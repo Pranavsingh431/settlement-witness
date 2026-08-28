@@ -494,7 +494,7 @@ Append one human workflow event beside a decision.
 {
   "action": "REQUEST_EVIDENCE",
   "decision_fingerprint": "b31c1a2f4d0e5c6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c",
-  "idempotency_key": "3f9c1d2e-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+  "idempotency_key": "line-0001-request-evidence-0001",
   "note": "need the 3 March bank statement"
 }
 ```
@@ -510,6 +510,10 @@ one.
 `idempotency_key` is the caller's own, at least 8 characters. The same key with
 the same command returns the original event with status 200 instead of 201. The
 same key with a different command is refused with 409 and writes nothing.
+
+It is not a credential and nothing authenticates with it. Any string a caller
+can regenerate for the same command works, and one describing the command, as
+above, is easier to reason about than a random identifier.
 
 `note` is optional, at most 500 characters, stored and served as plain text.
 Blank is the same as absent.
