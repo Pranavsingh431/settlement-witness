@@ -35,6 +35,23 @@ def test_prefixed_environment_variables_override_defaults(
     assert settings.api_port == 9001
 
 
+def test_blank_platform_variables_fall_back_to_safe_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty Vercel variable must not prevent the ASGI app from importing."""
+    monkeypatch.setenv("SW_APP_ENV", "")
+    monkeypatch.setenv("SW_LOG_LEVEL", "")
+    monkeypatch.setenv("SW_API_PORT", "")
+    monkeypatch.setenv("SW_MAX_UPLOAD_BYTES", "")
+
+    settings = Settings()
+
+    assert settings.app_env == "local"
+    assert settings.log_level == "INFO"
+    assert settings.api_port == 8000
+    assert settings.max_upload_bytes == 8 * 1024 * 1024
+
+
 def test_the_upload_limit_can_be_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator on a small machine can shrink what one request may cost."""
     monkeypatch.setenv("SW_MAX_UPLOAD_BYTES", "65536")

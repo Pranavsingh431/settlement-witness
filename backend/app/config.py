@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         env_prefix="SW_",
         extra="ignore",
         populate_by_name=True,
