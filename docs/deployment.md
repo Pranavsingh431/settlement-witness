@@ -1,14 +1,16 @@
 # Deployment boundary
 
 Settlement Witness is ready to run as a **local demonstration** with Docker
-Compose. Its Vercel deployment path is prepared for a **protected reviewer
-preview** backed by managed PostgreSQL. It is not a multi-tenant public product:
-it has write endpoints for imports, bank-finality audits and review events, and
-it has no application-level identity or tenancy model.
+Compose and as a **public, synthetic Vercel preview** for hackathon review. It
+is not a multi-tenant public product: it has write endpoints for imports,
+bank-finality audits and review events, and it has no application-level identity
+or tenancy model.
 
-This is a safety boundary, not a caveat to work around. A public URL without an
-access-control layer would let an unauthorised visitor write to the demonstration
-audit trail.
+The public preview is intentionally a shared demonstration workspace. The first
+screen loads only four committed synthetic fixtures; it is safe for a reviewer
+to inspect, but it is not a place to upload merchant data. Anyone with the link
+can add evidence or append a workflow event, so the public preview must never
+be presented as an access-controlled customer deployment.
 
 ## Local demonstration
 
@@ -28,7 +30,7 @@ make docker-down
 
 That command deliberately removes the local volume and its SQLite database.
 
-## Vercel-protected reviewer preview
+## Public Vercel hackathon preview
 
 The committed [`vercel.json`](../vercel.json) uses Vercel Services: the Vite
 application is the root service and FastAPI receives only `/v1/*` plus
@@ -37,7 +39,7 @@ database from `SW_DATABASE_URL` (or the Neon integration's
 `SW_DATABASE_DATABASE_URL`); it never writes a SQLite file in the function
 filesystem.
 
-Before pushing a reviewer-preview branch, configure these Vercel settings:
+Before pushing the public reviewer branch, configure these Vercel settings:
 
 1. Let the Neon integration provide `SW_DATABASE_DATABASE_URL` in the **Preview**
    environment. The backend recognises that integration name directly; do not
@@ -45,13 +47,14 @@ Before pushing a reviewer-preview branch, configure these Vercel settings:
    The value is a secret; do not put it in Git, `.env`, a command line, or an
    issue. The application accepts the standard Neon `postgresql://` form and
    uses the pinned Psycopg driver internally.
-2. Add `SW_APP_ENV=production` to that same Preview environment. This makes a
-   missing database URL a startup refusal rather than a fallback to ephemeral
-   storage.
-3. Enable **Deployment Protection → Standard Protection → Vercel
-   Authentication** before sharing the preview. It protects the frontend and
-   every same-origin API request together. Do not add deployment-protection
-   bypasses, public exceptions, or the hosted-model key.
+2. Optionally add `SW_APP_ENV=production` to that same Preview environment.
+   Never save platform variables as blank strings: absent optional values use
+   their safe defaults, but an explicit value should be meaningful.
+3. Disable **Deployment Protection → Vercel Authentication** for this
+   hackathon preview so external reviewers can open the submitted URL. Do not
+   use a protection bypass or share a bypass secret. This choice is acceptable
+   only because the walkthrough is synthetic and the workspace is deliberately
+   shared; it would be wrong for merchant data.
 4. Push a non-`main` branch. Vercel treats a push to `main` as Production and
    does not apply Preview-only environment variables.
 
@@ -59,10 +62,10 @@ The first cold start migrates the empty PostgreSQL database to the current
 schema. PostgreSQL advisory locking serialises concurrent cold starts, and the
 same append-only UPDATE/DELETE protections are installed as database triggers.
 
-After Vercel marks the protected preview ready, open `/health`, then follow the
-fixture walkthrough from [submission.md](submission.md). A reviewer who is not
-an authorised Vercel user must use a Vercel Shareable Link; do not remove
-protection merely to make the URL easier to open.
+After Vercel marks the preview ready, use **Load the interactive demo** on the
+landing page. It loads four shipped synthetic CSVs server-side, creates a normal
+immutable reconciliation run and bank-finality audit, and takes the reviewer to
+the evidence trail. It never reads a file from the reviewer's machine.
 
 ## Requirements before a public production service
 
@@ -97,7 +100,6 @@ Before giving a reviewer access, run:
 make verify
 ```
 
-Then demonstrate the evidence path from the committed fixtures: import the
-three CSVs, create a reconciliation run, open a certificate, open the review
-queue, and explain that bank finality is a separate conclusion. The exact
-walkthrough and safe claims are in [submission.md](submission.md).
+Then demonstrate the evidence path: load the bundled walkthrough, open a
+certificate, open the review queue, and explain that bank finality is a separate
+conclusion. The exact walkthrough and safe claims are in [submission.md](submission.md).

@@ -16,13 +16,14 @@ and keeps AI suggestions outside the decision path.**
 1. **Start with the problem.** Payment, settlement and payout records can
    appear internally consistent while still needing an auditable explanation.
    A green match without its evidence is not enough for a finance operator.
-2. **Import evidence.** In *Import evidence*, load the three committed CSVs in
-   `data/fixtures/ingestion/` using the declared record types. Show the import
-   receipts, including that an identical replay is a no-op rather than a second
-   write.
-3. **Create and inspect a run.** In *Runs*, reconcile the snapshot. Open the
-   run audit and select an exception. The certificate shows citations, payload
-   hashes, exception codes and each invariant independently.
+2. **Load the walkthrough.** On the landing page, choose *Load the interactive
+   demo*. It imports four committed **synthetic** fixture documents server-side,
+   then creates a normal immutable reconciliation run and bank-finality audit.
+   No reviewer file is uploaded. Show the resulting import receipts, including
+   that a repeat opens the same conclusion rather than writing duplicate facts.
+3. **Inspect a run.** Open the decision audit and select an exception. The
+   certificate shows citations, payload hashes, exception codes and each
+   invariant independently.
 4. **Separate operations from truth.** Open the review queue and record an
    acknowledgement or request for evidence. The baseline decision stays the
    same; a human workflow event cannot convert an exception into a resolution.
@@ -70,12 +71,13 @@ decision. That constraint is the design, not an omitted feature.
   access to uploaded merchant data. It does none of those things.
 - Do not say a `RESOLVED` settlement line proves money reached the merchant.
   Only a separate matching bank credit can support that statement.
-- Do not say the application is a public production deployment. It has no
-  authentication or multi-tenancy; see [deployment.md](deployment.md).
+- Do not say the public preview is a production deployment. It has no
+  authentication or multi-tenancy, and it is for synthetic demo data only; see
+  [deployment.md](deployment.md).
 
 ## Reviewer setup
 
 For a local run, use `make docker-up`, open <http://127.0.0.1:5173>, and follow
 the walkthrough above. Run `make verify` before recording a demo. For a remote
-reviewer, follow the access-control and persistent-storage requirements in
-[deployment.md](deployment.md) before sharing a URL.
+reviewer, use the public Vercel preview only for the bundled synthetic
+walkthrough described in [deployment.md](deployment.md).

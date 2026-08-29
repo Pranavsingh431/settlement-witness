@@ -682,3 +682,25 @@ class BankFinalityAuditPage(BaseModel):
 
     bank_finality_version: str = BANK_FINALITY_VERSION
     settlement_and_finality_are_separate: str = SETTLEMENT_AND_FINALITY_ARE_SEPARATE
+
+
+class DemoFixtureResult(BaseModel):
+    """What preparing one bundled fixture did, without serving its contents."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_name: str
+    source_record_type: SourceRecordType
+    outcome: ImportOutcome
+    loaded_now: bool
+
+
+class DemoBootstrapResult(BaseModel):
+    """The immutable run and audit prepared by the synthetic walkthrough."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fixture_results: list[DemoFixtureResult]
+    run: RunSummary
+    bank_finality_audit: BankFinalityAuditSummary
+    created: bool

@@ -15,6 +15,7 @@ import {
   BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   EXCEPTION_DECISION,
+  DEMO_BOOTSTRAP,
   OPEN_ITEM,
   RESOLVED_DECISION,
   REVIEW_QUEUE,
@@ -23,6 +24,7 @@ import {
 import {
   appendReviewEvent,
   createBankFinalityAudit,
+  bootstrapDemo,
   createRun,
   getImport,
   getReviewItem,
@@ -181,6 +183,19 @@ describe('creating a run', () => {
       code: 'no_facts',
       message: 'the store holds no accepted source facts to reconcile',
     });
+  });
+});
+
+describe('preparing the walkthrough', () => {
+  it('uses the fixed demo route with no request body', async () => {
+    fetchMock.mockResolvedValue(answer(DEMO_BOOTSTRAP, 201));
+
+    const result = await bootstrapDemo();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/demo/bootstrap');
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual({ method: 'POST' });
+    expect(result.run.run_id).toBe(RUN.run_id);
+    expect(result.fixture_results).toHaveLength(4);
   });
 });
 

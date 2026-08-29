@@ -16,6 +16,7 @@ import {
   parseBankFinalityAuditDetail,
   parseBankFinalityAuditPage,
   parseBankFinalityAuditSummary,
+  parseDemoBootstrap,
   parseReceipt,
   parseReceiptPage,
   parseReviewEventReceipt,
@@ -29,6 +30,7 @@ import type {
   BankFinalityAuditCreation,
   BankFinalityAuditDetail,
   BankFinalityAuditPage,
+  DemoBootstrapResult,
   ImportReceipt,
   ImportReceiptPage,
   ReviewAction,
@@ -44,6 +46,7 @@ const IMPORTS = '/v1/imports';
 const RUNS = '/v1/reconciliation/runs';
 const REVIEW = '/v1/review/runs';
 const BANK_FINALITY = '/v1/bank-finality/audits';
+const DEMO_BOOTSTRAP = '/v1/demo/bootstrap';
 
 interface Answer {
   readonly status: number;
@@ -162,6 +165,18 @@ export async function listRuns(filters: RunListFilters = {}): Promise<RunPage> {
 export async function createRun(): Promise<RunCreation> {
   const { status, body } = await send(RUNS, { method: 'POST' });
   return { run: parseRunSummary(body), created: status === 201 };
+}
+
+/**
+ * Prepare the shipped synthetic walkthrough and return its real conclusions.
+ *
+ * This is intentionally a body-less request: a reviewer cannot accidentally
+ * send a local file through the public demo button. Their own CSVs still go
+ * through the explicit import screen.
+ */
+export async function bootstrapDemo(): Promise<DemoBootstrapResult> {
+  const { body } = await send(DEMO_BOOTSTRAP, { method: 'POST' });
+  return parseDemoBootstrap(body);
 }
 
 export interface DecisionFilters {

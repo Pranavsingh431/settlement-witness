@@ -49,8 +49,9 @@ because the model exceeded the bounded response size, so no aggregate was
 published. That is a model-and-protocol observation, not reconciliation or
 production performance.
 
-There is no authentication and no multi-tenancy: this is a local and
-demonstration backend, and it must not be exposed to a network.
+There is no authentication and no multi-tenancy. The submitted Vercel link is a
+shared synthetic walkthrough for reviewers, not a merchant-data or production
+deployment; see [docs/deployment.md](docs/deployment.md).
 
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract
 says, and the [phase reports](docs/phase-reports/) for exactly what was built and

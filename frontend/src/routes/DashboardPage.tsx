@@ -1,61 +1,27 @@
-/**
- * What the system is, and where the data currently stands.
- *
- * The empty state matters more than the populated one. With no facts loaded
- * there is nothing to report, and reporting zeroes in the same layout as real
- * counts would make an empty store look like a clean bill of health. So an
- * empty store gets an explanation and a next step instead of a dashboard of
- * noughts.
- */
+/** The starting point for a reviewer seeing Settlement Witness for the first time. */
 
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { getReviewQueue, listImports, listRuns } from '../api/client';
+import { bootstrapDemo, getReviewQueue, listImports, listRuns } from '../api/client';
+import { describeError } from '../api/errors';
+import type { DemoBootstrapResult, RunSummary } from '../api/types';
 import { formatMinorUnits, formatTimestamp } from '../format';
 import { useLoad } from '../hooks';
-import {
-  EmptyState,
-  ErrorNotice,
-  Loading,
-  OutcomeBadge,
-  Panel,
-  Stat,
-  Stats,
-} from '../components/ui';
+import { ErrorNotice, Loading, OutcomeBadge, Panel, Stat, Stats } from '../components/ui';
 
-/**
- * The three answers, described as the contract actually defines them.
- *
- * The exception wording has been wrong twice, in two different directions, so
- * it is worth writing down what it may not say.
- *
- * It may not say a rule failed. A failed invariant means an exception, and an
- * exception does not mean a failed invariant: the baseline also raises one for
- * a lifecycle state it will not resolve on, such as a partial refund, with
- * every check passing. `line-0001` of the demo corpus is that case.
- *
- * It may not say the evidence was there either. `derive_status` reads the
- * exception codes before it looks at the citations, so a decision citing
- * nothing at all and carrying one ordinary code is an `EXCEPTION`. A domain
- * test pins that.
- *
- * What is true of every exception is that the backing carries a reported
- * finding or a failed invariant, and that the baseline will not resolve the
- * line. Everything else varies, which is what the certificate is for, so the
- * card points at it rather than guessing on its behalf.
- */
 const STATES = [
   {
     tone: 'resolved',
     glyph: '✓',
     name: 'Resolved',
-    what: 'Every citation resolved to a stored fact and every required invariant held. This is the only state that says a line is supported.',
+    what: 'Every citation resolved to a stored fact and every required invariant held. This is the only answer that says a line is supported.',
   },
   {
     tone: 'exception',
     glyph: '!',
     name: 'Exception',
-    what: 'The baseline reports a finding and does not resolve this line. Its certificate shows the citations and the checks recorded for that finding, including any that are missing.',
+    what: 'The baseline reports a finding and does not resolve this line. Open its certificate to see the citations and the checks recorded for that finding.',
   },
   {
     tone: 'unknown',
@@ -65,40 +31,248 @@ const STATES = [
   },
 ] as const;
 
+function DemoHero({
+  latest,
+  loading,
+  result,
+  error,
+  onLoad,
+}: {
+  latest: RunSummary | null;
+  loading: boolean;
+  result: DemoBootstrapResult | null;
+  error: unknown;
+  onLoad: () => void;
+}) {
+  const destination = result?.run ?? latest;
+
+  return (
+    <section className="demo-hero" aria-labelledby="workspace-title">
+      <div className="demo-hero__copy">
+        <p className="eyebrow">Payment operations workspace</p>
+        <h1 id="workspace-title">Know which settlements you can stand behind.</h1>
+        <p>
+          Settlement Witness follows a payout from payment events to settlement records and bank
+          evidence. It surfaces uncertainty instead of hiding it inside a score.
+        </p>
+        <div className="demo-hero__actions">
+          {destination ? (
+            <Link className="button button--light" to={`/runs/${destination.run_id}`}>
+              Open decision audit
+            </Link>
+          ) : (
+            <button
+              className="button button--light"
+              type="button"
+              disabled={loading}
+              onClick={onLoad}
+            >
+              {loading ? 'Preparing demo…' : 'Load the interactive demo'}
+            </button>
+          )}
+          <Link className="button button--ghost" to="/imports">
+            Bring your own CSV
+          </Link>
+        </div>
+        <p className="demo-hero__assurance">
+          The walkthrough uses four bundled synthetic files. It does not upload anything from your
+          device.
+        </p>
+        {error ? (
+          <p className="demo-hero__error" role="alert">
+            Could not prepare the walkthrough: {describeError(error)}
+          </p>
+        ) : null}
+      </div>
+
+      <ol className="demo-journey" aria-label="How Settlement Witness works">
+        <li>
+          <span className="demo-journey__step">01</span>
+          <div>
+            <strong>Bring in evidence</strong>
+            <span>Payment, settlement, payout and bank records stay separate.</span>
+          </div>
+        </li>
+        <li>
+          <span className="demo-journey__step">02</span>
+          <div>
+            <strong>Run the checks</strong>
+            <span>Every outcome carries its evidence and invariant certificate.</span>
+          </div>
+        </li>
+        <li>
+          <span className="demo-journey__step">03</span>
+          <div>
+            <strong>Act without rewriting history</strong>
+            <span>Human review is a workflow trail, never an override button.</span>
+          </div>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
 export function DashboardPage() {
   const runs = useLoad(() => listRuns({ limit: 1 }), 'latest-run');
   const imports = useLoad(() => listImports({ limit: 5 }), 'recent-imports');
-
   const latest = runs.data?.runs[0] ?? null;
-  // Asked for only once there is a run to ask about, and with a page size of
-  // one because the counts describe the whole queue rather than the page. The
-  // key carries the run ID so the request is remade when the latest run
-  // changes, rather than reporting the previous run's queue under the new one.
+  const [demo, setDemo] = useState<DemoBootstrapResult | null>(null);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoError, setDemoError] = useState<unknown>(null);
+
   const review = useLoad(
-    () =>
-      latest === null
-        ? Promise.resolve(null)
-        : getReviewQueue(latest.run_id, { limit: 1 }).then((page) => page),
+    () => (latest === null ? Promise.resolve(null) : getReviewQueue(latest.run_id, { limit: 1 })),
     `review-queue|${latest?.run_id ?? 'none'}`,
   );
   const resolved = latest?.status_counts.RESOLVED ?? 0;
   const exceptions = latest?.status_counts.EXCEPTION ?? 0;
   const insufficient = latest?.status_counts.INSUFFICIENT_EVIDENCE ?? 0;
 
+  const loadDemo = async () => {
+    if (demoLoading) {
+      return;
+    }
+    setDemoLoading(true);
+    setDemoError(null);
+    try {
+      const prepared = await bootstrapDemo();
+      setDemo(prepared);
+      runs.reload();
+      imports.reload();
+    } catch (cause) {
+      setDemoError(cause);
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
   return (
     <>
-      <div className="page__head">
+      <DemoHero
+        latest={latest}
+        loading={demoLoading}
+        result={demo}
+        error={demoError}
+        onLoad={() => {
+          void loadDemo();
+        }}
+      />
+
+      {demo ? (
+        <section className="demo-ready" aria-label="Walkthrough ready">
+          <div>
+            <p className="eyebrow">Walkthrough ready</p>
+            <h2>
+              {demo.created
+                ? 'A real audit is ready to inspect.'
+                : 'The walkthrough is already ready.'}
+            </h2>
+            <p>
+              {demo.fixture_results.filter((item) => item.loaded_now).length} bundled files loaded ·{' '}
+              {formatMinorUnits(demo.run.fact_count)} source records ·{' '}
+              {formatMinorUnits(demo.run.decision_count)} settlement decisions
+            </p>
+          </div>
+          <Link className="button" to={`/runs/${demo.run.run_id}`}>
+            Inspect the evidence trail
+          </Link>
+        </section>
+      ) : null}
+
+      <section className="workspace-overview" aria-label="Current workspace">
         <div>
-          <h1>Evidence-first settlement reconciliation</h1>
-          <p className="page__lede">
-            A settlement line is resolved only when the source records it cites are in the store and
-            every required invariant about them holds. Anything else is reported as what it is,
-            rather than folded into a success rate.
+          <p className="eyebrow">Current workspace</p>
+          <h2>{latest ? 'Decision snapshot' : 'Start with a guided example'}</h2>
+          <p>
+            {latest
+              ? 'Open the audit to trace each decision back to its evidence, checks and review trail.'
+              : 'Load the walkthrough once, then inspect the decisions and the two payout outcomes end to end.'}
           </p>
         </div>
-      </div>
+        {latest ? (
+          <Link className="text-link" to={`/runs/${latest.run_id}`}>
+            View latest run <span aria-hidden="true">→</span>
+          </Link>
+        ) : null}
+      </section>
 
-      <Panel title="The three answers a line can get">
+      {runs.loading ? <Loading what="the latest workspace" /> : null}
+      {runs.error ? (
+        <ErrorNotice error={runs.error} onRetry={runs.reload} what="the latest workspace" />
+      ) : null}
+
+      {latest ? (
+        <div className="grid grid--halves">
+          <Panel
+            title="Settlement decisions"
+            note={`Recorded ${formatTimestamp(latest.created_at)}`}
+            actions={
+              <Link className="button button--quiet button--small" to={`/runs/${latest.run_id}`}>
+                Open audit
+              </Link>
+            }
+          >
+            <Stats label="Run summary">
+              <Stat label="Source records" value={formatMinorUnits(latest.fact_count)} />
+              <Stat
+                label="Settlement lines"
+                value={formatMinorUnits(latest.settlement_line_count)}
+              />
+              <Stat label="Supported" value={formatMinorUnits(resolved)} tone="resolved" />
+              <Stat label="Needs attention" value={formatMinorUnits(exceptions)} tone="exception" />
+              <Stat
+                label="Cannot decide yet"
+                value={formatMinorUnits(insufficient)}
+                tone="unknown"
+              />
+            </Stats>
+            <p className="panel__note panel__note--spaced">
+              Baseline {latest.baseline_version} · contract {latest.domain_schema_version} · parser{' '}
+              {latest.parser_version}
+            </p>
+          </Panel>
+
+          <Panel
+            title="Review work"
+            note="The lines the baseline did not resolve, with a human workflow beside—not inside—the decision."
+            actions={
+              <Link
+                className="button button--quiet button--small"
+                to={`/runs/${latest.run_id}/review`}
+              >
+                Open queue
+              </Link>
+            }
+          >
+            {review.loading ? <Loading what="the review queue" /> : null}
+            {review.error ? (
+              <ErrorNotice error={review.error} onRetry={review.reload} what="the review queue" />
+            ) : null}
+            {review.data ? (
+              <>
+                <Stats label="Review queue">
+                  <Stat
+                    label="Needs review"
+                    value={formatMinorUnits(review.data.total)}
+                    tone="exception"
+                  />
+                  <Stat label="Still open" value={formatMinorUnits(review.data.open_total)} />
+                  <Stat
+                    label="Closed without override"
+                    value={formatMinorUnits(review.data.total - review.data.open_total)}
+                  />
+                </Stats>
+                <p className="notice notice--warn baseline-note" role="note">
+                  <strong>Review never changes a decision.</strong>{' '}
+                  {review.data.baseline_unchanged_note}
+                </p>
+              </>
+            ) : null}
+          </Panel>
+        </div>
+      ) : null}
+
+      <Panel title="What each answer means" note="Read the certificate before acting on a line.">
         <ul className="states">
           {STATES.map((state) => (
             <li key={state.name} className="state-card">
@@ -115,112 +289,11 @@ export function DashboardPage() {
       </Panel>
 
       <Panel
-        title="Latest reconciliation run"
-        actions={
-          latest ? (
-            <Link className="button button--quiet button--small" to={`/runs/${latest.run_id}`}>
-              Audit this run
-            </Link>
-          ) : null
-        }
-      >
-        {runs.loading ? <Loading what="the latest run" /> : null}
-        {runs.error ? (
-          <ErrorNotice error={runs.error} onRetry={runs.reload} what="the latest run" />
-        ) : null}
-        {!runs.loading && !runs.error && latest === null ? (
-          <EmptyState
-            title="No run has been recorded yet"
-            actions={
-              <>
-                <Link className="button" to="/imports">
-                  Import evidence
-                </Link>
-                <Link className="button button--quiet" to="/runs">
-                  Go to runs
-                </Link>
-              </>
-            }
-          >
-            Nothing has been reconciled, so there is nothing to report. Import the three example
-            documents first, then create a run.
-          </EmptyState>
-        ) : null}
-        {latest ? (
-          <>
-            <Stats label="Run summary">
-              <Stat label="Source facts" value={formatMinorUnits(latest.fact_count)} />
-              <Stat
-                label="Settlement lines"
-                value={formatMinorUnits(latest.settlement_line_count)}
-              />
-              <Stat label="Resolved" value={formatMinorUnits(resolved)} tone="resolved" />
-              <Stat label="Exceptions" value={formatMinorUnits(exceptions)} tone="exception" />
-              <Stat
-                label="Insufficient evidence"
-                value={formatMinorUnits(insufficient)}
-                tone="unknown"
-              />
-            </Stats>
-            <p className="panel__note" style={{ marginTop: 12 }}>
-              Recorded {formatTimestamp(latest.created_at)} · baseline {latest.baseline_version} ·
-              contract {latest.domain_schema_version} · parser {latest.parser_version}
-            </p>
-          </>
-        ) : null}
-      </Panel>
-
-      <Panel
-        title="Human review queue"
-        note="The lines the latest run did not resolve, and what people are doing about them."
-        actions={
-          latest ? (
-            <Link
-              className="button button--quiet button--small"
-              to={`/runs/${latest.run_id}/review`}
-            >
-              Open the review queue
-            </Link>
-          ) : null
-        }
-      >
-        {latest === null ? (
-          <p className="panel__note">
-            There is no run yet, so there is nothing to review. A review queue is built from a
-            recorded run, never from the fact store directly.
-          </p>
-        ) : null}
-        {latest && review.loading ? <Loading what="the review queue" /> : null}
-        {latest && review.error ? (
-          <ErrorNotice error={review.error} onRetry={review.reload} what="the review queue" />
-        ) : null}
-        {review.data ? (
-          <>
-            <Stats label="Review queue">
-              <Stat
-                label="Needing review"
-                value={formatMinorUnits(review.data.total)}
-                tone="exception"
-              />
-              <Stat label="Still open" value={formatMinorUnits(review.data.open_total)} />
-              <Stat
-                label="Closed without override"
-                value={formatMinorUnits(review.data.total - review.data.open_total)}
-              />
-            </Stats>
-            <p className="notice notice--warn baseline-note" role="note">
-              <strong>Human workflow state does not change the baseline decision.</strong>{' '}
-              {review.data.baseline_unchanged_note}
-            </p>
-          </>
-        ) : null}
-      </Panel>
-
-      <Panel
-        title="Recent import attempts"
+        title="Recent evidence activity"
+        note="Every import attempt has a receipt, including a refused one."
         actions={
           <Link className="button button--quiet button--small" to="/imports">
-            Import evidence
+            Manage evidence
           </Link>
         }
       >
@@ -229,25 +302,16 @@ export function DashboardPage() {
           <ErrorNotice error={imports.error} onRetry={imports.reload} what="import history" />
         ) : null}
         {!imports.loading && !imports.error && imports.data?.receipts.length === 0 ? (
-          <EmptyState
-            title="Nothing has been imported"
-            actions={
-              <Link className="button" to="/imports">
-                Import the example documents
-              </Link>
-            }
-          >
-            Load payment events, settlement lines and payouts to give the reconciler something to
-            work from.
-          </EmptyState>
+          <p className="empty-copy">
+            No evidence has been added yet. Load the walkthrough above or import your own CSV files.
+          </p>
         ) : null}
         {imports.data && imports.data.receipts.length > 0 ? (
           <div className="table-scroll">
             <table>
               <caption>
                 The {formatMinorUnits(Math.min(5, imports.data.total))} most recent attempts of{' '}
-                {formatMinorUnits(imports.data.total)}. Every attempt leaves a receipt, including a
-                refused one.
+                {formatMinorUnits(imports.data.total)}.
               </caption>
               <thead>
                 <tr>

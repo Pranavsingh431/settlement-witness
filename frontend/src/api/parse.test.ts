@@ -14,6 +14,7 @@ import {
   parseBankFinalityAuditDetail,
   parseBankFinalityAuditPage,
   parseBankFinalityCertificate,
+  parseDemoBootstrap,
   parseDecision,
   parseReceipt,
   parseReviewEventReceipt,
@@ -28,6 +29,7 @@ import {
   BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   CLOSED_ITEM,
+  DEMO_BOOTSTRAP,
   EMPTY_REVIEW_QUEUE,
   OPEN_ITEM,
   RESOLVED_DECISION,
@@ -69,6 +71,21 @@ describe('parseRunSummary', () => {
 
   it('refuses counts that are not an object', () => {
     expect(() => parseRunSummary({ ...RUN, status_counts: 3 })).toThrow(/status_counts/);
+  });
+});
+
+describe('parseDemoBootstrap', () => {
+  it('accepts the walkthrough result and its existing conclusion shapes', () => {
+    expect(parseDemoBootstrap(DEMO_BOOTSTRAP)).toEqual(DEMO_BOOTSTRAP);
+  });
+
+  it('refuses a missing loaded-now flag rather than treating it as false', () => {
+    expect(() =>
+      parseDemoBootstrap({
+        ...DEMO_BOOTSTRAP,
+        fixture_results: [without(DEMO_BOOTSTRAP.fixture_results[0], 'loaded_now')],
+      }),
+    ).toThrow(/loaded_now/);
   });
 });
 

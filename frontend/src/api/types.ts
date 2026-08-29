@@ -170,6 +170,24 @@ export interface RunCreation {
   readonly created: boolean;
 }
 
+/** One fixed fixture document prepared by the public walkthrough. */
+export interface DemoFixtureResult {
+  readonly document_name: string;
+  readonly source_record_type: ImportableRecordType;
+  readonly outcome: ImportOutcome;
+  /** True only when this request added the fixture's accepted source facts. */
+  readonly loaded_now: boolean;
+}
+
+/** The conclusions prepared by the bundled, synthetic walkthrough. */
+export interface DemoBootstrapResult {
+  readonly fixture_results: readonly DemoFixtureResult[];
+  readonly run: RunSummary;
+  readonly bank_finality_audit: BankFinalityAuditSummary;
+  /** True when this request added fixtures or recorded a conclusion. */
+  readonly created: boolean;
+}
+
 /**
  * The four things a reviewer may record, and nothing else.
  *

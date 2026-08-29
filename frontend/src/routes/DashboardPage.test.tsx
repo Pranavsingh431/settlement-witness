@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, NetworkError } from '../api/errors';
 import {
   ACCEPTED_RECEIPT,
+  DEMO_BOOTSTRAP,
   EMPTY_REVIEW_QUEUE,
   INVALID_RECEIPT,
   REVIEW_QUEUE,
@@ -44,42 +45,80 @@ describe('an empty store', () => {
   it('says no run has been recorded rather than showing a run of zeroes', async () => {
     renderScreen(<DashboardPage />);
 
-    expect(await screen.findByText(/no run has been recorded yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/start with a guided example/i)).toBeInTheDocument();
   });
 
   it('shows no statistics at all, so nothing reads as a completed reconciliation', async () => {
     renderScreen(<DashboardPage />);
-    await screen.findByText(/no run has been recorded yet/i);
+    await screen.findByText(/start with a guided example/i);
 
     expect(screen.queryByRole('group', { name: /run summary/i })).not.toBeInTheDocument();
   });
 
-  it('points at importing evidence as the next step', async () => {
+  it('offers a one-click walkthrough and a separate path for a reviewer CSV', async () => {
     renderScreen(<DashboardPage />);
 
-    const links = await screen.findAllByRole('link', { name: /import/i });
-    expect(links[0]).toHaveAttribute('href', '/imports');
+    expect(
+      await screen.findByRole('button', { name: /load the interactive demo/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /bring your own csv/i })).toHaveAttribute(
+      'href',
+      '/imports',
+    );
   });
 
-  it('says nothing has been imported', async () => {
+  it('says no evidence has been added yet', async () => {
     renderScreen(<DashboardPage />);
 
-    expect(await screen.findByText(/nothing has been imported/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no evidence has been added yet/i)).toBeInTheDocument();
   });
 
   it('still explains the three answers, because that is what the product is', async () => {
     renderScreen(<DashboardPage />);
 
-    expect(await screen.findByText(/the three answers a line can get/i)).toBeInTheDocument();
-    expect(screen.getByText(/only state that says a line is supported/i)).toBeInTheDocument();
+    expect(await screen.findByText(/what each answer means/i)).toBeInTheDocument();
+    expect(screen.getByText(/only answer that says a line is supported/i)).toBeInTheDocument();
   });
 
   it('offers no accuracy figure and no percentage anywhere', async () => {
     const { container } = renderScreen(<DashboardPage />);
-    await screen.findByText(/no run has been recorded yet/i);
+    await screen.findByText(/start with a guided example/i);
 
     expect(container.textContent).not.toMatch(/accuracy/i);
     expect(container.textContent).not.toMatch(/\d\s*%/);
+  });
+});
+
+describe('the bundled walkthrough', () => {
+  beforeEach(() => {
+    client.listRuns.mockResolvedValue(NO_RUNS);
+    client.listImports.mockResolvedValue(NO_IMPORTS);
+  });
+
+  it('prepares only the server-side walkthrough and points at its evidence trail', async () => {
+    client.bootstrapDemo.mockResolvedValue(DEMO_BOOTSTRAP);
+    renderScreen(<DashboardPage />);
+
+    (await screen.findByRole('button', { name: /load the interactive demo/i })).click();
+
+    expect(await screen.findByRole('region', { name: /walkthrough ready/i })).toBeInTheDocument();
+    expect(screen.getByText(/4 bundled files loaded/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /inspect the evidence trail/i })).toHaveAttribute(
+      'href',
+      `/runs/${DEMO_BOOTSTRAP.run.run_id}`,
+    );
+    expect(client.bootstrapDemo).toHaveBeenCalledWith();
+  });
+
+  it('shows a server refusal in the walkthrough area', async () => {
+    client.bootstrapDemo.mockRejectedValue(new ApiError(500, 'demo_failed', 'demo unavailable'));
+    renderScreen(<DashboardPage />);
+
+    (await screen.findByRole('button', { name: /load the interactive demo/i })).click();
+
+    expect(
+      await screen.findByText(/could not prepare the walkthrough: demo unavailable/i),
+    ).toBeInTheDocument();
   });
 });
 
@@ -97,7 +136,8 @@ describe('the explanation of the three answers', () => {
    * carries a decorative glyph before the word.
    */
   async function stateCard(name: string): Promise<HTMLElement> {
-    const cards = await screen.findAllByRole('listitem');
+    await screen.findByText(/what each answer means/i);
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.states > .state-card'));
     const card = cards.find((item) => within(item).queryByText(name) !== null);
     if (card === undefined) {
       throw new Error(`no card explains "${name}"`);
@@ -122,7 +162,8 @@ describe('the explanation of the three answers', () => {
   }
 
   it('describes all three, and only three', async () => {
-    const cards = await screen.findAllByRole('listitem');
+    await screen.findByText(/what each answer means/i);
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.states > .state-card'));
 
     expect(cards).toHaveLength(3);
     expect(await stateCard('Resolved')).toBeInTheDocument();
@@ -222,31 +263,31 @@ describe('a store with a run', () => {
     renderScreen(<DashboardPage />);
     const summary = await screen.findByRole('group', { name: /run summary/i });
 
-    expect(within(summary).getByText('Source facts').previousSibling).toHaveTextContent('10');
-    expect(within(summary).getByText('Resolved').previousSibling).toHaveTextContent('1');
-    expect(within(summary).getByText('Exceptions').previousSibling).toHaveTextContent('2');
+    expect(within(summary).getByText('Source records').previousSibling).toHaveTextContent('10');
+    expect(within(summary).getByText('Supported').previousSibling).toHaveTextContent('1');
+    expect(within(summary).getByText('Needs attention').previousSibling).toHaveTextContent('2');
   });
 
   it('shows insufficient evidence as its own number, not folded into exceptions', async () => {
     renderScreen(<DashboardPage />);
     const summary = await screen.findByRole('group', { name: /run summary/i });
 
-    expect(within(summary).getByText('Insufficient evidence').previousSibling).toHaveTextContent(
-      '0',
-    );
+    expect(within(summary).getByText('Cannot decide yet').previousSibling).toHaveTextContent('0');
   });
 
   it('names the rule versions the run used', async () => {
     renderScreen(<DashboardPage />);
 
-    expect(await screen.findByText(/baseline 1\.0\.0/)).toBeInTheDocument();
-    expect(screen.getByText(/parser 3\.1\.0/)).toBeInTheDocument();
+    await screen.findByRole('group', { name: /run summary/i });
+    const versions = document.querySelector('.panel__note--spaced');
+    expect(versions).toHaveTextContent(/baseline.*1\.0\.0/i);
+    expect(versions).toHaveTextContent(/parser.*3\.1\.0/i);
   });
 
   it('links to the audit for that run', async () => {
     renderScreen(<DashboardPage />);
 
-    expect(await screen.findByRole('link', { name: /audit this run/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /^open audit$/i })).toHaveAttribute(
       'href',
       `/runs/${RUN.run_id}`,
     );
@@ -317,7 +358,7 @@ describe('the review queue panel', () => {
     renderScreen(<DashboardPage />);
 
     const stats = await screen.findByRole('group', { name: /review queue/i });
-    expect(within(stats).getByText('Needing review')).toBeInTheDocument();
+    expect(within(stats).getByText('Needs review')).toBeInTheDocument();
     expect(within(stats).getByText('Still open')).toBeInTheDocument();
     expect(within(stats).getByText('Closed without override')).toBeInTheDocument();
   });
@@ -326,16 +367,14 @@ describe('the review queue panel', () => {
     client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
     renderScreen(<DashboardPage />);
 
-    expect(
-      await screen.findByText(/human workflow state does not change the baseline decision/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/review never changes a decision/i)).toBeInTheDocument();
   });
 
   it('links to the review queue for that run', async () => {
     client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
     renderScreen(<DashboardPage />);
 
-    const link = await screen.findByRole('link', { name: /open the review queue/i });
+    const link = await screen.findByRole('link', { name: /open queue/i });
     expect(link).toHaveAttribute('href', `/runs/${RUN.run_id}/review`);
   });
 
@@ -344,7 +383,7 @@ describe('the review queue panel', () => {
     renderScreen(<DashboardPage />);
 
     expect(await screen.findByText(/could not load the review queue/i)).toBeInTheDocument();
-    expect(screen.getByText(/latest reconciliation run/i)).toBeInTheDocument();
+    expect(screen.getByText(/current workspace/i)).toBeInTheDocument();
   });
 
   it('reports an empty queue as zeroes rather than as a failure', async () => {
@@ -356,23 +395,13 @@ describe('the review queue panel', () => {
   });
 });
 
-describe('the review queue panel with no run', () => {
-  it('explains that a queue is built from a run', async () => {
+describe('the empty workspace', () => {
+  it('does not request a review queue before a run exists', async () => {
     client.listRuns.mockResolvedValue(NO_RUNS);
     client.listImports.mockResolvedValue(NO_IMPORTS);
     renderScreen(<DashboardPage />);
 
-    expect(
-      await screen.findByText(/there is no run yet, so there is nothing to review/i),
-    ).toBeInTheDocument();
-  });
-
-  it('asks the backend for no queue at all', async () => {
-    client.listRuns.mockResolvedValue(NO_RUNS);
-    client.listImports.mockResolvedValue(NO_IMPORTS);
-    renderScreen(<DashboardPage />);
-
-    await screen.findByText(/there is no run yet/i);
+    await screen.findByText(/start with a guided example/i);
     expect(client.getReviewQueue).not.toHaveBeenCalled();
   });
 });

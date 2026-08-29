@@ -7,9 +7,9 @@ import { ReviewQueuePage } from './routes/ReviewQueuePage';
 import { RunsPage } from './routes/RunsPage';
 
 const LINKS = [
-  { to: '/', label: 'Overview' },
-  { to: '/imports', label: 'Import evidence' },
-  { to: '/runs', label: 'Runs' },
+  { to: '/', label: 'Workspace' },
+  { to: '/imports', label: 'Evidence' },
+  { to: '/runs', label: 'Audits' },
 ] as const;
 
 /**
@@ -28,7 +28,7 @@ export function App() {
       <header className="masthead">
         <div className="masthead__inner">
           <span className="masthead__name">Settlement Witness</span>
-          <span className="masthead__claim">Evidence-first settlement reconciliation</span>
+          <span className="masthead__claim">Payout controls, made auditable</span>
           <nav className="masthead__nav" aria-label="Sections">
             {LINKS.map((link) => (
               <NavLink key={link.to} className="masthead__link" to={link.to} end={link.to === '/'}>

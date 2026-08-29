@@ -21,6 +21,8 @@ import type {
   BankFinalityAuditSummary,
   BankFinalityCertificate,
   BankFinalityOutcome,
+  DemoBootstrapResult,
+  DemoFixtureResult,
   DecisionStatus,
   DecisionView,
   EvidenceReference,
@@ -138,6 +140,20 @@ export function parseRunSummary(value: unknown): RunSummary {
     decision_count: num(raw, 'decision_count', 'run'),
     status_counts: counts(raw, 'status_counts', 'run'),
     exception_counts: counts(raw, 'exception_counts', 'run'),
+  };
+}
+
+function parseDemoFixture(value: unknown): DemoFixtureResult {
+  const raw = object(value, 'demo fixture');
+  return {
+    document_name: str(raw, 'document_name', 'demo fixture'),
+    source_record_type: str(
+      raw,
+      'source_record_type',
+      'demo fixture',
+    ) as DemoFixtureResult['source_record_type'],
+    outcome: str(raw, 'outcome', 'demo fixture') as DemoFixtureResult['outcome'],
+    loaded_now: bool(raw, 'loaded_now', 'demo fixture'),
   };
 }
 
@@ -369,5 +385,15 @@ export function parseBankFinalityAuditPage(value: unknown): BankFinalityAuditPag
       'settlement_and_finality_are_separate',
       'bank finality audits',
     ),
+  };
+}
+
+export function parseDemoBootstrap(value: unknown): DemoBootstrapResult {
+  const raw = object(value, 'demo walkthrough');
+  return {
+    fixture_results: list(raw, 'fixture_results', 'demo walkthrough', parseDemoFixture),
+    run: parseRunSummary(raw.run),
+    bank_finality_audit: parseBankFinalityAuditSummary(raw.bank_finality_audit),
+    created: bool(raw, 'created', 'demo walkthrough'),
   };
 }

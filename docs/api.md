@@ -4,11 +4,12 @@ The import, reconciliation, bank finality and human review API. Examples below a
 responses, taken from a database holding the example documents in
 `data/fixtures/ingestion/`.
 
-## Before anything else: this is a local backend
+## Before anything else: this is a single-workspace demo backend
 
-**There is no authentication and no multi-tenancy.** It assumes one merchant's
-data and one trusted operator, and it must not be exposed to a network where
-either assumption fails.
+**There is no authentication and no multi-tenancy.** It assumes one workspace
+and one trusted operator. The submitted Vercel preview is a shared synthetic
+demo, not a merchant-data service: anyone with its public URL can use its write
+routes, so do not upload merchant data there.
 
 That is a statement of fact, not a plan. Adding a token check without a tenancy
 model would look like security and provide none, so nothing has been added.
@@ -18,8 +19,9 @@ attribute it to. The review API is a workflow record and not an accountability
 one, and nothing in it answers "who decided this".
 
 **There is no endpoint that changes anything already stored.** Every route is a
-`GET` apart from the four that create something: an import receipt, a
-reconciliation run, a bank finality audit and a human review event. Facts,
+`GET` apart from the five that create something: an import receipt, a
+reconciliation run, a bank finality audit, a human review event and the
+fixture-only walkthrough setup. Facts,
 receipts, runs, decisions, bank finality audits and review events are all
 append-only in the database, and the API adds no exception.
 
@@ -103,6 +105,20 @@ curl --request POST http://127.0.0.1:8000/v1/imports \
   --form 'source_system=PSP_API' \
   --form 'record_type=PAYMENT_EVENT'
 ```
+
+## `POST /v1/demo/bootstrap`
+
+Prepare the exact synthetic walkthrough shown on the landing page. The request
+has no body and accepts no caller-supplied document. It reads only four committed
+fixtures—payment events, settlement lines, payouts and a bank statement—from
+the application package, then records the ordinary immutable reconciliation run
+and bank-finality audit.
+
+The first request returns `201`; a later request returns `200` with the same run
+and audit. Existing accepted fixtures are recognised by their document hash,
+declared source and record type, so a repeat adds neither duplicate facts nor
+duplicate import receipts. This route is for the shared public demo only; use
+`POST /v1/imports` for an explicit operator upload.
 
 ## `GET /health`
 

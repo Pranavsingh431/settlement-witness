@@ -10,6 +10,7 @@ import type {
   BankFinalityAuditPage,
   BankFinalityCertificate,
   DecisionView,
+  DemoBootstrapResult,
   ImportReceipt,
   ReviewQueueItem,
   ReviewQueuePage,
@@ -348,6 +349,38 @@ export const BANK_AUDIT: BankFinalityAuditPage['audits'][number] = {
     BANK_CURRENCY_MISMATCH: 0,
   },
   verified_payout_count: 1,
+};
+
+export const DEMO_BOOTSTRAP: DemoBootstrapResult = {
+  fixture_results: [
+    {
+      document_name: 'payment_events.csv',
+      source_record_type: 'PAYMENT_EVENT',
+      outcome: 'ACCEPTED',
+      loaded_now: true,
+    },
+    {
+      document_name: 'settlement_lines.csv',
+      source_record_type: 'SETTLEMENT_LINE',
+      outcome: 'ACCEPTED',
+      loaded_now: true,
+    },
+    {
+      document_name: 'payouts.csv',
+      source_record_type: 'PAYOUT',
+      outcome: 'ACCEPTED',
+      loaded_now: true,
+    },
+    {
+      document_name: 'bank_transactions.csv',
+      source_record_type: 'BANK_TRANSACTION',
+      outcome: 'ACCEPTED',
+      loaded_now: true,
+    },
+  ],
+  run: { ...RUN, fact_count: 11 },
+  bank_finality_audit: BANK_AUDIT,
+  created: true,
 };
 
 export const BANK_AUDITS: BankFinalityAuditPage = {

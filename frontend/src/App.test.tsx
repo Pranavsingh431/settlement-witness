@@ -42,7 +42,7 @@ describe('the shell', () => {
 
     expect(screen.getByText('Settlement Witness')).toBeInTheDocument();
     expect(
-      within(screen.getByRole('banner')).getByText(/evidence-first settlement reconciliation/i),
+      within(screen.getByRole('banner')).getByText(/payout controls, made auditable/i),
     ).toBeInTheDocument();
   });
 
@@ -57,11 +57,8 @@ describe('the shell', () => {
   it('marks the section the reader is in', () => {
     renderScreen(<App />, '/imports');
 
-    expect(screen.getByRole('link', { name: 'Import evidence' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    expect(screen.getByRole('link', { name: 'Runs' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Evidence' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Audits' })).not.toHaveAttribute('aria-current');
   });
 
   it('puts the navigation in a named landmark', () => {
@@ -76,7 +73,7 @@ describe('routing', () => {
     renderScreen(<App />, '/');
 
     expect(
-      await screen.findByRole('heading', { name: /evidence-first settlement reconciliation/i }),
+      await screen.findByRole('heading', { name: /know which settlements you can stand behind/i }),
     ).toBeInTheDocument();
   });
 

@@ -9,11 +9,11 @@ request before anything parses them, which is what stops a client that sends no
 against the exact configured limit. The first bounds what the server accepts,
 the second decides what it will import.
 
-There is no authentication and no multi-tenancy. This is a local and
-demonstration backend: it assumes one merchant's data and one trusted operator,
-and it must not be exposed to a network where either assumption fails. Adding
-authentication is real work that has not been done, and pretending otherwise by
-adding a token check without a tenancy model would be worse than saying so.
+There is no authentication and no multi-tenancy. The submitted public preview
+is therefore a shared synthetic demonstration: visitors can load the four
+bundled walkthrough documents, but must never submit merchant data. A real
+merchant deployment needs authentication, tenancy and access control; adding a
+token-shaped check without those properties would be worse than saying so.
 
 There is no endpoint that changes a stored decision. The review API appends
 human workflow events beside a decision and cannot alter one: there is no field
@@ -33,6 +33,7 @@ from sqlalchemy import Engine
 from app import __version__
 from app.api.bank_finality import router as bank_finality_router
 from app.api.body_limit import RequestBodyLimit, post_to
+from app.api.demo import router as demo_router
 from app.api.imports import IMPORTS_PATH
 from app.api.imports import router as imports_router
 from app.api.reconciliation import router as reconciliation_router
@@ -87,8 +88,8 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         title="Settlement Witness",
         version=__version__,
         description=(
-            "Evidence-complete AI finance controller. Local and demonstration "
-            "backend: no authentication, no multi-tenancy."
+            "Evidence-complete payment reconciliation. Shared synthetic demo "
+            "backend: no authentication, no multi-tenancy, no merchant data."
         ),
     )
     application.state.engine = engine
@@ -151,6 +152,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     application.include_router(reconciliation_router)
     application.include_router(review_router)
     application.include_router(bank_finality_router)
+    application.include_router(demo_router)
     return application
 
 
