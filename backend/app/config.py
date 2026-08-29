@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["local", "test", "ci", "production"]
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="SW_",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_env: AppEnv = "local"
@@ -46,13 +47,18 @@ class Settings(BaseSettings):
     Relative paths are resolved against the process working directory, which
     is the backend directory when the service is started by `make api`."""
 
-    database_url: SecretStr | None = None
+    database_url: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SW_DATABASE_URL", "SW_DATABASE_DATABASE_URL"),
+    )
     """Optional SQLAlchemy database URL for a managed database.
 
     The URL is a secret because it normally contains a database password. A
-    configured URL takes precedence over ``database_path``. Vercel functions
-    must use this setting: their filesystem is not durable enough to hold the
-    append-only audit trail.
+    configured URL takes precedence over ``database_path``. ``SW_DATABASE_URL``
+    is the canonical operator-facing name; Vercel's Neon integration currently
+    provisions ``SW_DATABASE_DATABASE_URL``, which is accepted as an equivalent
+    source. Vercel functions must use this setting: their filesystem is not
+    durable enough to hold the append-only audit trail.
     """
 
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
@@ -73,7 +79,9 @@ class Settings(BaseSettings):
     def _production_requires_a_managed_database(self) -> "Settings":
         """Refuse a production process that would fall back to a local SQLite file."""
         if self.app_env == "production" and self.database_url is None:
-            message = "SW_DATABASE_URL must be set when SW_APP_ENV=production"
+            message = (
+                "SW_DATABASE_URL or SW_DATABASE_DATABASE_URL must be set when SW_APP_ENV=production"
+            )
             raise ValueError(message)
         return self
 

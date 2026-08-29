@@ -68,9 +68,25 @@ def test_the_legacy_postgres_scheme_uses_the_configured_psycopg_driver() -> None
     )
 
 
+def test_the_neon_integration_database_variable_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vercel's Neon integration uses its own safe, documented variable name."""
+    monkeypatch.setenv(
+        "SW_DATABASE_DATABASE_URL",
+        "postgresql://operator:password@example.test/neondb?sslmode=require",
+    )
+
+    settings = Settings(app_env="production")
+
+    assert settings.resolved_database_url == (
+        "postgresql+psycopg://operator:password@example.test/neondb?sslmode=require"
+    )
+
+
 def test_a_production_process_refuses_to_fall_back_to_a_local_database() -> None:
     """The durable store is a deployment prerequisite, not a local default."""
-    with pytest.raises(ValidationError, match="SW_DATABASE_URL"):
+    with pytest.raises(ValidationError, match="SW_DATABASE_URL or SW_DATABASE_DATABASE_URL"):
         Settings(app_env="production")
 
 

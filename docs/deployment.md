@@ -33,12 +33,15 @@ That command deliberately removes the local volume and its SQLite database.
 The committed [`vercel.json`](../vercel.json) uses Vercel Services: the Vite
 application is the root service and FastAPI receives only `/v1/*` plus
 `/health`. The backend entrypoint is `app.main:app`. It reads the managed
-database from `SW_DATABASE_URL`; it never writes a SQLite file in the function
+database from `SW_DATABASE_URL` (or the Neon integration's
+`SW_DATABASE_DATABASE_URL`); it never writes a SQLite file in the function
 filesystem.
 
 Before pushing a reviewer-preview branch, configure these Vercel settings:
 
-1. Add the Neon integration's `SW_DATABASE_URL` to the **Preview** environment.
+1. Let the Neon integration provide `SW_DATABASE_DATABASE_URL` in the **Preview**
+   environment. The backend recognises that integration name directly; do not
+   copy its value into a second variable.
    The value is a secret; do not put it in Git, `.env`, a command line, or an
    issue. The application accepts the standard Neon `postgresql://` form and
    uses the pinned Psycopg driver internally.
