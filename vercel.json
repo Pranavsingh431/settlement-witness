@@ -9,7 +9,6 @@
       "root": "backend",
       "framework": "fastapi",
       "entrypoint": "app.main:app",
-      "maxDuration": 30,
       "excludeFiles": [
         "tests/**",
         ".venv/**",

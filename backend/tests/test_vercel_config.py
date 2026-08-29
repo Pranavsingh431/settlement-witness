@@ -20,7 +20,6 @@ def test_vercel_config_exposes_the_fastapi_entrypoint_and_api_route() -> None:
         "root": "backend",
         "framework": "fastapi",
         "entrypoint": "app.main:app",
-        "maxDuration": 30,
         "excludeFiles": [
             "tests/**",
             ".venv/**",
