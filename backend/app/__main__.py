@@ -15,7 +15,6 @@ from app.config import get_settings
 from app.storage.database import (
     create_database_engine,
     create_schema,
-    database_url_for,
 )
 
 
@@ -23,8 +22,9 @@ def main() -> None:
     """Migrate the database, then start the API server."""
     settings = get_settings()
 
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_database_engine(database_url_for(settings.database_path))
+    if settings.database_url is None:
+        settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_database_engine(settings.resolved_database_url)
     try:
         create_schema(engine)
     finally:

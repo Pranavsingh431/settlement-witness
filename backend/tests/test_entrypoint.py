@@ -21,7 +21,8 @@ def test_main_starts_the_server_on_the_configured_address(
         recorded.update(kwargs)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
-    monkeypatch.setenv("SW_DATABASE_PATH", str(tmp_path / "entrypoint.sqlite"))
+    database = tmp_path / "entrypoint.sqlite"
+    monkeypatch.setenv("SW_DATABASE_URL", f"sqlite+pysqlite:///{database}")
     monkeypatch.setenv("SW_API_HOST", "0.0.0.0")  # noqa: S104
     monkeypatch.setenv("SW_API_PORT", "9100")
     monkeypatch.setenv("SW_LOG_LEVEL", "WARNING")
@@ -73,7 +74,7 @@ def test_main_migrates_the_database_before_binding(
 
     database = tmp_path / "migrated.sqlite"
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setenv("SW_DATABASE_PATH", str(database))
+    monkeypatch.setenv("SW_DATABASE_URL", f"sqlite+pysqlite:///{database}")
 
     get_settings.cache_clear()
     try:

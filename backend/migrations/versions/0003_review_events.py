@@ -36,6 +36,24 @@ def _create_immutability_triggers(tables: Sequence[str]) -> None:
     is part of what the legacy fingerprint compares, and a table protected by a
     differently worded trigger would be a second dialect of the same rule.
     """
+    if op.get_bind().dialect.name == "postgresql":
+        for table in tables:
+            function = f"fn_{table}_append_only"
+            op.execute(
+                f"CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                "BEGIN "
+                f"RAISE EXCEPTION '{table} is append-only: % is not permitted', TG_OP; "
+                "END; "
+                "$$;"
+            )
+            for operation in ("UPDATE", "DELETE"):
+                op.execute(
+                    f"CREATE TRIGGER trg_{table}_no_{operation.lower()} "
+                    f"BEFORE {operation} ON {table} FOR EACH ROW "
+                    f"EXECUTE FUNCTION {function}();"
+                )
+        return
+
     for table in tables:
         for operation in ("UPDATE", "DELETE"):
             op.execute(
@@ -49,6 +67,13 @@ def _create_immutability_triggers(tables: Sequence[str]) -> None:
 
 def _drop_immutability_triggers(tables: Sequence[str]) -> None:
     """Remove the protections, so a downgrade can drop the table."""
+    if op.get_bind().dialect.name == "postgresql":
+        for table in tables:
+            for operation in ("update", "delete"):
+                op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_no_{operation} ON {table}")
+            op.execute(f"DROP FUNCTION IF EXISTS fn_{table}_append_only()")
+        return
+
     for table in tables:
         for operation in ("update", "delete"):
             op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_no_{operation}")

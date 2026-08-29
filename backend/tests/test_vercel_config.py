@@ -16,12 +16,14 @@ def test_vercel_config_exposes_the_fastapi_entrypoint_and_api_route() -> None:
     """The deployed service uses the app the local entrypoint names, at ``/v1``."""
     config = json.loads((REPOSITORY_ROOT / "vercel.json").read_text(encoding="utf-8"))
 
+    assert config["$schema"] == "https://openapi.vercel.sh/vercel.json"
     assert config["services"]["backend"] == {
         "root": "backend",
         "framework": "fastapi",
         "entrypoint": "app.main:app",
     }
     assert config["rewrites"] == [
+        {"source": "/health", "destination": {"service": "backend"}},
         {"source": "/v1/(.*)", "destination": {"service": "backend"}},
         {"source": "/(.*)", "destination": {"service": "frontend"}},
     ]

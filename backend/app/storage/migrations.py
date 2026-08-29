@@ -21,7 +21,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, text
 
 from app.storage.legacy import LEGACY_REVISION, AdoptionPlan, plan_adoption
 
@@ -29,11 +29,11 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 """The directory holding alembic.ini and the migrations package."""
 
 
-def alembic_config(engine: Engine) -> Config:
-    """Return an Alembic configuration bound to one engine."""
+def alembic_config(connection: Engine | Connection) -> Config:
+    """Return an Alembic configuration bound to one engine or connection."""
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
-    config.attributes["connection"] = engine
+    config.attributes["connection"] = connection
     return config
 
 
@@ -51,6 +51,12 @@ def adopt_if_legacy(engine: Engine) -> None:
         UnrecognisedSchemaError: When the database is unstamped, not empty, and
             not the Phase 2 schema.
     """
+    if engine.dialect.name != "sqlite":
+        # Legacy adoption recognises one frozen SQLite schema. A remote
+        # PostgreSQL database is either fresh (and migrates from revision zero)
+        # or already carries Alembic's stamp; it is never guessed at and
+        # stamped as though it were a SQLite file.
+        return
     if current_revision(engine) is not None:
         return
     if plan_adoption(engine) is AdoptionPlan.ADOPT_LEGACY:
@@ -60,7 +66,21 @@ def adopt_if_legacy(engine: Engine) -> None:
 def upgrade_to_head(engine: Engine) -> None:
     """Bring a database to the latest revision. Safe to run again."""
     adopt_if_legacy(engine)
-    command.upgrade(alembic_config(engine), "head")
+    if engine.dialect.name != "postgresql":
+        command.upgrade(alembic_config(engine), "head")
+        return
+
+    # Vercel may cold-start more than one function at once. PostgreSQL's
+    # session advisory lock serialises the corresponding Alembic upgrades, so
+    # two processes cannot race to create the version table or the same trigger.
+    with engine.connect() as connection:
+        connection.execute(text("SELECT pg_advisory_lock(847231904159)"))
+        connection.commit()
+        try:
+            command.upgrade(alembic_config(connection), "head")
+        finally:
+            connection.execute(text("SELECT pg_advisory_unlock(847231904159)"))
+            connection.commit()
 
 
 def upgrade_to(engine: Engine, revision: str) -> None:

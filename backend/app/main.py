@@ -38,7 +38,7 @@ from app.api.imports import router as imports_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.review import router as review_router
 from app.config import AppEnv, Settings, get_settings
-from app.storage.database import create_database_engine, database_url_for
+from app.storage.database import create_database_engine, create_schema
 
 MULTIPART_OVERHEAD_BYTES = 8 * 1024
 """How much a multipart envelope may add on top of the document itself.
@@ -74,7 +74,14 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     """
     resolved = settings if settings is not None else get_settings()
     if engine is None:
-        engine = create_database_engine(database_url_for(resolved.database_path))
+        engine = create_database_engine(resolved.resolved_database_url)
+        # A Vercel function has no separate long-lived process in which an
+        # operator can run migrations before accepting requests. Managed
+        # databases are therefore brought to head on cold start. The migration
+        # runner serialises PostgreSQL upgrades, so concurrent function starts
+        # do not race to write the Alembic revision.
+        if resolved.database_url is not None:
+            create_schema(engine)
 
     application = FastAPI(
         title="Settlement Witness",

@@ -6,7 +6,9 @@ services:
       context: ./backend
     image: settlement-witness-backend:local
     environment:
-      SW_APP_ENV: production
+      # This is a trusted local demonstration stack. A remote production
+      # deployment must set SW_APP_ENV=production and provide SW_DATABASE_URL.
+      SW_APP_ENV: local
       SW_LOG_LEVEL: INFO
       SW_API_HOST: 0.0.0.0
       SW_API_PORT: 8000

@@ -28,8 +28,7 @@ def database_url_for(path: Path) -> str:
 def create_database_engine(url: str, *, echo: bool = False) -> Engine:
     """Return an engine with the settings this application relies on.
 
-    Two adjustments, both of which SQLite needs and neither of which is optional
-    here.
+    Two adjustments apply only to SQLite, where they are both required.
 
     Foreign keys are switched on, because SQLite leaves them off by default and a
     constraint declared in the schema would otherwise be decoration.
@@ -42,6 +41,9 @@ def create_database_engine(url: str, *, echo: bool = False) -> Engine:
     work. There is a test for exactly that.
     """
     engine = create_engine(url, echo=echo, future=True)
+
+    if engine.dialect.name != "sqlite":
+        return engine
 
     @event.listens_for(engine, "connect")
     def _configure_connection(

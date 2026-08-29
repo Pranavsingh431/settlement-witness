@@ -1,9 +1,10 @@
 # Deployment boundary
 
 Settlement Witness is ready to run as a **local demonstration** with Docker
-Compose. It is not ready to be placed directly on the public internet: it has
-write endpoints for imports, bank-finality audits and review events, and it
-intentionally has no authentication or multi-tenancy.
+Compose. Its Vercel deployment path is prepared for a **protected reviewer
+preview** backed by managed PostgreSQL. It is not a multi-tenant public product:
+it has write endpoints for imports, bank-finality audits and review events, and
+it has no application-level identity or tenancy model.
 
 This is a safety boundary, not a caveat to work around. A public URL without an
 access-control layer would let an unauthorised visitor write to the demonstration
@@ -27,7 +28,40 @@ make docker-down
 
 That command deliberately removes the local volume and its SQLite database.
 
-## Requirements before a remote demonstration
+## Vercel-protected reviewer preview
+
+The committed [`vercel.json`](../vercel.json) uses Vercel Services: the Vite
+application is the root service and FastAPI receives only `/v1/*` plus
+`/health`. The backend entrypoint is `app.main:app`. It reads the managed
+database from `SW_DATABASE_URL`; it never writes a SQLite file in the function
+filesystem.
+
+Before pushing a reviewer-preview branch, configure these Vercel settings:
+
+1. Add the Neon integration's `SW_DATABASE_URL` to the **Preview** environment.
+   The value is a secret; do not put it in Git, `.env`, a command line, or an
+   issue. The application accepts the standard Neon `postgresql://` form and
+   uses the pinned Psycopg driver internally.
+2. Add `SW_APP_ENV=production` to that same Preview environment. This makes a
+   missing database URL a startup refusal rather than a fallback to ephemeral
+   storage.
+3. Enable **Deployment Protection → Standard Protection → Vercel
+   Authentication** before sharing the preview. It protects the frontend and
+   every same-origin API request together. Do not add deployment-protection
+   bypasses, public exceptions, or the hosted-model key.
+4. Push a non-`main` branch. Vercel treats a push to `main` as Production and
+   does not apply Preview-only environment variables.
+
+The first cold start migrates the empty PostgreSQL database to the current
+schema. PostgreSQL advisory locking serialises concurrent cold starts, and the
+same append-only UPDATE/DELETE protections are installed as database triggers.
+
+After Vercel marks the protected preview ready, open `/health`, then follow the
+fixture walkthrough from [submission.md](submission.md). A reviewer who is not
+an authorised Vercel user must use a Vercel Shareable Link; do not remove
+protection merely to make the URL easier to open.
+
+## Requirements before a public production service
 
 Use a deployment platform or reverse proxy that provides all of these controls:
 
@@ -42,6 +76,10 @@ Use a deployment platform or reverse proxy that provides all of these controls:
 5. The local `.env.ai` file is not copied into an image, container, secret
    store or deployment configuration. Hosted shadow evaluation is a local,
    corpus-only command and does not belong in the running application.
+
+For a Production deployment, copy the Neon variables to the **Production**
+environment and protect the production domain too. Vercel treats Preview and
+Production variables as separate values.
 
 Until identity and tenancy are designed and implemented, access control must be
 provided by the deployment environment. A platform choice, domain and access

@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["local", "test", "ci", "production"]
@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     Relative paths are resolved against the process working directory, which
     is the backend directory when the service is started by `make api`."""
 
+    database_url: SecretStr | None = None
+    """Optional SQLAlchemy database URL for a managed database.
+
+    The URL is a secret because it normally contains a database password. A
+    configured URL takes precedence over ``database_path``. Vercel functions
+    must use this setting: their filesystem is not durable enough to hold the
+    append-only audit trail.
+    """
+
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
     """Largest CSV document the import endpoint will accept, in bytes.
 
@@ -59,6 +68,31 @@ class Settings(BaseSettings):
     The default holds a document of roughly forty thousand settlement lines,
     which is far more than the demonstration corpus and small enough that one
     request cannot exhaust a laptop."""
+
+    @model_validator(mode="after")
+    def _production_requires_a_managed_database(self) -> "Settings":
+        """Refuse a production process that would fall back to a local SQLite file."""
+        if self.app_env == "production" and self.database_url is None:
+            message = "SW_DATABASE_URL must be set when SW_APP_ENV=production"
+            raise ValueError(message)
+        return self
+
+    @property
+    def resolved_database_url(self) -> str:
+        """Return the configured managed URL or the local SQLite URL.
+
+        This is intentionally the sole selection point. A deployment cannot
+        accidentally create one database from ``database_path`` while a CLI or
+        another function uses ``database_url``.
+        """
+        if self.database_url is not None:
+            supplied = self.database_url.get_secret_value()
+            if supplied.startswith("postgres://"):
+                return "postgresql+psycopg://" + supplied.removeprefix("postgres://")
+            if supplied.startswith("postgresql://"):
+                return "postgresql+psycopg://" + supplied.removeprefix("postgresql://")
+            return supplied
+        return f"sqlite+pysqlite:///{self.database_path}"
 
 
 @lru_cache(maxsize=1)
