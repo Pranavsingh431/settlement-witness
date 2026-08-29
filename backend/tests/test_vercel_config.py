@@ -20,13 +20,6 @@ def test_vercel_config_exposes_the_fastapi_entrypoint_and_api_route() -> None:
         "root": "backend",
         "framework": "fastapi",
         "entrypoint": "app.main:app",
-        "excludeFiles": [
-            "tests/**",
-            ".venv/**",
-            ".mypy_cache/**",
-            ".pytest_cache/**",
-            ".ruff_cache/**",
-        ],
     }
     assert config["rewrites"] == [
         {"source": "/v1/(.*)", "destination": {"service": "backend"}},

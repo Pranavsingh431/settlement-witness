@@ -8,14 +8,7 @@
     "backend": {
       "root": "backend",
       "framework": "fastapi",
-      "entrypoint": "app.main:app",
-      "excludeFiles": [
-        "tests/**",
-        ".venv/**",
-        ".mypy_cache/**",
-        ".pytest_cache/**",
-        ".ruff_cache/**"
-      ]
+      "entrypoint": "app.main:app"
     }
   },
   "rewrites": [
