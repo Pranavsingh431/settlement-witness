@@ -14,7 +14,7 @@ import {
   parseBankFinalityAuditDetail,
   parseBankFinalityAuditPage,
   parseBankFinalityCertificate,
-  parseDemoBootstrap,
+  parseDemoBatch,
   parseDecision,
   parseReceipt,
   parseReviewEventReceipt,
@@ -29,7 +29,7 @@ import {
   BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   CLOSED_ITEM,
-  DEMO_BOOTSTRAP,
+  DEMO_BATCH,
   EMPTY_REVIEW_QUEUE,
   OPEN_ITEM,
   RESOLVED_DECISION,
@@ -74,18 +74,18 @@ describe('parseRunSummary', () => {
   });
 });
 
-describe('parseDemoBootstrap', () => {
-  it('accepts the walkthrough result and its existing conclusion shapes', () => {
-    expect(parseDemoBootstrap(DEMO_BOOTSTRAP)).toEqual(DEMO_BOOTSTRAP);
+describe('parseDemoBatch', () => {
+  it('accepts the measured synthetic batch', () => {
+    expect(parseDemoBatch(DEMO_BATCH)).toEqual(DEMO_BATCH);
   });
 
-  it('refuses a missing loaded-now flag rather than treating it as false', () => {
+  it('refuses a missing match-rate denominator rather than inventing one', () => {
     expect(() =>
-      parseDemoBootstrap({
-        ...DEMO_BOOTSTRAP,
-        fixture_results: [without(DEMO_BOOTSTRAP.fixture_results[0], 'loaded_now')],
+      parseDemoBatch({
+        ...DEMO_BATCH,
+        auto_match_rate: without(DEMO_BATCH.auto_match_rate, 'denominator'),
       }),
-    ).toThrow(/loaded_now/);
+    ).toThrow(/denominator/);
   });
 });
 

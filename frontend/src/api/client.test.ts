@@ -15,7 +15,7 @@ import {
   BANK_AUDIT_DETAIL,
   BASELINE_NOTE,
   EXCEPTION_DECISION,
-  DEMO_BOOTSTRAP,
+  DEMO_BATCH,
   OPEN_ITEM,
   RESOLVED_DECISION,
   REVIEW_QUEUE,
@@ -24,7 +24,7 @@ import {
 import {
   appendReviewEvent,
   createBankFinalityAudit,
-  bootstrapDemo,
+  runDemoBatch,
   createRun,
   getImport,
   getReviewItem,
@@ -186,16 +186,16 @@ describe('creating a run', () => {
   });
 });
 
-describe('preparing the walkthrough', () => {
-  it('uses the fixed demo route with no request body', async () => {
-    fetchMock.mockResolvedValue(answer(DEMO_BOOTSTRAP, 201));
+describe('running the public batch', () => {
+  it('uses the read-only demo route with no request body', async () => {
+    fetchMock.mockResolvedValue(answer(DEMO_BATCH));
 
-    const result = await bootstrapDemo();
+    const result = await runDemoBatch();
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/demo/bootstrap');
-    expect(fetchMock.mock.calls[0]?.[1]).toEqual({ method: 'POST' });
-    expect(result.run.run_id).toBe(RUN.run_id);
-    expect(result.fixture_results).toHaveLength(4);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/demo/batch');
+    expect(fetchMock.mock.calls[0]?.[1]).toBeUndefined();
+    expect(result.decision_count).toBe(59);
+    expect(result.source_documents).toHaveLength(3);
   });
 });
 

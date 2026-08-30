@@ -17,6 +17,7 @@ from app.banking.finality import (
     BankFinalityCertificate,
     BankFinalityOutcome,
 )
+from app.benchmark.metrics import Rate
 from app.domain.banking import BankDirection
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import DecisionStatus, ReconciliationDecision
@@ -684,23 +685,55 @@ class BankFinalityAuditPage(BaseModel):
     settlement_and_finality_are_separate: str = SETTLEMENT_AND_FINALITY_ARE_SEPARATE
 
 
-class DemoFixtureResult(BaseModel):
-    """What preparing one bundled fixture did, without serving its contents."""
+class DemoDocumentSummary(BaseModel):
+    """One synthetic input document used by the public Track 04 batch."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     document_name: str
     source_record_type: SourceRecordType
-    outcome: ImportOutcome
-    loaded_now: bool
+    record_count: int
 
 
-class DemoBootstrapResult(BaseModel):
-    """The immutable run and audit prepared by the synthetic walkthrough."""
+class DemoExceptionSummary(BaseModel):
+    """One finding emitted by the real baseline over the synthetic batch."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    fixture_results: list[DemoFixtureResult]
-    run: RunSummary
-    bank_finality_audit: BankFinalityAuditSummary
-    created: bool
+    code: str
+    finding_count: int
+
+
+class DemoBatchResult(BaseModel):
+    """A read-only, repeatable Track 04 reconciliation demonstration."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    corpus_name: str
+    seed: int
+    is_synthetic: bool = True
+    scenario_count: int
+    source_record_count: int
+    decision_count: int
+    source_documents: list[DemoDocumentSummary]
+
+    resolved_count: int
+    exception_count: int
+    insufficient_evidence_count: int
+    auto_match_rate: Rate
+    """Resolved lines over all evaluated lines; this is not an accuracy claim."""
+    exception_breakdown: list[DemoExceptionSummary]
+
+    processing_duration_ms: int
+    throughput_lines_per_second: float
+    """Measured over this local, temporary evaluation—not a production SLA."""
+
+    contract_agreement: Rate
+    """Strict manifest agreement: status, exact codes and exact evidence IDs."""
+    exception_recall: Rate
+    false_resolution_rate: Rate
+
+    generator_version: str
+    harness_version: str
+    baseline_version: str
+    limitation: str

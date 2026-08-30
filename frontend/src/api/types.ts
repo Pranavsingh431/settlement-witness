@@ -170,22 +170,49 @@ export interface RunCreation {
   readonly created: boolean;
 }
 
-/** One fixed fixture document prepared by the public walkthrough. */
-export interface DemoFixtureResult {
-  readonly document_name: string;
-  readonly source_record_type: ImportableRecordType;
-  readonly outcome: ImportOutcome;
-  /** True only when this request added the fixture's accepted source facts. */
-  readonly loaded_now: boolean;
+/** A rate that keeps its numerator and denominator visible. */
+export interface MeasuredRate {
+  readonly numerator: number;
+  readonly denominator: number;
+  readonly value: number | null;
 }
 
-/** The conclusions prepared by the bundled, synthetic walkthrough. */
-export interface DemoBootstrapResult {
-  readonly fixture_results: readonly DemoFixtureResult[];
-  readonly run: RunSummary;
-  readonly bank_finality_audit: BankFinalityAuditSummary;
-  /** True when this request added fixtures or recorded a conclusion. */
-  readonly created: boolean;
+/** One generated document that fed the public Track 04 batch. */
+export interface DemoDocumentSummary {
+  readonly document_name: string;
+  readonly source_record_type: ImportableRecordType;
+  readonly record_count: number;
+}
+
+export interface DemoExceptionSummary {
+  readonly code: string;
+  readonly finding_count: number;
+}
+
+/** The read-only synthetic batch that demonstrates Track 04. */
+export interface DemoBatchResult {
+  readonly corpus_name: string;
+  readonly seed: number;
+  readonly is_synthetic: boolean;
+  readonly scenario_count: number;
+  readonly source_record_count: number;
+  readonly decision_count: number;
+  readonly source_documents: readonly DemoDocumentSummary[];
+  readonly resolved_count: number;
+  readonly exception_count: number;
+  readonly insufficient_evidence_count: number;
+  /** Resolved lines / all lines. It is not a production-accuracy measure. */
+  readonly auto_match_rate: MeasuredRate;
+  readonly exception_breakdown: readonly DemoExceptionSummary[];
+  readonly processing_duration_ms: number;
+  readonly throughput_lines_per_second: number;
+  readonly contract_agreement: MeasuredRate;
+  readonly exception_recall: MeasuredRate;
+  readonly false_resolution_rate: MeasuredRate;
+  readonly generator_version: string;
+  readonly harness_version: string;
+  readonly baseline_version: string;
+  readonly limitation: string;
 }
 
 /**

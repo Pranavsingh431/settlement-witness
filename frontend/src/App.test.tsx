@@ -42,7 +42,7 @@ describe('the shell', () => {
 
     expect(screen.getByText('Settlement Witness')).toBeInTheDocument();
     expect(
-      within(screen.getByRole('banner')).getByText(/payout controls, made auditable/i),
+      within(screen.getByRole('banner')).getByText(/batch reconciliation, made auditable/i),
     ).toBeInTheDocument();
   });
 
@@ -69,12 +69,10 @@ describe('the shell', () => {
 });
 
 describe('routing', () => {
-  it('shows the overview at the root', async () => {
+  it('shows the Track 04 batch demo at the root', async () => {
     renderScreen(<App />, '/');
 
-    expect(
-      await screen.findByRole('heading', { name: /know which settlements you can stand behind/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /close the batch/i })).toBeInTheDocument();
   });
 
   it('shows the import screen', async () => {

@@ -41,8 +41,17 @@ export function WorkflowBadge({ state }: { state: string }) {
 /** The sentence that must appear wherever a workflow state appears. */
 export function BaselineUnchangedNotice({ note }: { note: string }) {
   return (
-    <p className="notice notice--warn baseline-note" role="note">
-      <strong>Human workflow state does not change the baseline decision.</strong> {note}
+    <p className="baseline-rule" role="note">
+      <span className="baseline-rule__mark" aria-hidden="true">
+        i
+      </span>
+      <span>
+        <strong>Workflow is separate from the decision.</strong> Add evidence and run a new batch to
+        change an outcome.
+      </span>
+      <span className="visually-hidden">
+        Human workflow state does not change the baseline decision. {note}
+      </span>
     </p>
   );
 }

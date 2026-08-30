@@ -19,9 +19,10 @@ attribute it to. The review API is a workflow record and not an accountability
 one, and nothing in it answers "who decided this".
 
 **There is no endpoint that changes anything already stored.** Every route is a
-`GET` apart from the five that create something: an import receipt, a
-reconciliation run, a bank finality audit, a human review event and the
-fixture-only walkthrough setup. Facts,
+`GET` apart from the four that create something: an import receipt, a
+reconciliation run, a bank finality audit and a human review event. The public
+Track 04 batch endpoint is a `GET` that uses a fresh temporary database and
+does not create anything in the application workspace. Facts,
 receipts, runs, decisions, bank finality audits and review events are all
 append-only in the database, and the API adds no exception.
 
@@ -106,19 +107,21 @@ curl --request POST http://127.0.0.1:8000/v1/imports \
   --form 'record_type=PAYMENT_EVENT'
 ```
 
-## `POST /v1/demo/bootstrap`
+## `GET /v1/demo/batch`
 
-Prepare the exact synthetic walkthrough shown on the landing page. The request
-has no body and accepts no caller-supplied document. It reads only four committed
-fixtures—payment events, settlement lines, payouts and a bank statement—from
-the application package, then records the ordinary immutable reconciliation run
-and bank-finality audit.
+Run the public Track 04 demonstration. It accepts no input and never reads a
+reviewer's file. Each call generates the committed 59-scenario synthetic corpus,
+imports it through the ordinary strict parser into a fresh temporary database,
+reconciles it through the ordinary deterministic baseline, evaluates it against
+the independent manifest, and removes the temporary database before returning.
 
-The first request returns `201`; a later request returns `200` with the same run
-and audit. Existing accepted fixtures are recognised by their document hash,
-declared source and record type, so a repeat adds neither duplicate facts nor
-duplicate import receipts. This route is for the shared public demo only; use
-`POST /v1/imports` for an explicit operator upload.
+The response reports source-record and decision counts, elapsed processing time,
+throughput, the operational auto-match rate, every exception class and the
+strict contract measures. It contains no generic `accuracy` field. The reported
+numbers are measurements on a generated regression/shadow corpus, **not**
+reconciliation accuracy, production accuracy or evidence of real-merchant
+performance. Repeating this `GET` leaves no facts, receipts, runs, bank audits
+or review events in the shared application database.
 
 ## `GET /health`
 

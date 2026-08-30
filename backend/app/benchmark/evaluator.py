@@ -32,7 +32,7 @@ from app.domain.facts import SourceRecordType
 from app.domain.version import DOMAIN_SCHEMA_VERSION
 from app.ingestion.schemas import PARSER_VERSION
 from app.ingestion.service import ImportOutcome, ImportService
-from app.reconciliation.batch import BASELINE_VERSION, reconcile
+from app.reconciliation.batch import BASELINE_VERSION, ReconciliationBatch, reconcile
 from app.storage.database import (
     create_database_engine,
     create_schema,
@@ -389,6 +389,19 @@ def run_corpus(corpus: GeneratedCorpus) -> EvaluationReport:
     earlier one. The database is discarded afterwards: an evaluation is a
     measurement, not a place to accumulate state.
     """
+    report, _ = run_corpus_with_batch(corpus)
+    return report
+
+
+def run_corpus_with_batch(corpus: GeneratedCorpus) -> tuple[EvaluationReport, ReconciliationBatch]:
+    """Evaluate a corpus and return the actual batch beside its grade.
+
+    The public demo needs the operational counts produced by the same temporary
+    import and reconciliation path that the harness grades. Returning the batch
+    avoids reconstructing those counts from the oracle: the visible match rate
+    must describe what the baseline actually produced, even when a regression
+    makes the grade fail.
+    """
     with TemporaryDirectory(prefix="settlement-witness-eval-") as directory:
         database = Path(directory) / "evaluation.sqlite"
         engine = create_database_engine(database_url_for(database))
@@ -397,11 +410,11 @@ def run_corpus(corpus: GeneratedCorpus) -> EvaluationReport:
             outcomes = _import_all(engine, corpus)
             with session_factory(engine)() as session:
                 index = SourceFactRepository(session).fact_index()
-                decisions = reconcile(index).decisions
+                batch = reconcile(index)
         finally:
             engine.dispose()
 
-    return grade(corpus.manifest, decisions, outcomes)
+    return grade(corpus.manifest, batch.decisions, outcomes), batch
 
 
 def _import_all(engine: object, corpus: GeneratedCorpus) -> list[str]:

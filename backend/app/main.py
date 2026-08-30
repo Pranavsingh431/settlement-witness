@@ -10,10 +10,11 @@ against the exact configured limit. The first bounds what the server accepts,
 the second decides what it will import.
 
 There is no authentication and no multi-tenancy. The submitted public preview
-is therefore a shared synthetic demonstration: visitors can load the four
-bundled walkthrough documents, but must never submit merchant data. A real
-merchant deployment needs authentication, tenancy and access control; adding a
-token-shaped check without those properties would be worse than saying so.
+is therefore a shared synthetic demonstration: visitors can run a generated
+59-scenario batch in a fresh temporary database, but must never submit merchant
+data. A real merchant deployment needs authentication, tenancy and access
+control; adding a token-shaped check without those properties would be worse
+than saying so.
 
 There is no endpoint that changes a stored decision. The review API appends
 human workflow events beside a decision and cannot alter one: there is no field

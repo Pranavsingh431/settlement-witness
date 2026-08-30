@@ -50,8 +50,10 @@ published. That is a model-and-protocol observation, not reconciliation or
 production performance.
 
 There is no authentication and no multi-tenancy. The submitted Vercel link is a
-shared synthetic walkthrough for reviewers, not a merchant-data or production
-deployment; see [docs/deployment.md](docs/deployment.md).
+shared **Track 04** synthetic batch demonstration for reviewers, not a
+merchant-data or production deployment. It evaluates 59 generated payment,
+settlement and payout scenarios, reports its auto-match rate and keeps every
+exception visible; see [docs/deployment.md](docs/deployment.md).
 
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract
 says, and the [phase reports](docs/phase-reports/) for exactly what was built and

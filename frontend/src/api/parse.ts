@@ -21,14 +21,16 @@ import type {
   BankFinalityAuditSummary,
   BankFinalityCertificate,
   BankFinalityOutcome,
-  DemoBootstrapResult,
-  DemoFixtureResult,
+  DemoBatchResult,
+  DemoDocumentSummary,
+  DemoExceptionSummary,
   DecisionStatus,
   DecisionView,
   EvidenceReference,
   ImportReceipt,
   ImportReceiptPage,
   InvariantCheck,
+  MeasuredRate,
   ReviewAction,
   ReviewEventReceipt,
   ReviewEventView,
@@ -143,17 +145,33 @@ export function parseRunSummary(value: unknown): RunSummary {
   };
 }
 
-function parseDemoFixture(value: unknown): DemoFixtureResult {
-  const raw = object(value, 'demo fixture');
+function parseRate(value: unknown, what: string): MeasuredRate {
+  const raw = object(value, what);
   return {
-    document_name: str(raw, 'document_name', 'demo fixture'),
+    numerator: num(raw, 'numerator', what),
+    denominator: num(raw, 'denominator', what),
+    value: nullableNum(raw, 'value', what),
+  };
+}
+
+function parseDemoDocument(value: unknown): DemoDocumentSummary {
+  const raw = object(value, 'demo document');
+  return {
+    document_name: str(raw, 'document_name', 'demo document'),
     source_record_type: str(
       raw,
       'source_record_type',
-      'demo fixture',
-    ) as DemoFixtureResult['source_record_type'],
-    outcome: str(raw, 'outcome', 'demo fixture') as DemoFixtureResult['outcome'],
-    loaded_now: bool(raw, 'loaded_now', 'demo fixture'),
+      'demo document',
+    ) as DemoDocumentSummary['source_record_type'],
+    record_count: num(raw, 'record_count', 'demo document'),
+  };
+}
+
+function parseDemoException(value: unknown): DemoExceptionSummary {
+  const raw = object(value, 'demo exception');
+  return {
+    code: str(raw, 'code', 'demo exception'),
+    finding_count: num(raw, 'finding_count', 'demo exception'),
   };
 }
 
@@ -388,12 +406,29 @@ export function parseBankFinalityAuditPage(value: unknown): BankFinalityAuditPag
   };
 }
 
-export function parseDemoBootstrap(value: unknown): DemoBootstrapResult {
-  const raw = object(value, 'demo walkthrough');
+export function parseDemoBatch(value: unknown): DemoBatchResult {
+  const raw = object(value, 'demo batch');
   return {
-    fixture_results: list(raw, 'fixture_results', 'demo walkthrough', parseDemoFixture),
-    run: parseRunSummary(raw.run),
-    bank_finality_audit: parseBankFinalityAuditSummary(raw.bank_finality_audit),
-    created: bool(raw, 'created', 'demo walkthrough'),
+    corpus_name: str(raw, 'corpus_name', 'demo batch'),
+    seed: num(raw, 'seed', 'demo batch'),
+    is_synthetic: bool(raw, 'is_synthetic', 'demo batch'),
+    scenario_count: num(raw, 'scenario_count', 'demo batch'),
+    source_record_count: num(raw, 'source_record_count', 'demo batch'),
+    decision_count: num(raw, 'decision_count', 'demo batch'),
+    source_documents: list(raw, 'source_documents', 'demo batch', parseDemoDocument),
+    resolved_count: num(raw, 'resolved_count', 'demo batch'),
+    exception_count: num(raw, 'exception_count', 'demo batch'),
+    insufficient_evidence_count: num(raw, 'insufficient_evidence_count', 'demo batch'),
+    auto_match_rate: parseRate(raw.auto_match_rate, 'demo batch auto-match rate'),
+    exception_breakdown: list(raw, 'exception_breakdown', 'demo batch', parseDemoException),
+    processing_duration_ms: num(raw, 'processing_duration_ms', 'demo batch'),
+    throughput_lines_per_second: num(raw, 'throughput_lines_per_second', 'demo batch'),
+    contract_agreement: parseRate(raw.contract_agreement, 'demo batch contract agreement'),
+    exception_recall: parseRate(raw.exception_recall, 'demo batch exception recall'),
+    false_resolution_rate: parseRate(raw.false_resolution_rate, 'demo batch false-resolution rate'),
+    generator_version: str(raw, 'generator_version', 'demo batch'),
+    harness_version: str(raw, 'harness_version', 'demo batch'),
+    baseline_version: str(raw, 'baseline_version', 'demo batch'),
+    limitation: str(raw, 'limitation', 'demo batch'),
   };
 }

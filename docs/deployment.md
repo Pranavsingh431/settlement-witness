@@ -6,11 +6,12 @@ is not a multi-tenant public product: it has write endpoints for imports,
 bank-finality audits and review events, and it has no application-level identity
 or tenancy model.
 
-The public preview is intentionally a shared demonstration workspace. The first
-screen loads only four committed synthetic fixtures; it is safe for a reviewer
-to inspect, but it is not a place to upload merchant data. Anyone with the link
-can add evidence or append a workflow event, so the public preview must never
-be presented as an access-controlled customer deployment.
+The public preview is intentionally a shared demonstration workspace. Its first
+screen runs a generated 59-scenario Track 04 batch in a fresh temporary
+database; it is safe for a reviewer to inspect, but it is not a place to upload
+merchant data. Anyone with the link can add evidence or append a workflow event,
+so the public preview must never be presented as an access-controlled customer
+deployment.
 
 ## Local demonstration
 
@@ -62,10 +63,11 @@ The first cold start migrates the empty PostgreSQL database to the current
 schema. PostgreSQL advisory locking serialises concurrent cold starts, and the
 same append-only UPDATE/DELETE protections are installed as database triggers.
 
-After Vercel marks the preview ready, use **Load the interactive demo** on the
-landing page. It loads four shipped synthetic CSVs server-side, creates a normal
-immutable reconciliation run and bank-finality audit, and takes the reviewer to
-the evidence trail. It never reads a file from the reviewer's machine.
+After Vercel marks the preview ready, use **Run the 59-case batch** on the
+landing page. It runs the shipped generated synthetic corpus through a fresh
+temporary database, reports match rate and its full exception ledger, and never
+reads a file from the reviewer's machine or changes the shared application
+database.
 
 ## Requirements before a public production service
 
@@ -100,6 +102,6 @@ Before giving a reviewer access, run:
 make verify
 ```
 
-Then demonstrate the evidence path: load the bundled walkthrough, open a
+Then demonstrate the evidence path: run the generated Track 04 batch, open a
 certificate, open the review queue, and explain that bank finality is a separate
 conclusion. The exact walkthrough and safe claims are in [submission.md](submission.md).

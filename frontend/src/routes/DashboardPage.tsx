@@ -1,346 +1,232 @@
-/** The starting point for a reviewer seeing Settlement Witness for the first time. */
+/** The public Track 04 demonstration: one batch, its measures and its exceptions. */
 
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-
-import { bootstrapDemo, getReviewQueue, listImports, listRuns } from '../api/client';
+import { Stat, Stats } from '../components/ui';
+import { runDemoBatch } from '../api/client';
 import { describeError } from '../api/errors';
-import type { DemoBootstrapResult, RunSummary } from '../api/types';
-import { formatMinorUnits, formatTimestamp } from '../format';
-import { useLoad } from '../hooks';
-import { ErrorNotice, Loading, OutcomeBadge, Panel, Stat, Stats } from '../components/ui';
+import type { DemoBatchResult, MeasuredRate } from '../api/types';
+import { formatMinorUnits, humanise } from '../format';
 
-const STATES = [
-  {
-    tone: 'resolved',
-    glyph: '✓',
-    name: 'Resolved',
-    what: 'Every citation resolved to a stored fact and every required invariant held. This is the only answer that says a line is supported.',
-  },
-  {
-    tone: 'exception',
-    glyph: '!',
-    name: 'Exception',
-    what: 'The baseline reports a finding and does not resolve this line. Open its certificate to see the citations and the checks recorded for that finding.',
-  },
-  {
-    tone: 'unknown',
-    glyph: '?',
-    name: 'Insufficient evidence',
-    what: 'The backing does not support a determinate judgement, so none was made. Not a failure, and not a pass either.',
-  },
-] as const;
+function percentage(rate: MeasuredRate): string {
+  return rate.value === null ? '—' : `${(rate.value * 100).toFixed(1)}%`;
+}
 
-function DemoHero({
-  latest,
-  loading,
-  result,
-  error,
-  onLoad,
-}: {
-  latest: RunSummary | null;
-  loading: boolean;
-  result: DemoBootstrapResult | null;
-  error: unknown;
-  onLoad: () => void;
-}) {
-  const destination = result?.run ?? latest;
-
+function BatchHero({ loading, onRun }: { loading: boolean; onRun: () => void }) {
   return (
-    <section className="demo-hero" aria-labelledby="workspace-title">
-      <div className="demo-hero__copy">
-        <p className="eyebrow">Payment operations workspace</p>
-        <h1 id="workspace-title">Know which settlements you can stand behind.</h1>
+    <section className="track-hero" aria-labelledby="track-title">
+      <div className="track-hero__copy">
+        <p className="eyebrow eyebrow--on-blue">Track 04 · AI Finance Controller</p>
+        <h1 id="track-title">Close the batch. Surface what doesn&apos;t reconcile.</h1>
         <p>
-          Settlement Witness follows a payout from payment events to settlement records and bank
-          evidence. It surfaces uncertainty instead of hiding it inside a score.
+          A 59-case synthetic payment batch runs through the same strict importer, evidence verifier
+          and reconciliation baseline as the product—not a hand-picked match.
         </p>
-        <div className="demo-hero__actions">
-          {destination ? (
-            <Link className="button button--light" to={`/runs/${destination.run_id}`}>
-              Open decision audit
-            </Link>
-          ) : (
-            <button
-              className="button button--light"
-              type="button"
-              disabled={loading}
-              onClick={onLoad}
-            >
-              {loading ? 'Preparing demo…' : 'Load the interactive demo'}
-            </button>
-          )}
-          <Link className="button button--ghost" to="/imports">
-            Bring your own CSV
-          </Link>
+        <div className="track-hero__actions">
+          <button className="button button--light" type="button" disabled={loading} onClick={onRun}>
+            {loading ? 'Running 59-case batch…' : 'Run the 59-case batch'}
+          </button>
         </div>
-        <p className="demo-hero__assurance">
-          The walkthrough uses four bundled synthetic files. It does not upload anything from your
-          device.
+        <p className="track-hero__note">
+          Read-only synthetic demo. No browser file, merchant record or shared audit history is
+          created. Use the audit workspace with a local, private evidence set.
         </p>
-        {error ? (
-          <p className="demo-hero__error" role="alert">
-            Could not prepare the walkthrough: {describeError(error)}
-          </p>
-        ) : null}
       </div>
 
-      <ol className="demo-journey" aria-label="How Settlement Witness works">
-        <li>
-          <span className="demo-journey__step">01</span>
-          <div>
-            <strong>Bring in evidence</strong>
-            <span>Payment, settlement, payout and bank records stay separate.</span>
+      <div className="track-flow" aria-label="Batch reconciliation flow">
+        <p className="track-flow__label">One finance-ops loop</p>
+        <ol>
+          <li>
+            <span>01</span>
+            <div>
+              <strong>Payment events</strong>
+              <small>captures, refunds, returns</small>
+            </div>
+          </li>
+          <li>
+            <span>02</span>
+            <div>
+              <strong>Settlement lines</strong>
+              <small>gross, fee, tax and net checks</small>
+            </div>
+          </li>
+          <li>
+            <span>03</span>
+            <div>
+              <strong>Payout records</strong>
+              <small>batch totals and payout linkage</small>
+            </div>
+          </li>
+          <li>
+            <span>04</span>
+            <div>
+              <strong>Decision ledger</strong>
+              <small>matches, exceptions and missing evidence</small>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+function TrackCriteria() {
+  return (
+    <section className="track-criteria" aria-label="Track 04 fit">
+      <div>
+        <span className="track-criteria__number">50+</span>
+        <p>
+          <strong>Batch-scale input</strong>
+          <span>59 scenarios across payment, settlement and payout sources.</span>
+        </p>
+      </div>
+      <div>
+        <span className="track-criteria__number">2</span>
+        <p>
+          <strong>Measures, not vibes</strong>
+          <span>Auto-match rate plus strict manifest agreement are kept distinct.</span>
+        </p>
+      </div>
+      <div>
+        <span className="track-criteria__number">AI</span>
+        <p>
+          <strong>AI proposes; verifier decides</strong>
+          <span>Candidate links cannot resolve, alter or hide an evidence-backed decision.</span>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function BatchResult({ batch }: { batch: DemoBatchResult }) {
+  const unresolved = batch.exception_count + batch.insufficient_evidence_count;
+
+  return (
+    <section className="batch-result" aria-label="59-case batch result">
+      <header className="batch-result__head">
+        <div>
+          <p className="eyebrow">Batch result</p>
+          <h2>The controller finished every line—and kept the hard ones open.</h2>
+          <p>
+            {formatMinorUnits(batch.decision_count)} settlement decisions from{' '}
+            {formatMinorUnits(batch.source_record_count)} synthetic source records in{' '}
+            {formatMinorUnits(batch.processing_duration_ms)} ms.
+          </p>
+        </div>
+        <div className="batch-result__speed" aria-label="Measured throughput">
+          <strong>{formatMinorUnits(batch.throughput_lines_per_second)}</strong>
+          <span>lines / second</span>
+        </div>
+      </header>
+
+      <Stats label="Batch outcome">
+        <Stat label="Auto-matched" value={formatMinorUnits(batch.resolved_count)} tone="resolved" />
+        <Stat
+          label="Exceptions surfaced"
+          value={formatMinorUnits(batch.exception_count)}
+          tone="exception"
+        />
+        <Stat
+          label="Need more evidence"
+          value={formatMinorUnits(batch.insufficient_evidence_count)}
+          tone="unknown"
+        />
+        <Stat label="Source records checked" value={formatMinorUnits(batch.source_record_count)} />
+      </Stats>
+
+      <div className="batch-result__detail">
+        <div className="match-rate">
+          <p className="match-rate__label">Auto-match rate</p>
+          <strong>{percentage(batch.auto_match_rate)}</strong>
+          <p>
+            {formatMinorUnits(batch.auto_match_rate.numerator)} of{' '}
+            {formatMinorUnits(batch.auto_match_rate.denominator)} lines were supported without
+            manual follow-up.
+          </p>
+          <span className="match-rate__rule">
+            Operational outcome, not a production-accuracy claim.
+          </span>
+        </div>
+
+        <div className="exception-ledger">
+          <div className="exception-ledger__head">
+            <div>
+              <p className="eyebrow">Honest exception list</p>
+              <h3>{formatMinorUnits(unresolved)} lines did not auto-resolve.</h3>
+            </div>
+            <span>
+              {formatMinorUnits(batch.exception_recall.numerator)} expected findings caught
+            </span>
           </div>
-        </li>
-        <li>
-          <span className="demo-journey__step">02</span>
-          <div>
-            <strong>Run the checks</strong>
-            <span>Every outcome carries its evidence and invariant certificate.</span>
-          </div>
-        </li>
-        <li>
-          <span className="demo-journey__step">03</span>
-          <div>
-            <strong>Act without rewriting history</strong>
-            <span>Human review is a workflow trail, never an override button.</span>
-          </div>
-        </li>
-      </ol>
+          <ul>
+            {batch.exception_breakdown.map((exception) => (
+              <li key={exception.code}>
+                <span>{humanise(exception.code)}</span>
+                <strong>{formatMinorUnits(exception.finding_count)}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <footer className="batch-result__footer">
+        <p>
+          <strong>Contract agreement:</strong>{' '}
+          {formatMinorUnits(batch.contract_agreement.numerator)} /{' '}
+          {formatMinorUnits(batch.contract_agreement.denominator)} scenarios matched the independent
+          manifest on status, exact exception set and cited evidence. False resolutions:{' '}
+          {formatMinorUnits(batch.false_resolution_rate.numerator)} /{' '}
+          {formatMinorUnits(batch.false_resolution_rate.denominator)}.
+        </p>
+        <p>{batch.limitation}</p>
+      </footer>
     </section>
   );
 }
 
 export function DashboardPage() {
-  const runs = useLoad(() => listRuns({ limit: 1 }), 'latest-run');
-  const imports = useLoad(() => listImports({ limit: 5 }), 'recent-imports');
-  const latest = runs.data?.runs[0] ?? null;
-  const [demo, setDemo] = useState<DemoBootstrapResult | null>(null);
-  const [demoLoading, setDemoLoading] = useState(false);
-  const [demoError, setDemoError] = useState<unknown>(null);
+  const [batch, setBatch] = useState<DemoBatchResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
-  const review = useLoad(
-    () => (latest === null ? Promise.resolve(null) : getReviewQueue(latest.run_id, { limit: 1 })),
-    `review-queue|${latest?.run_id ?? 'none'}`,
-  );
-  const resolved = latest?.status_counts.RESOLVED ?? 0;
-  const exceptions = latest?.status_counts.EXCEPTION ?? 0;
-  const insufficient = latest?.status_counts.INSUFFICIENT_EVIDENCE ?? 0;
-
-  const loadDemo = async () => {
-    if (demoLoading) {
+  async function runBatch(): Promise<void> {
+    if (loading) {
       return;
     }
-    setDemoLoading(true);
-    setDemoError(null);
+    setLoading(true);
+    setError(null);
     try {
-      const prepared = await bootstrapDemo();
-      setDemo(prepared);
-      runs.reload();
-      imports.reload();
+      setBatch(await runDemoBatch());
     } catch (cause) {
-      setDemoError(cause);
+      setError(cause);
     } finally {
-      setDemoLoading(false);
+      setLoading(false);
     }
-  };
+  }
 
   return (
     <>
-      <DemoHero
-        latest={latest}
-        loading={demoLoading}
-        result={demo}
-        error={demoError}
-        onLoad={() => {
-          void loadDemo();
+      <BatchHero
+        loading={loading}
+        onRun={() => {
+          void runBatch();
         }}
       />
-
-      {demo ? (
-        <section className="demo-ready" aria-label="Walkthrough ready">
-          <div>
-            <p className="eyebrow">Walkthrough ready</p>
-            <h2>
-              {demo.created
-                ? 'A real audit is ready to inspect.'
-                : 'The walkthrough is already ready.'}
-            </h2>
-            <p>
-              {demo.fixture_results.filter((item) => item.loaded_now).length} bundled files loaded ·{' '}
-              {formatMinorUnits(demo.run.fact_count)} source records ·{' '}
-              {formatMinorUnits(demo.run.decision_count)} settlement decisions
-            </p>
-          </div>
-          <Link className="button" to={`/runs/${demo.run.run_id}`}>
-            Inspect the evidence trail
-          </Link>
+      <TrackCriteria />
+      {error ? (
+        <section className="demo-error" role="alert">
+          <strong>The batch could not run.</strong> {describeError(error)}
+          <button
+            type="button"
+            className="button button--quiet button--small"
+            onClick={() => {
+              void runBatch();
+            }}
+          >
+            Try again
+          </button>
         </section>
       ) : null}
-
-      <section className="workspace-overview" aria-label="Current workspace">
-        <div>
-          <p className="eyebrow">Current workspace</p>
-          <h2>{latest ? 'Decision snapshot' : 'Start with a guided example'}</h2>
-          <p>
-            {latest
-              ? 'Open the audit to trace each decision back to its evidence, checks and review trail.'
-              : 'Load the walkthrough once, then inspect the decisions and the two payout outcomes end to end.'}
-          </p>
-        </div>
-        {latest ? (
-          <Link className="text-link" to={`/runs/${latest.run_id}`}>
-            View latest run <span aria-hidden="true">→</span>
-          </Link>
-        ) : null}
-      </section>
-
-      {runs.loading ? <Loading what="the latest workspace" /> : null}
-      {runs.error ? (
-        <ErrorNotice error={runs.error} onRetry={runs.reload} what="the latest workspace" />
-      ) : null}
-
-      {latest ? (
-        <div className="grid grid--halves">
-          <Panel
-            title="Settlement decisions"
-            note={`Recorded ${formatTimestamp(latest.created_at)}`}
-            actions={
-              <Link className="button button--quiet button--small" to={`/runs/${latest.run_id}`}>
-                Open audit
-              </Link>
-            }
-          >
-            <Stats label="Run summary">
-              <Stat label="Source records" value={formatMinorUnits(latest.fact_count)} />
-              <Stat
-                label="Settlement lines"
-                value={formatMinorUnits(latest.settlement_line_count)}
-              />
-              <Stat label="Supported" value={formatMinorUnits(resolved)} tone="resolved" />
-              <Stat label="Needs attention" value={formatMinorUnits(exceptions)} tone="exception" />
-              <Stat
-                label="Cannot decide yet"
-                value={formatMinorUnits(insufficient)}
-                tone="unknown"
-              />
-            </Stats>
-            <p className="panel__note panel__note--spaced">
-              Baseline {latest.baseline_version} · contract {latest.domain_schema_version} · parser{' '}
-              {latest.parser_version}
-            </p>
-          </Panel>
-
-          <Panel
-            title="Review work"
-            note="The lines the baseline did not resolve, with a human workflow beside—not inside—the decision."
-            actions={
-              <Link
-                className="button button--quiet button--small"
-                to={`/runs/${latest.run_id}/review`}
-              >
-                Open queue
-              </Link>
-            }
-          >
-            {review.loading ? <Loading what="the review queue" /> : null}
-            {review.error ? (
-              <ErrorNotice error={review.error} onRetry={review.reload} what="the review queue" />
-            ) : null}
-            {review.data ? (
-              <>
-                <Stats label="Review queue">
-                  <Stat
-                    label="Needs review"
-                    value={formatMinorUnits(review.data.total)}
-                    tone="exception"
-                  />
-                  <Stat label="Still open" value={formatMinorUnits(review.data.open_total)} />
-                  <Stat
-                    label="Closed without override"
-                    value={formatMinorUnits(review.data.total - review.data.open_total)}
-                  />
-                </Stats>
-                <p className="notice notice--warn baseline-note" role="note">
-                  <strong>Review never changes a decision.</strong>{' '}
-                  {review.data.baseline_unchanged_note}
-                </p>
-              </>
-            ) : null}
-          </Panel>
-        </div>
-      ) : null}
-
-      <Panel title="What each answer means" note="Read the certificate before acting on a line.">
-        <ul className="states">
-          {STATES.map((state) => (
-            <li key={state.name} className="state-card">
-              <span className={`badge badge--${state.tone}`}>
-                <span className="badge__glyph" aria-hidden="true">
-                  {state.glyph}
-                </span>
-                {state.name}
-              </span>
-              <p className="state-card__what">{state.what}</p>
-            </li>
-          ))}
-        </ul>
-      </Panel>
-
-      <Panel
-        title="Recent evidence activity"
-        note="Every import attempt has a receipt, including a refused one."
-        actions={
-          <Link className="button button--quiet button--small" to="/imports">
-            Manage evidence
-          </Link>
-        }
-      >
-        {imports.loading ? <Loading what="import history" /> : null}
-        {imports.error ? (
-          <ErrorNotice error={imports.error} onRetry={imports.reload} what="import history" />
-        ) : null}
-        {!imports.loading && !imports.error && imports.data?.receipts.length === 0 ? (
-          <p className="empty-copy">
-            No evidence has been added yet. Load the walkthrough above or import your own CSV files.
-          </p>
-        ) : null}
-        {imports.data && imports.data.receipts.length > 0 ? (
-          <div className="table-scroll">
-            <table>
-              <caption>
-                The {formatMinorUnits(Math.min(5, imports.data.total))} most recent attempts of{' '}
-                {formatMinorUnits(imports.data.total)}.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Document</th>
-                  <th scope="col">Read as</th>
-                  <th scope="col">Outcome</th>
-                  <th scope="col" className="num">
-                    Stored
-                  </th>
-                  <th scope="col">Received</th>
-                </tr>
-              </thead>
-              <tbody>
-                {imports.data.receipts.map((receipt) => (
-                  <tr key={receipt.receipt_id}>
-                    <td className="mono">{receipt.document_name}</td>
-                    <td>{receipt.source_record_type}</td>
-                    <td>
-                      <OutcomeBadge outcome={receipt.outcome} />
-                    </td>
-                    <td className="num">{formatMinorUnits(receipt.accepted_count)}</td>
-                    <td>{formatTimestamp(receipt.received_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </Panel>
+      {batch ? <BatchResult batch={batch} /> : null}
     </>
   );
 }

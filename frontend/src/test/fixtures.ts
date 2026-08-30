@@ -10,7 +10,7 @@ import type {
   BankFinalityAuditPage,
   BankFinalityCertificate,
   DecisionView,
-  DemoBootstrapResult,
+  DemoBatchResult,
   ImportReceipt,
   ReviewQueueItem,
   ReviewQueuePage,
@@ -351,36 +351,45 @@ export const BANK_AUDIT: BankFinalityAuditPage['audits'][number] = {
   verified_payout_count: 1,
 };
 
-export const DEMO_BOOTSTRAP: DemoBootstrapResult = {
-  fixture_results: [
-    {
-      document_name: 'payment_events.csv',
-      source_record_type: 'PAYMENT_EVENT',
-      outcome: 'ACCEPTED',
-      loaded_now: true,
-    },
+export const DEMO_BATCH: DemoBatchResult = {
+  corpus_name: 'track-04-public-synthetic-batch',
+  seed: 20260701,
+  is_synthetic: true,
+  scenario_count: 59,
+  source_record_count: 180,
+  decision_count: 59,
+  source_documents: [
+    { document_name: 'payment_events.csv', source_record_type: 'PAYMENT_EVENT', record_count: 65 },
     {
       document_name: 'settlement_lines.csv',
       source_record_type: 'SETTLEMENT_LINE',
-      outcome: 'ACCEPTED',
-      loaded_now: true,
+      record_count: 59,
     },
-    {
-      document_name: 'payouts.csv',
-      source_record_type: 'PAYOUT',
-      outcome: 'ACCEPTED',
-      loaded_now: true,
-    },
-    {
-      document_name: 'bank_transactions.csv',
-      source_record_type: 'BANK_TRANSACTION',
-      outcome: 'ACCEPTED',
-      loaded_now: true,
-    },
+    { document_name: 'payouts.csv', source_record_type: 'PAYOUT', record_count: 56 },
   ],
-  run: { ...RUN, fact_count: 11 },
-  bank_finality_audit: BANK_AUDIT,
-  created: true,
+  resolved_count: 32,
+  exception_count: 24,
+  insufficient_evidence_count: 3,
+  auto_match_rate: { numerator: 32, denominator: 59, value: 0.542373 },
+  exception_breakdown: [
+    { code: 'AMOUNT_MISMATCH', finding_count: 12 },
+    { code: 'MISSING_PAYMENT', finding_count: 3 },
+    { code: 'INSUFFICIENT_EVIDENCE', finding_count: 3 },
+    { code: 'CURRENCY_MISMATCH', finding_count: 3 },
+    { code: 'PARTIAL_REFUND', finding_count: 6 },
+    { code: 'OUT_OF_ORDER_EVENT', finding_count: 3 },
+    { code: 'UNSUPPORTED_STATE', finding_count: 3 },
+  ],
+  processing_duration_ms: 412,
+  throughput_lines_per_second: 143.2,
+  contract_agreement: { numerator: 59, denominator: 59, value: 1 },
+  exception_recall: { numerator: 33, denominator: 33, value: 1 },
+  false_resolution_rate: { numerator: 0, denominator: 27, value: 0 },
+  generator_version: '1.0.0',
+  harness_version: '2.0.0',
+  baseline_version: '1.0.0',
+  limitation:
+    'Generated regression corpus only. These numbers do not measure real-merchant performance, production accuracy or a production service level.',
 };
 
 export const BANK_AUDITS: BankFinalityAuditPage = {

@@ -6,32 +6,37 @@ claims about production merchants or hiring outcomes.
 
 ## One-sentence pitch
 
-**Settlement Witness is an evidence-first reconciliation controller that
-resolves a settlement only when its stored source records and required
-invariants support it, preserves every import and review action append-only,
-and keeps AI suggestions outside the decision path.**
+**Settlement Witness is an evidence-first AI finance controller that closes a
+multi-source reconciliation loop across a generated 59-scenario batch: it
+auto-matches supported lines, publishes an honest exception ledger, and keeps
+AI suggestions outside the decision path.**
 
 ## What to show in a three-minute demo
 
 1. **Start with the problem.** Payment, settlement and payout records can
    appear internally consistent while still needing an auditable explanation.
    A green match without its evidence is not enough for a finance operator.
-2. **Load the walkthrough.** On the landing page, choose *Load the interactive
-   demo*. It imports four committed **synthetic** fixture documents server-side,
-   then creates a normal immutable reconciliation run and bank-finality audit.
-   No reviewer file is uploaded. Show the resulting import receipts, including
-   that a repeat opens the same conclusion rather than writing duplicate facts.
-3. **Inspect a run.** Open the decision audit and select an exception. The
-   certificate shows citations, payload hashes, exception codes and each
-   invariant independently.
-4. **Separate operations from truth.** Open the review queue and record an
+2. **Run the Track 04 batch.** On the landing page, choose *Run the 59-case
+   batch*. It generates 59 synthetic payment, settlement and payout scenarios,
+   imports them through the real strict parser into a fresh temporary database,
+   and reconciles them through the real baseline. No reviewer file is uploaded
+   and the shared application database is not changed.
+3. **Read the measures.** Show the throughput, the 32/59 auto-match rate, the
+   full list of 27 lines that did not auto-resolve, the strict contract
+   agreement and the zero false-resolution count. State the limitation on the
+   page: this is a generated regression corpus, not real-merchant or
+   production performance.
+4. **Inspect a run.** Open the decision audit workspace and select an
+   exception. The certificate shows citations, payload hashes, exception codes
+   and each invariant independently.
+5. **Separate operations from truth.** Open the review queue and record an
    acknowledgement or request for evidence. The baseline decision stays the
    same; a human workflow event cannot convert an exception into a resolution.
-5. **Show finality separately.** Explain that provider reconciliation and a
+6. **Show finality separately.** Explain that provider reconciliation and a
    bank showing a credit are different conclusions. A bank finality audit is
    append-only and exact-reference only; it does not guess from amounts or
    dates.
-6. **Explain the AI boundary.** The model can propose opaque record links only
+7. **Explain the AI boundary.** The model can propose opaque record links only
    on a generated shadow corpus. Deterministic validation decides whether a
    proposal is admissible; no model output can create or change evidence,
    decisions, runs, reviews or bank audits.
@@ -77,7 +82,7 @@ decision. That constraint is the design, not an omitted feature.
 
 ## Reviewer setup
 
-For a local run, use `make docker-up`, open <http://127.0.0.1:5173>, and follow
-the walkthrough above. Run `make verify` before recording a demo. For a remote
-reviewer, use the public Vercel preview only for the bundled synthetic
-walkthrough described in [deployment.md](deployment.md).
+For a local run, use `make docker-up`, open <http://127.0.0.1:5173>, and run
+the Track 04 batch above. Run `make verify` before recording a demo. For a
+remote reviewer, use the public Vercel preview only for the generated synthetic
+batch described in [deployment.md](deployment.md).

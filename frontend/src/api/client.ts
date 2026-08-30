@@ -16,7 +16,7 @@ import {
   parseBankFinalityAuditDetail,
   parseBankFinalityAuditPage,
   parseBankFinalityAuditSummary,
-  parseDemoBootstrap,
+  parseDemoBatch,
   parseReceipt,
   parseReceiptPage,
   parseReviewEventReceipt,
@@ -30,7 +30,7 @@ import type {
   BankFinalityAuditCreation,
   BankFinalityAuditDetail,
   BankFinalityAuditPage,
-  DemoBootstrapResult,
+  DemoBatchResult,
   ImportReceipt,
   ImportReceiptPage,
   ReviewAction,
@@ -46,7 +46,7 @@ const IMPORTS = '/v1/imports';
 const RUNS = '/v1/reconciliation/runs';
 const REVIEW = '/v1/review/runs';
 const BANK_FINALITY = '/v1/bank-finality/audits';
-const DEMO_BOOTSTRAP = '/v1/demo/bootstrap';
+const DEMO_BATCH = '/v1/demo/batch';
 
 interface Answer {
   readonly status: number;
@@ -168,15 +168,15 @@ export async function createRun(): Promise<RunCreation> {
 }
 
 /**
- * Prepare the shipped synthetic walkthrough and return its real conclusions.
+ * Run the shipped synthetic Track 04 batch and return its measured result.
  *
- * This is intentionally a body-less request: a reviewer cannot accidentally
- * send a local file through the public demo button. Their own CSVs still go
- * through the explicit import screen.
+ * It is intentionally a GET: the batch is evaluated in a fresh temporary
+ * database, so a reviewer cannot accidentally send a local file or add shared
+ * records through the public demo button.
  */
-export async function bootstrapDemo(): Promise<DemoBootstrapResult> {
-  const { body } = await send(DEMO_BOOTSTRAP, { method: 'POST' });
-  return parseDemoBootstrap(body);
+export async function runDemoBatch(): Promise<DemoBatchResult> {
+  const { body } = await send(DEMO_BATCH);
+  return parseDemoBatch(body);
 }
 
 export interface DecisionFilters {
