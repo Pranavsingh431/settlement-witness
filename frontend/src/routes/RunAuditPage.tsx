@@ -80,15 +80,16 @@ export function RunAuditPage() {
 
   return (
     <>
-      <div className="page__head">
+      <section className="audit-hero" aria-labelledby="audit-title">
         <div>
-          <h1>Run audit</h1>
-          <p className="page__lede">
+          <p className="eyebrow">Recorded reconciliation snapshot</p>
+          <h1 id="audit-title">Run audit</h1>
+          <p>
             Every settlement line this run judged, with the evidence it cited and the invariants it
             checked.
           </p>
         </div>
-        <div className="form-row">
+        <div className="audit-hero__actions">
           <Link className="button button--quiet button--small" to={`/runs/${runId}/review`}>
             Review queue
           </Link>
@@ -96,12 +97,17 @@ export function RunAuditPage() {
             All runs
           </Link>
         </div>
-      </div>
+      </section>
 
-      <Panel
-        title="Run metadata"
-        note="These counts describe the whole run, never a filtered view."
-      >
+      <section className="audit-overview" aria-labelledby="audit-overview-title">
+        <header className="section-heading section-heading--compact">
+          <div>
+            <p className="eyebrow">Whole-run summary</p>
+            <h2 id="audit-overview-title">What this snapshot concluded</h2>
+            <p>These counts describe the whole run, never a filtered view.</p>
+          </div>
+          <span className="section-heading__meta">Immutable record</span>
+        </header>
         <Stats label="Run summary">
           <Stat label="Source facts" value={formatMinorUnits(run.fact_count)} />
           <Stat label="Settlement lines" value={formatMinorUnits(run.settlement_line_count)} />
@@ -133,18 +139,27 @@ export function RunAuditPage() {
             ['Recorded at', formatTimestamp(run.created_at)],
           ]}
         />
-      </Panel>
+      </section>
 
-      <div className="grid grid--audit">
-        <Panel
-          title="Decisions"
-          note={
-            detail.data?.filtered
-              ? 'Filtered. The counts above still describe the whole run.'
-              : 'Every decision in this run.'
-          }
-        >
-          <div className="toolbar" style={{ marginBottom: 14 }}>
+      <div className="audit-workspace">
+        <section className="decision-navigator" aria-labelledby="decision-ledger-title">
+          <header className="section-heading section-heading--compact">
+            <div>
+              <p className="eyebrow">Decision ledger</p>
+              <h2 id="decision-ledger-title">Choose a settlement line</h2>
+              <p>
+                {detail.data?.filtered
+                  ? 'Filtered. The counts above still describe the whole run.'
+                  : 'Every decision in this run.'}
+              </p>
+            </div>
+            {selected ? (
+              <span className="section-heading__meta">
+                Reading <span className="mono">{selected.subject_settlement_line_id}</span>
+              </span>
+            ) : null}
+          </header>
+          <div className="ledger-filters ledger-filters--audit" aria-label="Decision filters">
             <div className="field">
               <label className="field__label" htmlFor="decision-status">
                 Status
@@ -185,6 +200,18 @@ export function RunAuditPage() {
                 ))}
               </select>
             </div>
+            <button
+              type="button"
+              className="button button--quiet button--small"
+              disabled={status === '' && exceptionCode === ''}
+              onClick={() => {
+                setStatus('');
+                setExceptionCode('');
+                setSelectedId(null);
+              }}
+            >
+              Clear filters
+            </button>
           </div>
 
           {detail.loading ? <Loading what="decisions" /> : null}
@@ -262,7 +289,7 @@ export function RunAuditPage() {
               </table>
             </div>
           ) : null}
-        </Panel>
+        </section>
 
         <Panel title="Certificate" note="Why this line was decided the way it was.">
           {selected ? (

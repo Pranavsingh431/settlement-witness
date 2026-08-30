@@ -17,7 +17,7 @@ import { ApiError, describeError } from '../api/errors';
 import type { RunCreation } from '../api/types';
 import { formatMinorUnits, formatTimestamp, shortHash } from '../format';
 import { useLoad } from '../hooks';
-import { EmptyState, ErrorNotice, Loading, Panel } from '../components/ui';
+import { EmptyState, ErrorNotice, Loading } from '../components/ui';
 
 export function RunsPage() {
   const [creating, setCreating] = useState(false);
@@ -49,26 +49,31 @@ export function RunsPage() {
 
   return (
     <>
-      <div className="page__head">
+      <section className="operations-hero operations-hero--audits" aria-labelledby="audits-title">
         <div>
-          <h1>Reconciliation runs</h1>
-          <p className="page__lede">
-            A run reconciles every stored source fact and records what it concluded. Runs are
-            immutable: new evidence produces a new run beside the old one rather than changing it.
+          <p className="eyebrow">Reconciliation workspace</p>
+          <h1 id="audits-title">Turn evidence into an audit.</h1>
+          <p>
+            Reconcile the stored facts once, record the conclusion immutably, then inspect every
+            line and the evidence behind it. New evidence creates a new audit; it never edits an old
+            one.
           </p>
         </div>
-        <button
-          type="button"
-          className="button"
-          disabled={creating}
-          onClick={() => {
-            // Async handler, nothing to return to the DOM.
-            void reconcile();
-          }}
-        >
-          {creating ? 'Reconciling…' : 'Reconcile stored facts'}
-        </button>
-      </div>
+        <div className="operations-hero__action">
+          <button
+            type="button"
+            className="button"
+            disabled={creating}
+            onClick={() => {
+              // Async handler, nothing to return to the DOM.
+              void reconcile();
+            }}
+          >
+            {creating ? 'Reconciling…' : 'Reconcile stored facts'}
+          </button>
+          <p>Uses stored facts only. It never invents a match.</p>
+        </div>
+      </section>
 
       <div aria-live="polite">
         {result ? (
@@ -107,7 +112,15 @@ export function RunsPage() {
         ) : null}
       </div>
 
-      <Panel title="Recorded runs" note="Newest first.">
+      <section className="operations-ledger" aria-labelledby="recorded-runs-title">
+        <header className="section-heading">
+          <div>
+            <p className="eyebrow">Immutable audit history</p>
+            <h2 id="recorded-runs-title">Recorded runs</h2>
+            <p>Newest first. Open one to inspect its decision ledger and certificates.</p>
+          </div>
+          <span className="section-heading__meta">A repeat returns the existing snapshot</span>
+        </header>
         {runs.loading ? <Loading what="runs" /> : null}
         {runs.error ? <ErrorNotice error={runs.error} onRetry={runs.reload} what="runs" /> : null}
 
@@ -179,7 +192,7 @@ export function RunsPage() {
             </table>
           </div>
         ) : null}
-      </Panel>
+      </section>
     </>
   );
 }

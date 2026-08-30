@@ -432,7 +432,7 @@ describe('bank finality', () => {
     await userEvent.click(await screen.findByRole('button', { name: /audit bank finality/i }));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(/run metadata/i)).toBeInTheDocument();
+    expect(screen.getByText(/what this snapshot concluded/i)).toBeInTheDocument();
   });
 
   it('says the two conclusions are separate, above the outcomes', async () => {

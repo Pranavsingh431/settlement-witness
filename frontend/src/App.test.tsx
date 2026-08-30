@@ -78,14 +78,16 @@ describe('routing', () => {
   it('shows the import screen', async () => {
     renderScreen(<App />, '/imports');
 
-    expect(await screen.findByRole('heading', { name: /import evidence/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: /add evidence\. keep the receipt/i }),
+    ).toBeInTheDocument();
   });
 
   it('shows the runs screen', async () => {
     renderScreen(<App />, '/runs');
 
     expect(
-      await screen.findByRole('heading', { name: /reconciliation runs/i }),
+      await screen.findByRole('heading', { name: /turn evidence into an audit/i }),
     ).toBeInTheDocument();
   });
 

@@ -18,7 +18,7 @@ import type { ImportReceipt } from '../api/types';
 import { formatMinorUnits, formatTimestamp, humanise } from '../format';
 import { useLoad } from '../hooks';
 import { ReceiptView } from '../components/ReceiptView';
-import { EmptyState, ErrorNotice, Loading, OutcomeBadge, Panel } from '../components/ui';
+import { EmptyState, ErrorNotice, Loading, OutcomeBadge } from '../components/ui';
 
 const PAGE_SIZE = 10;
 
@@ -97,145 +97,174 @@ export function ImportsPage() {
 
   return (
     <>
-      <div className="page__head">
+      <section
+        className="operations-hero operations-hero--evidence"
+        aria-labelledby="evidence-title"
+      >
         <div>
-          <h1>Import evidence</h1>
-          <p className="page__lede">
-            Every attempt leaves a receipt, whether the document was taken or refused. A refused
-            document writes no facts and its receipt is kept, because what was tried is part of the
-            record.
+          <p className="eyebrow">Evidence intake</p>
+          <h1 id="evidence-title">Add evidence. Keep the receipt.</h1>
+          <p>
+            Declare where a CSV came from and what it represents. The importer checks that claim,
+            writes immutable facts only when it can, and records the outcome either way.
           </p>
         </div>
-      </div>
+        <ol className="operations-path" aria-label="Evidence intake steps">
+          <li>
+            <span>01</span>
+            <div>
+              <strong>Declare the source</strong>
+              <small>System and record type are never guessed.</small>
+            </div>
+          </li>
+          <li>
+            <span>02</span>
+            <div>
+              <strong>Read the receipt</strong>
+              <small>Accepted, replayed or refused—every attempt is explicit.</small>
+            </div>
+          </li>
+        </ol>
+      </section>
 
-      <Panel
-        title="Upload a CSV document"
-        note="The three demo documents live in data/fixtures/ingestion."
-      >
-        <form
-          noValidate
-          onSubmit={(event) => {
-            // The handler is async and the DOM wants nothing back, so the
-            // promise is discarded on purpose rather than by omission.
-            void submit(event);
-          }}
-        >
-          <div
-            className={`dropzone${dragging ? ' is-over' : ''}`}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => {
-              setDragging(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              chooseFile(event.dataTransfer.files[0] ?? null);
+      <section className="evidence-intake" aria-labelledby="upload-title">
+        <header className="section-heading">
+          <div>
+            <p className="eyebrow">Step 1 · source document</p>
+            <h2 id="upload-title">Add one CSV document</h2>
+            <p>
+              The three local sample files live in{' '}
+              <span className="mono">data/fixtures/ingestion</span>.
+            </p>
+          </div>
+          <span className="section-heading__meta">Receipt recorded on every attempt</span>
+        </header>
+        <div className="evidence-intake__body">
+          <form
+            noValidate
+            onSubmit={(event) => {
+              // The handler is async and the DOM wants nothing back, so the
+              // promise is discarded on purpose rather than by omission.
+              void submit(event);
             }}
           >
-            <div className="field">
-              <label className="field__label" htmlFor={fileId}>
-                CSV document
-              </label>
-              <input
-                id={fileId}
-                ref={fileInput}
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(event) => {
-                  chooseFile(event.target.files?.[0] ?? null);
-                }}
-              />
-              <p className="field__hint">
-                Drop a file here or choose one. The server checks the headers against the record
-                type you declare below; nothing is guessed from the file name.
-              </p>
-            </div>
-          </div>
-
-          <div className="form-row" style={{ marginTop: 16 }}>
-            <div className="field">
-              <label className="field__label" htmlFor={systemId}>
-                Declared source system
-              </label>
-              <select
-                id={systemId}
-                value={sourceSystem}
-                onChange={(event) => {
-                  setSourceSystem(event.target.value);
-                }}
-              >
-                {SOURCE_SYSTEMS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <p className="field__hint">
-                Where the document came from. Never inferred: a file read as the wrong system would
-                import cleanly and be wrong.
-              </p>
+            <div
+              className={`dropzone${dragging ? ' is-over' : ''}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => {
+                setDragging(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                chooseFile(event.dataTransfer.files[0] ?? null);
+              }}
+            >
+              <div className="field">
+                <label className="field__label" htmlFor={fileId}>
+                  CSV document
+                </label>
+                <input
+                  id={fileId}
+                  ref={fileInput}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(event) => {
+                    chooseFile(event.target.files?.[0] ?? null);
+                  }}
+                />
+                <p className="field__hint">
+                  Drop a file here or choose one. The server checks the headers against the record
+                  type you declare below; nothing is guessed from the file name.
+                </p>
+              </div>
             </div>
 
-            <div className="field">
-              <label className="field__label" htmlFor={typeId}>
-                Declared record type
-              </label>
-              <select
-                id={typeId}
-                value={recordType}
-                onChange={(event) => {
-                  setRecordType(event.target.value);
-                }}
-              >
-                {IMPORTABLE_RECORD_TYPES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <p className="field__hint">
-                Which schema to read it as. Never inferred from the headers.
-              </p>
+            <div className="form-row evidence-intake__fields">
+              <div className="field">
+                <label className="field__label" htmlFor={systemId}>
+                  Declared source system
+                </label>
+                <select
+                  id={systemId}
+                  value={sourceSystem}
+                  onChange={(event) => {
+                    setSourceSystem(event.target.value);
+                  }}
+                >
+                  {SOURCE_SYSTEMS.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <p className="field__hint">
+                  Where the document came from. Never inferred: a file read as the wrong system
+                  would import cleanly and be wrong.
+                </p>
+              </div>
+
+              <div className="field">
+                <label className="field__label" htmlFor={typeId}>
+                  Declared record type
+                </label>
+                <select
+                  id={typeId}
+                  value={recordType}
+                  onChange={(event) => {
+                    setRecordType(event.target.value);
+                  }}
+                >
+                  {IMPORTABLE_RECORD_TYPES.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <p className="field__hint">
+                  Which schema to read it as. Never inferred from the headers.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="toolbar" style={{ marginTop: 16 }}>
-            <button type="submit" className="button" disabled={file === null || uploading}>
-              {uploading ? 'Importing…' : 'Import document'}
-            </button>
-            {file ? (
-              <span className="panel__note">
-                <span className="mono">{file.name}</span> selected
-              </span>
-            ) : (
-              <span className="panel__note">Choose a file to enable importing.</span>
-            )}
-          </div>
-        </form>
+            <div className="toolbar evidence-intake__actions">
+              <button type="submit" className="button" disabled={file === null || uploading}>
+                {uploading ? 'Importing…' : 'Import document'}
+              </button>
+              {file ? (
+                <span className="panel__note">
+                  <span className="mono">{file.name}</span> selected
+                </span>
+              ) : (
+                <span className="panel__note">Choose a file to enable importing.</span>
+              )}
+            </div>
+          </form>
 
-        <table style={{ marginTop: 20 }}>
-          <caption>The three documents this demo expects.</caption>
-          <thead>
-            <tr>
-              <th scope="col">Record type</th>
-              <th scope="col">File</th>
-              <th scope="col">Holds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {EXPECTED_FILES.map((row) => (
-              <tr key={row.type}>
-                <td className="mono">{row.type}</td>
-                <td className="mono">{row.file}</td>
-                <td>{row.what}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
+          <aside className="source-guide" aria-label="Local sample files">
+            <p className="source-guide__eyebrow">Local sample set</p>
+            <h3>Start with these sources</h3>
+            <ol>
+              {EXPECTED_FILES.map((row) => (
+                <li key={row.type}>
+                  <span className="source-guide__number" aria-hidden="true">
+                    {EXPECTED_FILES.indexOf(row) + 1}
+                  </span>
+                  <div>
+                    <strong className="mono">{row.file}</strong>
+                    <span>
+                      <span className="mono">{row.type}</span> · {row.what}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </aside>
+        </div>
+      </section>
 
       <div aria-live="polite">
         {uploading ? (
@@ -252,17 +281,30 @@ export function ImportsPage() {
           </div>
         ) : null}
         {receipt ? (
-          <Panel title="Receipt" note="What the server recorded for this attempt.">
+          <section className="receipt-stage" aria-labelledby="receipt-title">
+            <header className="section-heading section-heading--compact">
+              <div>
+                <p className="eyebrow">Step 2 · import receipt</p>
+                <h2 id="receipt-title">What the server recorded</h2>
+              </div>
+              <span className="section-heading__meta">
+                This is the audit record for this attempt
+              </span>
+            </header>
             <ReceiptView receipt={receipt} />
-          </Panel>
+          </section>
         ) : null}
       </div>
 
-      <Panel
-        title="Import history"
-        note="Newest attempt first, in the order the attempts were made."
-      >
-        <div className="toolbar" style={{ marginBottom: 16 }}>
+      <section className="operations-ledger" aria-labelledby="import-history-title">
+        <header className="section-heading">
+          <div>
+            <p className="eyebrow">Evidence ledger</p>
+            <h2 id="import-history-title">Import history</h2>
+            <p>Newest attempt first, in the order the attempts were made.</p>
+          </div>
+        </header>
+        <div className="ledger-filters" aria-label="Import history filters">
           <div className="field">
             <label className="field__label" htmlFor="filter-outcome">
               Outcome
@@ -381,7 +423,7 @@ export function ImportsPage() {
                 </tbody>
               </table>
             </div>
-            <div className="toolbar" style={{ marginTop: 14 }}>
+            <div className="toolbar ledger-pagination">
               <button
                 type="button"
                 className="button button--quiet button--small"
@@ -408,7 +450,7 @@ export function ImportsPage() {
             </div>
           </>
         ) : null}
-      </Panel>
+      </section>
     </>
   );
 }
