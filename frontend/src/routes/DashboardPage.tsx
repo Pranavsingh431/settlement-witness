@@ -8,27 +8,6 @@ import { describeError } from '../api/errors';
 import type { DemoBatchResult, MeasuredRate } from '../api/types';
 import { formatMinorUnits, humanise } from '../format';
 
-const OPERATOR_ACTIONS: Readonly<Record<string, string>> = {
-  AMOUNT_MISMATCH: 'Compare the capture, settlement gross and payout total before release.',
-  CURRENCY_MISMATCH:
-    'Confirm the source currency and whether an explicit conversion record exists.',
-  DUPLICATE_CONFLICT: 'Quarantine the duplicate identity and compare the conflicting payloads.',
-  FEE_MISMATCH: 'Compare fee and tax components with the provider fee schedule.',
-  INSUFFICIENT_EVIDENCE: 'Request the missing source document before making a decision.',
-  MALFORMED_RECORD: 'Correct the source export and submit the whole document again.',
-  MISSING_PAYMENT: 'Request the payment event export referenced by the settlement line.',
-  MISSING_SETTLEMENT: 'Request the settlement export or confirm that the expected window is open.',
-  OUT_OF_ORDER_EVENT: 'Verify provider timestamps and the payment lifecycle sequence.',
-  PARTIAL_REFUND: 'Account for the remaining captured balance before closing the line.',
-  TIMING_PENDING: 'Keep the line open until the settlement window expires or evidence arrives.',
-  UNMAPPED_REFERENCE: 'Resolve the provider reference against an authoritative source record.',
-  UNSUPPORTED_STATE: 'Escalate the lifecycle state without overriding the evidence-backed result.',
-};
-
-function operatorAction(code: string): string {
-  return OPERATOR_ACTIONS[code] ?? 'Inspect the cited records and request authoritative evidence.';
-}
-
 function percentage(rate: MeasuredRate): string {
   return rate.value === null ? '—' : `${(rate.value * 100).toFixed(1)}%`;
 }
@@ -38,10 +17,11 @@ function BatchHero({ loading, onRun }: { loading: boolean; onRun: () => void }) 
     <section className="track-hero" aria-labelledby="track-title">
       <div className="track-hero__copy">
         <p className="eyebrow eyebrow--on-blue">Track 04 · AI Finance Controller</p>
-        <h1 id="track-title">Close the batch. Surface what doesn&apos;t reconcile.</h1>
+        <h1 id="track-title">Close the batch. Prove the next move.</h1>
         <p>
           A 59-case synthetic payment batch runs through the same strict importer, evidence verifier
-          and reconciliation baseline as the product—not a hand-picked match.
+          and reconciliation baseline as the product. Every unresolved line leaves with an owner, an
+          evidence request and a closure gate—not just a flag.
         </p>
         <div className="track-hero__actions">
           <button className="button button--light" type="button" disabled={loading} onClick={onRun}>
@@ -81,8 +61,8 @@ function BatchHero({ loading, onRun }: { loading: boolean; onRun: () => void }) 
           <li>
             <span>04</span>
             <div>
-              <strong>Decision ledger</strong>
-              <small>matches, exceptions and missing evidence</small>
+              <strong>Evidence-to-closure plan</strong>
+              <small>owners, next actions and proof required</small>
             </div>
           </li>
           <li>
@@ -141,7 +121,7 @@ function BatchResult({ batch }: { batch: DemoBatchResult }) {
       <header className="batch-result__head">
         <div>
           <p className="eyebrow">Batch result</p>
-          <h2>The controller finished every line—and kept the hard ones open.</h2>
+          <h2>The controller finished every line—and assigned the next proof.</h2>
           <p>
             {formatMinorUnits(batch.decision_count)} settlement decisions from{' '}
             {formatMinorUnits(batch.source_record_count)} synthetic source records in{' '}
@@ -200,7 +180,19 @@ function BatchResult({ batch }: { batch: DemoBatchResult }) {
                   <span>{humanise(exception.code)}</span>
                   <strong>{formatMinorUnits(exception.finding_count)}</strong>
                 </div>
-                <p>{operatorAction(exception.code)}</p>
+                <p>{exception.next_action}</p>
+                <div className="exception-ledger__route">
+                  <span>{humanise(exception.owner_lane)}</span>
+                  <span>
+                    {exception.supported_by_current_contract
+                      ? "Works with today's evidence"
+                      : 'Needs finance-control review'}
+                  </span>
+                </div>
+                <details>
+                  <summary>What would close this safely?</summary>
+                  <p>{exception.proof_required}</p>
+                </details>
               </li>
             ))}
           </ul>
@@ -246,8 +238,8 @@ function BatchResult({ batch }: { batch: DemoBatchResult }) {
           <li>
             <span>3</span>
             <div>
-              <strong>Act on the exceptions</strong>
-              <small>Acknowledge, request evidence or escalate without override</small>
+              <strong>Move each finding toward proof</strong>
+              <small>Route the owner, request evidence and keep the closure gate intact</small>
             </div>
           </li>
         </ol>

@@ -24,7 +24,9 @@ describe('the Track 04 landing page', () => {
     renderScreen(<DashboardPage />);
 
     expect(screen.getByText(/track 04.*ai finance controller/i)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /close the batch/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /close the batch\. prove the next move/i }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run the 59-case batch/i })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: /track 04 fit/i })).toHaveTextContent(/50\+/);
     expect(screen.getByText(/bank credit finality/i)).toBeInTheDocument();
@@ -44,7 +46,10 @@ describe('the Track 04 landing page', () => {
     expect(result).toHaveTextContent(/54\.2%/i);
     expect(result).toHaveTextContent(/27 lines did not auto-resolve/i);
     expect(result).toHaveTextContent(/amount mismatch/i);
-    expect(result).toHaveTextContent(/compare the capture, settlement gross and payout total/i);
+    expect(result).toHaveTextContent(/compare capture gross, settlement gross, deductions/i);
+    expect(result).toHaveTextContent(/psp operations/i);
+    expect(result).toHaveTextContent(/what would close this safely/i);
+    expect(result).toHaveTextContent(/authoritative correction or adjustment record/i);
     expect(result).toHaveTextContent(/contract agreement: 59 \/ 59/i);
     expect(result).toHaveTextContent(/false resolutions: 0 \/ 27/i);
     expect(result).toHaveTextContent(/not a production-accuracy claim/i);
@@ -60,7 +65,7 @@ describe('the Track 04 landing page', () => {
     const workflow = await screen.findByRole('region', { name: /run the same sources/i });
     expect(workflow).toHaveTextContent(/236 rows across provider and bank sources/i);
     expect(workflow).toHaveTextContent(/59 settlement decisions/i);
-    expect(workflow).toHaveTextContent(/request evidence or escalate without override/i);
+    expect(workflow).toHaveTextContent(/request evidence and keep the closure gate intact/i);
     expect(within(workflow).getByRole('link', { name: /open evidence intake/i })).toHaveAttribute(
       'href',
       '/imports',

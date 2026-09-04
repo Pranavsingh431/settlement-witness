@@ -42,6 +42,13 @@ class TestTrack04DemoBatch:
             "MISSING_PAYMENT",
             "INSUFFICIENT_EVIDENCE",
         }
+        assert all(item["owner_lane"] for item in payload["exception_breakdown"])
+        assert all(item["next_action"] for item in payload["exception_breakdown"])
+        assert all(item["proof_required"] for item in payload["exception_breakdown"])
+        assert any(item["supported_by_current_contract"] for item in payload["exception_breakdown"])
+        assert any(
+            not item["supported_by_current_contract"] for item in payload["exception_breakdown"]
+        )
         assert "not measure real-merchant performance" in payload["limitation"]
 
     def test_repeating_the_batch_writes_nothing_to_the_application_database(

@@ -17,6 +17,9 @@ import type {
   RunSummary,
 } from '../api/types';
 
+const NEW_RUN_GATE =
+  'Import authoritative evidence and create a new reconciliation run. Close only when that new decision is RESOLVED, every citation verifies, and every required invariant holds.';
+
 export const RUN: RunSummary = {
   run_id: 'fd0c9443bb7e4e5fb4eee88a79b6dc74',
   snapshot_fingerprint: '7092df18a31c4b93aa1f0d0e5f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c',
@@ -67,6 +70,18 @@ export const RESOLVED_DECISION: DecisionView = {
   reason_codes: ['ALL_REQUIRED_INVARIANTS_PASSED'],
   created_at: '2026-08-24T12:00:00Z',
   verified_evidence_count: 1,
+  closure_plan: {
+    plan_version: '1.0.0',
+    baseline_status: 'RESOLVED',
+    disposition: 'NO_ACTION',
+    primary_owner: 'NONE',
+    headline: 'No finance-ops follow-up is required for this decision.',
+    blocking_codes: [],
+    actions: [],
+    requires_new_run: false,
+    resolution_gate:
+      'Already resolved by the recorded certificate. Later evidence creates a new run; it never edits this one.',
+  },
 };
 
 export const EXCEPTION_DECISION: DecisionView = {
@@ -97,6 +112,27 @@ export const EXCEPTION_DECISION: DecisionView = {
   reason_codes: ['EXCEPTION_CODE_REPORTED'],
   created_at: '2026-08-24T12:00:00Z',
   verified_evidence_count: 1,
+  closure_plan: {
+    plan_version: '1.0.0',
+    baseline_status: 'EXCEPTION',
+    disposition: 'ESCALATE',
+    primary_owner: 'FINANCE_CONTROL',
+    headline: 'Account for the residual balance',
+    blocking_codes: ['PARTIAL_REFUND'],
+    actions: [
+      {
+        action_code: 'PARTIAL_REFUND',
+        owner_lane: 'FINANCE_CONTROL',
+        title: 'Account for the residual balance',
+        instruction: 'Explain the portion of the capture that remains after the recorded refund.',
+        evidence_required:
+          'A supported adjustment or terminal lifecycle record accounting for the remaining balance.',
+        supported_by_current_contract: false,
+      },
+    ],
+    requires_new_run: true,
+    resolution_gate: NEW_RUN_GATE,
+  },
 };
 
 export const INSUFFICIENT_DECISION: DecisionView = {
@@ -127,6 +163,27 @@ export const INSUFFICIENT_DECISION: DecisionView = {
   reason_codes: ['EVIDENCE_FACT_NOT_FOUND'],
   created_at: '2026-08-24T12:00:00Z',
   verified_evidence_count: 0,
+  closure_plan: {
+    plan_version: '1.0.0',
+    baseline_status: 'INSUFFICIENT_EVIDENCE',
+    disposition: 'COLLECT_EVIDENCE',
+    primary_owner: 'EVIDENCE_OPERATIONS',
+    headline: 'Request the missing evidence',
+    blocking_codes: ['INSUFFICIENT_EVIDENCE'],
+    actions: [
+      {
+        action_code: 'INSUFFICIENT_EVIDENCE',
+        owner_lane: 'EVIDENCE_OPERATIONS',
+        title: 'Request the missing evidence',
+        instruction:
+          'Read the certificate, identify each unverified citation or unrun invariant, and request it.',
+        evidence_required: 'All cited facts present and every required invariant evaluable.',
+        supported_by_current_contract: true,
+      },
+    ],
+    requires_new_run: true,
+    resolution_gate: NEW_RUN_GATE,
+  },
 };
 
 export const ACCEPTED_RECEIPT: ImportReceipt = {
@@ -372,13 +429,69 @@ export const DEMO_BATCH: DemoBatchResult = {
   insufficient_evidence_count: 3,
   auto_match_rate: { numerator: 32, denominator: 59, value: 0.542373 },
   exception_breakdown: [
-    { code: 'AMOUNT_MISMATCH', finding_count: 12 },
-    { code: 'MISSING_PAYMENT', finding_count: 3 },
-    { code: 'INSUFFICIENT_EVIDENCE', finding_count: 3 },
-    { code: 'CURRENCY_MISMATCH', finding_count: 3 },
-    { code: 'PARTIAL_REFUND', finding_count: 6 },
-    { code: 'OUT_OF_ORDER_EVENT', finding_count: 3 },
-    { code: 'UNSUPPORTED_STATE', finding_count: 3 },
+    {
+      code: 'AMOUNT_MISMATCH',
+      finding_count: 12,
+      owner_lane: 'PSP_OPERATIONS',
+      next_action:
+        'Compare capture gross, settlement gross, deductions, and payout total at the source.',
+      proof_required:
+        'An authoritative correction or adjustment record that makes every amount invariant hold.',
+      supported_by_current_contract: false,
+    },
+    {
+      code: 'MISSING_PAYMENT',
+      finding_count: 3,
+      owner_lane: 'EVIDENCE_OPERATIONS',
+      next_action: 'Request the provider payment-event export referenced by this settlement line.',
+      proof_required: 'At least one valid PAYMENT_EVENT linked by the exact payment ID.',
+      supported_by_current_contract: true,
+    },
+    {
+      code: 'INSUFFICIENT_EVIDENCE',
+      finding_count: 3,
+      owner_lane: 'EVIDENCE_OPERATIONS',
+      next_action:
+        'Read the certificate, identify each unverified citation or unrun invariant, and request it.',
+      proof_required: 'All cited facts present and every required invariant evaluable.',
+      supported_by_current_contract: true,
+    },
+    {
+      code: 'CURRENCY_MISMATCH',
+      finding_count: 3,
+      owner_lane: 'FINANCE_CONTROL',
+      next_action: 'Confirm the source currency and whether an authorised conversion occurred.',
+      proof_required: 'A supported FX or conversion record linking both currencies and amounts.',
+      supported_by_current_contract: false,
+    },
+    {
+      code: 'PARTIAL_REFUND',
+      finding_count: 6,
+      owner_lane: 'FINANCE_CONTROL',
+      next_action: 'Explain the portion of the capture that remains after the recorded refund.',
+      proof_required:
+        'A supported adjustment or terminal lifecycle record accounting for the remaining balance.',
+      supported_by_current_contract: false,
+    },
+    {
+      code: 'OUT_OF_ORDER_EVENT',
+      finding_count: 3,
+      owner_lane: 'PSP_OPERATIONS',
+      next_action: 'Check provider occurrence timestamps and the capture-to-return sequence.',
+      proof_required:
+        'Authoritative lifecycle evidence whose temporal order satisfies the contract.',
+      supported_by_current_contract: false,
+    },
+    {
+      code: 'UNSUPPORTED_STATE',
+      finding_count: 3,
+      owner_lane: 'FINANCE_CONTROL',
+      next_action:
+        'Record the case for policy review without forcing it into a nearby supported state.',
+      proof_required:
+        'A reviewed contract extension with fixtures and invariants for this lifecycle shape.',
+      supported_by_current_contract: false,
+    },
   ],
   processing_duration_ms: 412,
   throughput_lines_per_second: 143.2,

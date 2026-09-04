@@ -103,6 +103,64 @@ function EvidenceRow({ reference }: { reference: EvidenceReference }) {
   );
 }
 
+function ClosurePlanCard({ decision }: { decision: DecisionView }) {
+  const plan = decision.closure_plan;
+  const resolved = plan.disposition === 'NO_ACTION';
+
+  return (
+    <section
+      className={`closure-plan${resolved ? ' closure-plan--clear' : ''}`}
+      aria-labelledby={`closure-plan-${decision.decision_id}`}
+    >
+      <header className="closure-plan__head">
+        <div>
+          <p className="eyebrow">Evidence-to-closure plan</p>
+          <h3 id={`closure-plan-${decision.decision_id}`}>
+            {resolved ? plan.headline : 'What has to happen next'}
+          </h3>
+        </div>
+        <span className="closure-plan__owner">
+          {resolved ? 'No owner needed' : humanise(plan.primary_owner)}
+        </span>
+      </header>
+
+      {plan.actions.length > 0 ? (
+        <ol className="closure-plan__actions">
+          {plan.actions.map((action) => (
+            <li key={action.action_code}>
+              <div className="closure-plan__action-head">
+                <strong>{action.title}</strong>
+                <span
+                  className={
+                    action.supported_by_current_contract
+                      ? 'closure-plan__capability closure-plan__capability--ready'
+                      : 'closure-plan__capability'
+                  }
+                >
+                  {action.supported_by_current_contract
+                    ? 'Can be verified today'
+                    : 'Needs a new evidence rule'}
+                </span>
+              </div>
+              <p>{action.instruction}</p>
+              <p className="closure-plan__proof">
+                <strong>Proof required:</strong> {action.evidence_required}
+              </p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="closure-plan__clear-copy">The recorded certificate already passed.</p>
+      )}
+
+      <div className="closure-plan__gate">
+        <strong>{plan.requires_new_run ? 'Closure gate' : 'Evidence rule'}</strong>
+        <span>{plan.resolution_gate}</span>
+      </div>
+    </section>
+  );
+}
+
 export function DecisionCertificate({ decision }: { decision: DecisionView }) {
   const unmet = decision.invariant_results.filter(
     (check) => check.outcome === 'FAILED' || check.outcome === 'INSUFFICIENT_INPUT',
@@ -136,6 +194,8 @@ export function DecisionCertificate({ decision }: { decision: DecisionView }) {
           {headline}
         </p>
       </div>
+
+      <ClosurePlanCard decision={decision} />
 
       <Facts
         items={[

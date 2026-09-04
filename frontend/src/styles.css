@@ -529,6 +529,138 @@ code,
   line-height: 1.4;
 }
 
+.exception-ledger li > .exception-ledger__route {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.exception-ledger__route span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #edf3fa;
+  color: #385675;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.exception-ledger details {
+  margin-top: 8px;
+  font-size: 0.74rem;
+}
+
+.exception-ledger summary {
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.exception-ledger details p {
+  margin-top: 5px;
+  padding-left: 9px;
+  border-left: 2px solid #c7d8eb;
+}
+
+.closure-plan {
+  overflow: hidden;
+  border: 1px solid #c9d8e8;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f5f9fd 0%, #fff 65%);
+}
+
+.closure-plan--clear {
+  border-color: #b8d8c8;
+  background: #f5faf7;
+}
+
+.closure-plan__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 16px;
+  border-bottom: 1px solid #dce6f0;
+}
+
+.closure-plan__head h3 {
+  margin-top: 3px;
+  font-size: 1rem;
+}
+
+.closure-plan__owner,
+.closure-plan__capability {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f7e9dc;
+  color: #7b4414;
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.closure-plan__actions {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.closure-plan__actions li {
+  padding: 14px 16px;
+  border-top: 1px solid #e3ebf3;
+}
+
+.closure-plan__actions li:first-child {
+  border-top: 0;
+}
+
+.closure-plan__action-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.closure-plan__actions p,
+.closure-plan__clear-copy {
+  margin-top: 6px;
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.closure-plan__actions p.closure-plan__proof {
+  color: var(--ink);
+}
+
+.closure-plan__capability--ready {
+  background: var(--resolved-soft);
+  color: var(--resolved);
+}
+
+.closure-plan__clear-copy {
+  margin: 0;
+  padding: 13px 16px;
+}
+
+.closure-plan__gate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 11px 16px;
+  border-top: 1px solid #dce6f0;
+  background: #eef4fa;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.closure-plan--clear .closure-plan__gate {
+  background: #eaf5ef;
+}
+
 .batch-result__footer {
   display: grid;
   gap: 6px;

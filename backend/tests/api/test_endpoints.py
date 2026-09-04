@@ -162,6 +162,22 @@ class TestReadingOneRun:
             "INV-004",
             "INV-009",
         }
+        assert decision["closure_plan"]["baseline_status"] == decision["status"]
+        assert decision["closure_plan"]["plan_version"] == "1.0.0"
+
+    def test_an_exception_carries_functional_recourse_without_an_override(
+        self, client: TestClient
+    ) -> None:
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+
+        decisions = client.get(f"/v1/reconciliation/runs/{run_id}").json()["decisions"]
+        decision = next(item for item in decisions if item["status"] == "EXCEPTION")
+        plan = decision["closure_plan"]
+
+        assert plan["actions"]
+        assert plan["requires_new_run"] is True
+        assert "RESOLVED" in plan["resolution_gate"]
+        assert "status" not in plan
 
     def test_an_unknown_run_is_a_404(self, client: TestClient) -> None:
         """Named, without echoing anything else."""

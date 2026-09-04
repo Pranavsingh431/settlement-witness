@@ -94,6 +94,15 @@ describe('parseDecision', () => {
     expect(parseDecision(RESOLVED_DECISION)).toEqual(RESOLVED_DECISION);
   });
 
+  it('refuses a decision whose closure plan is missing its actions', () => {
+    expect(() =>
+      parseDecision({
+        ...RESOLVED_DECISION,
+        closure_plan: without(RESOLVED_DECISION.closure_plan, 'actions'),
+      }),
+    ).toThrow(/actions/);
+  });
+
   it('refuses a missing list', () => {
     expect(() => parseDecision(without(RESOLVED_DECISION, 'evidence'))).toThrow(/evidence/);
   });

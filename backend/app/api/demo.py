@@ -16,6 +16,8 @@ from app.api.schemas import DemoBatchResult, DemoDocumentSummary, DemoExceptionS
 from app.benchmark.evaluator import HARNESS_VERSION, run_corpus_with_batch
 from app.benchmark.generator import CorpusConfig, generate
 from app.benchmark.metrics import Rate
+from app.closure.plans import playbook_for
+from app.domain.codes import ExceptionCode
 from app.domain.decisions import DecisionStatus
 from app.domain.facts import SourceRecordType
 
@@ -33,6 +35,19 @@ TRACK_04_CONFIG = CorpusConfig(
 def _rate(numerator: int, denominator: int) -> Rate:
     """Return one operational rate with a visible numerator and denominator."""
     return Rate.of(numerator, denominator)
+
+
+def _exception_summary(code: str, count: int) -> DemoExceptionSummary:
+    """Attach the same deterministic close playbook the audit workspace uses."""
+    _, action = playbook_for(ExceptionCode(code))
+    return DemoExceptionSummary(
+        code=code,
+        finding_count=count,
+        owner_lane=action.owner_lane,
+        next_action=action.instruction,
+        proof_required=action.evidence_required,
+        supported_by_current_contract=action.supported_by_current_contract,
+    )
 
 
 def _run_track_batch() -> DemoBatchResult:
@@ -65,8 +80,7 @@ def _run_track_batch() -> DemoBatchResult:
         insufficient_evidence_count=insufficient,
         auto_match_rate=_rate(resolved, len(batch.decisions)),
         exception_breakdown=[
-            DemoExceptionSummary(code=code, finding_count=count)
-            for code, count in batch.exception_counts.items()
+            _exception_summary(code, count) for code, count in batch.exception_counts.items()
         ],
         processing_duration_ms=duration_ms,
         throughput_lines_per_second=round(len(batch.decisions) * 1000 / duration_ms, 2),

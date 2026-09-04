@@ -6,10 +6,10 @@ claims about production merchants or hiring outcomes.
 
 ## One-sentence pitch
 
-**Settlement Witness is an evidence-first AI finance controller that closes a
-multi-source reconciliation loop across a generated 59-scenario batch: it
-auto-matches supported lines, publishes an honest exception ledger, and keeps
-AI suggestions outside the decision path.**
+**Settlement Witness is an evidence-to-closure finance controller: it reconciles
+a generated 59-scenario payment batch, proves every conclusion from source
+records, and turns every unresolved line into a bounded action with an owner,
+required evidence and a verifier-enforced closure gate.**
 
 ## What to show in a three-minute demo
 
@@ -26,16 +26,19 @@ AI suggestions outside the decision path.**
    agreement and the zero false-resolution count. State the limitation on the
    page: this is a generated regression corpus, not real-merchant or
    production performance.
-4. **Make the next action visible.** The exception ledger names the finance
-   follow-up for each finding category. Open *Evidence*, download the four
-   seeded CSVs and import them in the displayed order: 180 provider records
-   plus 56 matching bank credits. Before choosing each file, press its matching
-   **Use source → type** button: it explicitly declares `PSP_API` for the first
-   three files and `BANK_STATEMENT` for the last, without guessing from the
-   filename or contents. Never upload real merchant data to the public preview.
+4. **Make the next action testable.** Expand an exception in the ledger. Its
+   close plan names the owning finance lane, the next action, the exact proof
+   required and whether the current verifier can check it. Open *Evidence*,
+   download the four seeded CSVs and import them in the displayed order: 180
+   provider records plus 56 matching bank credits. Before choosing each file,
+   press its matching **Use source → type** button: it explicitly declares
+   `PSP_API` for the first three files and `BANK_STATEMENT` for the last,
+   without guessing from the filename or contents. Never upload real merchant
+   data to the public preview.
 5. **Inspect a run.** Open the decision audit workspace and select an
-   exception. The certificate shows citations, payload hashes, exception codes
-   and each invariant independently.
+   exception. The certificate shows citations, payload hashes, exception codes,
+   each invariant independently, and the new-run gate that prevents an action
+   from being mistaken for resolution.
 6. **Separate operations from truth.** Open the review queue and record an
    acknowledgement or request for evidence. The baseline decision stays the
    same; a human workflow event cannot convert an exception into a resolution.
@@ -56,6 +59,7 @@ CSV/API import -> append-only source facts + receipt -> deterministic baseline
 human review event ------------------------------> separate workflow timeline
 bank statement ----------------------------------> separate finality audit
 hosted model (generated shadow corpus only) -----> validated link proposal only
+immutable decision ------------------------------> deterministic close plan
 ```
 
 The arrows intentionally do not lead from AI or human review to a settlement
@@ -69,6 +73,9 @@ decision. That constraint is the design, not an omitted feature.
   hold; otherwise it reports an exception or insufficient evidence.
 - The UI keeps settlement status, human workflow state and bank finality
   visually and semantically separate.
+- Every unresolved decision carries a deterministic close plan with an owner,
+  evidence acceptance test and a new-run gate; the plan cannot edit its source
+  decision.
 - The hosted-model adapter is corpus-only, allow-listed, request-bounded and
   response-bounded. It has no database, API or frontend caller.
 - The credentialed Phase 13 shadow protocol made three pre-registered attempts:

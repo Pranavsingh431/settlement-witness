@@ -24,6 +24,8 @@ import type {
   DemoBatchResult,
   DemoDocumentSummary,
   DemoExceptionSummary,
+  ClosureAction,
+  ClosurePlan,
   DecisionStatus,
   DecisionView,
   EvidenceReference,
@@ -172,6 +174,37 @@ function parseDemoException(value: unknown): DemoExceptionSummary {
   return {
     code: str(raw, 'code', 'demo exception'),
     finding_count: num(raw, 'finding_count', 'demo exception'),
+    owner_lane: str(raw, 'owner_lane', 'demo exception') as DemoExceptionSummary['owner_lane'],
+    next_action: str(raw, 'next_action', 'demo exception'),
+    proof_required: str(raw, 'proof_required', 'demo exception'),
+    supported_by_current_contract: bool(raw, 'supported_by_current_contract', 'demo exception'),
+  };
+}
+
+function parseClosureAction(value: unknown): ClosureAction {
+  const raw = object(value, 'closure action');
+  return {
+    action_code: str(raw, 'action_code', 'closure action'),
+    owner_lane: str(raw, 'owner_lane', 'closure action') as ClosureAction['owner_lane'],
+    title: str(raw, 'title', 'closure action'),
+    instruction: str(raw, 'instruction', 'closure action'),
+    evidence_required: str(raw, 'evidence_required', 'closure action'),
+    supported_by_current_contract: bool(raw, 'supported_by_current_contract', 'closure action'),
+  };
+}
+
+function parseClosurePlan(value: unknown): ClosurePlan {
+  const raw = object(value, 'closure plan');
+  return {
+    plan_version: str(raw, 'plan_version', 'closure plan'),
+    baseline_status: str(raw, 'baseline_status', 'closure plan') as ClosurePlan['baseline_status'],
+    disposition: str(raw, 'disposition', 'closure plan') as ClosurePlan['disposition'],
+    primary_owner: str(raw, 'primary_owner', 'closure plan') as ClosurePlan['primary_owner'],
+    headline: str(raw, 'headline', 'closure plan'),
+    blocking_codes: strings(raw, 'blocking_codes', 'closure plan'),
+    actions: list(raw, 'actions', 'closure plan', parseClosureAction),
+    requires_new_run: bool(raw, 'requires_new_run', 'closure plan'),
+    resolution_gate: str(raw, 'resolution_gate', 'closure plan'),
   };
 }
 
@@ -215,6 +248,7 @@ export function parseDecision(value: unknown): DecisionView {
     reason_codes: strings(raw, 'reason_codes', 'decision'),
     created_at: str(raw, 'created_at', 'decision'),
     verified_evidence_count: num(raw, 'verified_evidence_count', 'decision'),
+    closure_plan: parseClosurePlan(raw.closure_plan),
   };
 }
 

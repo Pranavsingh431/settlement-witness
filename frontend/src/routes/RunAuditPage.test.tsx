@@ -349,6 +349,31 @@ describe('the certificate', () => {
 
     expect(within(panel).getByText('PARTIAL_REFUND')).toBeInTheDocument();
   });
+
+  it('turns an exception into a bounded evidence-to-closure plan', async () => {
+    render();
+    const panel = await screen.findByRole('region', { name: /certificate/i });
+    const plan = within(panel).getByRole('region', { name: /what has to happen next/i });
+
+    expect(plan).toHaveTextContent(/finance control/i);
+    expect(plan).toHaveTextContent(/explain the portion of the capture that remains/i);
+    expect(plan).toHaveTextContent(/proof required/i);
+    expect(plan).toHaveTextContent(/needs a new evidence rule/i);
+    expect(plan).toHaveTextContent(/new decision is RESOLVED/i);
+    expect(within(plan).queryByRole('button')).toBeNull();
+  });
+
+  it('routes missing evidence to an action the current verifier can check', async () => {
+    render();
+    await screen.findByRole('table', { name: /decision/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /line-0003/ }));
+    const plan = await screen.findByRole('region', { name: /what has to happen next/i });
+
+    expect(plan).toHaveTextContent(/evidence operations/i);
+    expect(plan).toHaveTextContent(/can be verified today/i);
+    expect(plan).toHaveTextContent(/all cited facts present/i);
+  });
 });
 
 describe('when the run cannot be loaded', () => {

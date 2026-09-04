@@ -8,8 +8,9 @@ decision. Every case ends in one of three states: matched, exception, or insuffi
 
 ## Status
 
-Phase 12. Seven append-only tables, four documented CSV schemas, two independent
-evidence-backed conclusions, and no model output that can reach either of them.
+Phase 13 plus the evidence-to-closure product layer. Seven append-only tables,
+four documented CSV schemas, two independent evidence-backed conclusions, and
+no model output that can reach either of them.
 
 **Phases 0 to 2** built the foundation and the contract. `backend/app/domain/`
 defines what a fact, an amount, a lifecycle event, an invariant, an exception
@@ -48,6 +49,14 @@ the application database. Two planned runs completed and one was incomplete
 because the model exceeded the bounded response size, so no aggregate was
 published. That is a model-and-protocol observation, not reconciliation or
 production performance.
+
+**The product layer** turns every immutable decision into a versioned
+evidence-to-closure plan. An unresolved line now names its owner, next bounded
+action, exact proof required and whether today's verifier can check that proof.
+It still closes only through authoritative evidence and a new reconciliation
+run—never through a recommendation or review button. The research-backed
+rationale and next product steps are in
+[docs/product-thesis.md](docs/product-thesis.md).
 
 There is no authentication and no multi-tenancy. The submitted Vercel link is a
 shared **Track 04** synthetic batch demonstration for reviewers, not a

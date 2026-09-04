@@ -116,8 +116,9 @@ reconciles it through the ordinary deterministic baseline, evaluates it against
 the independent manifest, and removes the temporary database before returning.
 
 The response reports source-record and decision counts, elapsed processing time,
-throughput, the operational auto-match rate, every exception class and the
-strict contract measures. It contains no generic `accuracy` field. The reported
+throughput, the operational auto-match rate, every exception class, its owning
+finance-operations lane, next action and required proof, and the strict contract
+measures. It contains no generic `accuracy` field. The reported
 numbers are measurements on a generated regression/shadow corpus, **not**
 reconciliation accuracy, production accuracy or evidence of real-merchant
 performance. Repeating this `GET` leaves no facts, receipts, runs, bank audits
@@ -442,7 +443,18 @@ an empty list that looks like a result.
       "exception_codes": [],
       "reason_codes": ["ALL_REQUIRED_INVARIANTS_PASSED"],
       "created_at": "2026-08-24T12:00:00Z",
-      "verified_evidence_count": 3
+      "verified_evidence_count": 3,
+      "closure_plan": {
+        "plan_version": "1.0.0",
+        "baseline_status": "RESOLVED",
+        "disposition": "NO_ACTION",
+        "primary_owner": "NONE",
+        "headline": "No finance-ops follow-up is required for this decision.",
+        "blocking_codes": [],
+        "actions": [],
+        "requires_new_run": false,
+        "resolution_gate": "Already resolved by the recorded certificate. Later evidence creates a new run; it never edits this one."
+      }
     }
   ]
 }
@@ -455,6 +467,13 @@ arrays invites mistakes.
 ## `GET /v1/reconciliation/runs/{run_id}/decisions/{decision_id}`
 
 One decision, in the same shape as it appears in the run detail.
+
+Every `DecisionView` also carries `closure_plan`, a deterministic read model of
+that immutable decision. For unresolved lines it contains the primary owner,
+all blocking codes, bounded actions, the evidence required for each action,
+whether today's contract can verify that evidence, and the new-run closure
+gate. A resolved decision carries `NO_ACTION`. The plan has no override status
+and writing or reading it changes no stored decision.
 
 The decision is rebuilt through the domain model on the way out, so a row that
 no longer satisfies the contract fails here rather than being served as though

@@ -76,6 +76,34 @@ export interface InvariantCheck {
   readonly observed_minor: number | null;
 }
 
+export type ClosureDisposition =
+  'NO_ACTION' | 'COLLECT_EVIDENCE' | 'INVESTIGATE_SOURCE' | 'MONITOR' | 'ESCALATE';
+
+export type ClosureLane =
+  'NONE' | 'EVIDENCE_OPERATIONS' | 'PSP_OPERATIONS' | 'DATA_QUALITY' | 'FINANCE_CONTROL';
+
+export interface ClosureAction {
+  readonly action_code: string;
+  readonly owner_lane: ClosureLane;
+  readonly title: string;
+  readonly instruction: string;
+  readonly evidence_required: string;
+  readonly supported_by_current_contract: boolean;
+}
+
+/** Operational recourse derived from a decision; it cannot edit that decision. */
+export interface ClosurePlan {
+  readonly plan_version: string;
+  readonly baseline_status: DecisionStatus;
+  readonly disposition: ClosureDisposition;
+  readonly primary_owner: ClosureLane;
+  readonly headline: string;
+  readonly blocking_codes: readonly string[];
+  readonly actions: readonly ClosureAction[];
+  readonly requires_new_run: boolean;
+  readonly resolution_gate: string;
+}
+
 export interface DecisionView {
   readonly decision_id: string;
   readonly schema_version: string;
@@ -89,6 +117,7 @@ export interface DecisionView {
   readonly reason_codes: readonly string[];
   readonly created_at: string;
   readonly verified_evidence_count: number;
+  readonly closure_plan: ClosurePlan;
 }
 
 export interface RunSummary {
@@ -187,6 +216,10 @@ export interface DemoDocumentSummary {
 export interface DemoExceptionSummary {
   readonly code: string;
   readonly finding_count: number;
+  readonly owner_lane: ClosureLane;
+  readonly next_action: string;
+  readonly proof_required: string;
+  readonly supported_by_current_contract: boolean;
 }
 
 /** The read-only synthetic batch that demonstrates Track 04. */

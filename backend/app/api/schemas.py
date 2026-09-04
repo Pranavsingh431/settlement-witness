@@ -18,6 +18,7 @@ from app.banking.finality import (
     BankFinalityOutcome,
 )
 from app.benchmark.metrics import Rate
+from app.closure.plans import ClosureLane, ClosurePlan, build_closure_plan
 from app.domain.banking import BankDirection
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import DecisionStatus, ReconciliationDecision
@@ -122,6 +123,8 @@ class DecisionView(BaseModel):
     reason_codes: list[ReasonCode]
     created_at: datetime
     verified_evidence_count: int
+    closure_plan: ClosurePlan
+    """Operational recourse derived from this immutable decision."""
 
     @classmethod
     def of(cls, decision: ReconciliationDecision) -> "DecisionView":
@@ -164,6 +167,7 @@ class DecisionView(BaseModel):
             reason_codes=list(decision.reason_codes),
             created_at=decision.created_at,
             verified_evidence_count=decision.verified_evidence_count,
+            closure_plan=build_closure_plan(decision),
         )
 
 
@@ -702,6 +706,10 @@ class DemoExceptionSummary(BaseModel):
 
     code: str
     finding_count: int
+    owner_lane: ClosureLane
+    next_action: str
+    proof_required: str
+    supported_by_current_contract: bool
 
 
 class DemoBatchResult(BaseModel):
