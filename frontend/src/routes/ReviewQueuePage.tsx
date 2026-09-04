@@ -19,7 +19,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { appendReviewEvent, getReviewQueue } from '../api/client';
+import { appendReviewEvent, evidenceRequestDownloadUrl, getReviewQueue } from '../api/client';
 import { REVIEW_ACTIONS } from '../api/types';
 import type { ReviewAction, ReviewQueueItem, ReviewQueuePage } from '../api/types';
 import { describeError } from '../api/errors';
@@ -434,7 +434,13 @@ export function ReviewQueuePage() {
                   }}
                 />
               </Panel>
-              <DecisionCertificate decision={selected.decision} />
+              <DecisionCertificate
+                decision={selected.decision}
+                evidenceRequestHref={evidenceRequestDownloadUrl(
+                  runId,
+                  selected.decision.decision_id,
+                )}
+              />
             </div>
           )}
         </div>

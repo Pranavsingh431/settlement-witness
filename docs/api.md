@@ -464,6 +464,47 @@ A citation and whether it resolved are joined into one object, because they are
 the same fact about the same record and making a caller line up two parallel
 arrays invites mistakes.
 
+## `GET /v1/reconciliation/runs/{run_id}/workboard`
+
+A read-only triage view of unresolved decisions. Each item is admitted only if
+the service can re-read the cited `SETTLEMENT_LINE` fact under the original
+payload hash. The displayed value is that source record's declared `net_minor`,
+not a verified bank balance or a cross-currency exposure estimate.
+
+```json
+{
+  "run_id": "8b5831ee02874efe98daf6d3c1e75bc4",
+  "snapshot_fingerprint": "...",
+  "workboard": {
+    "triage_version": "1.0.0",
+    "prioritisation_note": "Currencies are never converted or summed...",
+    "currency_queues": [
+      {
+        "currency": "INR",
+        "items": [
+          {
+            "rank_in_currency": 1,
+            "subject_settlement_line_id": "line-0001",
+            "declared_settlement_value": {
+              "source_record_id": "...:SETTLEMENT_LINE:1",
+              "payload_hash": "...",
+              "net_minor": 1000000,
+              "currency": "INR"
+            }
+          }
+        ]
+      }
+    ],
+    "unpriced_items": []
+  }
+}
+```
+
+Queues are ordered by absolute `net_minor` only within the same `currency`,
+with the settlement line ID as a deterministic tie-breaker. `unpriced_items`
+keep open work visible when the cited settlement fact cannot be safely re-read;
+the API refuses to substitute a convenient amount. This route writes no row.
+
 ## `GET /v1/reconciliation/runs/{run_id}/decisions/{decision_id}`
 
 One decision, in the same shape as it appears in the run detail.
@@ -481,6 +522,19 @@ it did.
 
 404 if either the run or the decision is unknown. The run is checked first, so
 the message names the right thing.
+
+## `GET /v1/reconciliation/runs/{run_id}/decisions/{decision_id}/evidence-request`
+
+Downloads a JSON evidence-request package for an **unresolved** decision. It is
+a communication handoff: cited record identities and hashes, owner lane,
+bounded proof requests, and the new-run acceptance condition. It does not
+include raw source payloads, an adjustment, an approval, or a command that can
+change a decision. `Content-Disposition` names a generic attachment and
+`Cache-Control: no-store` prevents the server from asking a shared browser to
+cache the package.
+
+A resolved decision returns 409 `evidence_request_not_needed`; the system does
+not manufacture follow-up work for a certificate that already passed.
 
 ## `GET /v1/review/runs/{run_id}/queue`
 

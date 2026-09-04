@@ -1,6 +1,6 @@
 """Reconciliation run endpoints.
 
-One create path and three read paths. There is no endpoint here that changes a
+One create path and four read paths. There is no endpoint here that changes a
 stored decision, and there is no plan for one: a mutable resolve endpoint would
 make a stored conclusion editable, and the whole contract rests on conclusions
 being immutable and replayable.
@@ -25,7 +25,10 @@ from app.api.schemas import (
     RunDetail,
     RunPage,
     RunSummary,
+    RunWorkboard,
 )
+from app.closure.evidence_requests import EvidenceRequestPackage, build_evidence_request
+from app.closure.triage import build_workboard
 from app.domain.codes import ExceptionCode
 from app.domain.decisions import DecisionStatus
 from app.reconciliation.runs import ReconciliationRunRepository, ReconciliationRunService
@@ -139,6 +142,76 @@ def get_run(
         decisions=[DecisionView.of(decision) for decision in decisions],
         filtered=decision_status is not None or exception_code is not None,
     )
+
+
+@router.get(
+    "/runs/{run_id}/workboard",
+    response_model=RunWorkboard,
+    responses=NOT_FOUND,
+    summary="Prioritise unresolved work within each source currency",
+)
+def get_workboard(run_id: str, session: Annotated[Session, Depends(get_session)]) -> RunWorkboard:
+    """Return source-pinned work priority without a cross-currency total.
+
+    The workboard is derived when served. It writes neither a decision nor a
+    priority row, and it checks the original cited settlement record and hash
+    before using its declared net value.
+    """
+    repository = ReconciliationRunRepository(session)
+    run = repository.get(run_id)
+    if run is None:
+        raise _not_found("run", run_id)
+
+    return RunWorkboard(
+        run_id=run.run_id,
+        snapshot_fingerprint=run.snapshot_fingerprint,
+        workboard=build_workboard(
+            repository.decisions_for(run_id), SourceFactRepository(session).fact_index()
+        ),
+    )
+
+
+@router.get(
+    "/runs/{run_id}/decisions/{decision_id}/evidence-request",
+    response_model=EvidenceRequestPackage,
+    responses={
+        **NOT_FOUND,
+        409: {
+            "model": ErrorEnvelope,
+            "description": "The recorded decision already resolved and needs no evidence request",
+        },
+    },
+    summary="Download a non-authoritative request for the evidence needed next",
+)
+def get_evidence_request(
+    run_id: str,
+    decision_id: str,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+) -> EvidenceRequestPackage:
+    """Return an operational handoff for an unresolved decision.
+
+    The response contains cited record identities and acceptance conditions,
+    never raw payloads or a state-changing command. A generic filename avoids
+    reflecting record identifiers into a response header.
+    """
+    repository = ReconciliationRunRepository(session)
+    if repository.get(run_id) is None:
+        raise _not_found("run", run_id)
+    decision = repository.find_decision(run_id, decision_id)
+    if decision is None:
+        raise _not_found("decision", decision_id)
+    try:
+        package = build_evidence_request(decision)
+    except ValueError as refusal:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "evidence_request_not_needed", "detail": str(refusal)},
+        ) from refusal
+
+    response.headers["Content-Disposition"] = 'attachment; filename="evidence-request.json"'
+    response.headers["Cache-Control"] = "no-store"
+    return package
 
 
 @router.get(

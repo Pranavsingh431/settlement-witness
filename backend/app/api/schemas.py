@@ -19,6 +19,7 @@ from app.banking.finality import (
 )
 from app.benchmark.metrics import Rate
 from app.closure.plans import ClosureLane, ClosurePlan, build_closure_plan
+from app.closure.triage import Workboard
 from app.domain.banking import BankDirection
 from app.domain.codes import ExceptionCode, ReasonCode
 from app.domain.decisions import DecisionStatus, ReconciliationDecision
@@ -182,6 +183,16 @@ class RunDetail(BaseModel):
     """True when a status or exception filter narrowed the list.
 
     Reported so a caller cannot mistake a filtered view for the whole run."""
+
+
+class RunWorkboard(BaseModel):
+    """Currency-separated prioritisation for the unresolved work in one run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    snapshot_fingerprint: str
+    workboard: Workboard
 
 
 class RunPage(BaseModel):

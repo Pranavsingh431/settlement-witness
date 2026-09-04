@@ -15,6 +15,7 @@ import type {
   ReviewQueueItem,
   ReviewQueuePage,
   RunSummary,
+  RunWorkboard,
 } from '../api/types';
 
 const NEW_RUN_GATE =
@@ -183,6 +184,51 @@ export const INSUFFICIENT_DECISION: DecisionView = {
     ],
     requires_new_run: true,
     resolution_gate: NEW_RUN_GATE,
+  },
+};
+
+/** Currency-separated triage copied from the run-workboard API contract. */
+export const WORKBOARD: RunWorkboard = {
+  run_id: RUN.run_id,
+  snapshot_fingerprint: RUN.snapshot_fingerprint,
+  workboard: {
+    triage_version: '1.0.0',
+    prioritisation_note:
+      'Open work is ordered by absolute declared settlement net within each source currency. Currencies are never converted or summed. This is triage, not a cash-at-risk total.',
+    currency_queues: [
+      {
+        currency: 'INR',
+        items: [
+          {
+            decision_id: EXCEPTION_DECISION.decision_id,
+            subject_settlement_line_id: EXCEPTION_DECISION.subject_settlement_line_id,
+            status: 'EXCEPTION',
+            exception_codes: ['PARTIAL_REFUND'],
+            declared_settlement_value: {
+              source_record_id: '2858d7ec:PSP_API:SETTLEMENT_LINE:1',
+              payload_hash: '1fdd4bb217febc17c0d4bfb33d869c27abb6fed7ee787943effa408b3d61d596',
+              net_minor: 1_000_000,
+              currency: 'INR',
+            },
+            rank_in_currency: 1,
+          },
+          {
+            decision_id: INSUFFICIENT_DECISION.decision_id,
+            subject_settlement_line_id: INSUFFICIENT_DECISION.subject_settlement_line_id,
+            status: 'INSUFFICIENT_EVIDENCE',
+            exception_codes: ['INSUFFICIENT_EVIDENCE'],
+            declared_settlement_value: {
+              source_record_id: '2858d7ec:PSP_API:SETTLEMENT_LINE:3',
+              payload_hash: '3fdd4bb217febc17c0d4bfb33d869c27abb6fed7ee787943effa408b3d61d596',
+              net_minor: 488_200,
+              currency: 'INR',
+            },
+            rank_in_currency: 2,
+          },
+        ],
+      },
+    ],
+    unpriced_items: [],
   },
 };
 

@@ -15,13 +15,17 @@ import { Link, useParams } from 'react-router-dom';
 
 import {
   createBankFinalityAudit,
+  evidenceRequestDownloadUrl,
   getBankFinalityAudit,
   getRun,
+  getWorkboard,
   listBankFinalityAudits,
 } from '../api/client';
 import { DECISION_STATUSES } from '../api/types';
+import type { RunWorkboard } from '../api/types';
 import { formatMinorUnits, formatTimestamp } from '../format';
 import { useLoad } from '../hooks';
+import type { Loadable } from '../hooks';
 import { DecisionCertificate } from '../components/DecisionCertificate';
 import { BankFinalityCertificateView, SeparateConclusionsNotice } from '../components/BankFinality';
 import {
@@ -50,6 +54,7 @@ export function RunAuditPage() {
       }),
     `${runId}|${status}|${exceptionCode}`,
   );
+  const workboard = useLoad(() => getWorkboard(runId), `${runId}|workboard`);
 
   const run = detail.data?.run ?? null;
   const decisions = detail.data?.decisions ?? [];
@@ -140,6 +145,15 @@ export function RunAuditPage() {
           ]}
         />
       </section>
+
+      <WorkboardPanel
+        state={workboard}
+        onSelect={(decisionId) => {
+          setStatus('');
+          setExceptionCode('');
+          setSelectedId(decisionId);
+        }}
+      />
 
       <div className="audit-workspace">
         <section className="decision-navigator" aria-labelledby="decision-ledger-title">
@@ -292,18 +306,164 @@ export function RunAuditPage() {
         </section>
 
         <Panel title="Certificate" note="Why this line was decided the way it was.">
-          {selected ? (
-            <DecisionCertificate decision={selected} />
-          ) : (
-            <EmptyState title="No decision selected">
-              Choose a settlement line to read the evidence and invariants behind its decision.
-            </EmptyState>
-          )}
+          <div id="decision-certificate">
+            {selected ? (
+              <DecisionCertificate
+                decision={selected}
+                evidenceRequestHref={evidenceRequestDownloadUrl(runId, selected.decision_id)}
+              />
+            ) : (
+              <EmptyState title="No decision selected">
+                Choose a settlement line to read the evidence and invariants behind its decision.
+              </EmptyState>
+            )}
+          </div>
         </Panel>
       </div>
 
       <BankFinalityPanel snapshotFingerprint={run.snapshot_fingerprint} />
     </>
+  );
+}
+
+/**
+ * Turn unresolved decisions into a human-sized queue without inventing an FX
+ * conversion or a cross-currency cash total. The value is deliberately called
+ * a declared settlement net: it tells an operator where to start, while bank
+ * finality remains the separate proof that a payout reached the merchant.
+ */
+function WorkboardPanel({
+  state,
+  onSelect,
+}: {
+  readonly state: Loadable<RunWorkboard>;
+  readonly onSelect: (decisionId: string) => void;
+}) {
+  const board = state.data?.workboard;
+
+  return (
+    <section className="workboard" aria-labelledby="workboard-title">
+      <header className="section-heading section-heading--compact">
+        <div>
+          <p className="eyebrow">Currency-safe triage</p>
+          <h2 id="workboard-title">What to work first</h2>
+          <p>
+            Start with the largest declared settlement values in each original currency. This is an
+            operational queue, not a cash-at-risk claim.
+          </p>
+        </div>
+        {board ? <span className="section-heading__meta">Rules {board.triage_version}</span> : null}
+      </header>
+
+      {state.loading ? <Loading what="work priorities" /> : null}
+      {state.error ? (
+        <ErrorNotice error={state.error} onRetry={state.reload} what="work priorities" />
+      ) : null}
+
+      {board ? (
+        <>
+          <p className="workboard__note">{board.prioritisation_note}</p>
+          {board.currency_queues.length === 0 && board.unpriced_items.length === 0 ? (
+            <EmptyState title="No unresolved work in this run">
+              Every recorded settlement decision resolved. Later evidence would create a new run,
+              never revise this one.
+            </EmptyState>
+          ) : null}
+          {board.currency_queues.length > 0 ? (
+            <div className="workboard__queues">
+              {board.currency_queues.map((queue) => (
+                <article className="workboard__queue" key={queue.currency}>
+                  <header className="workboard__queue-head">
+                    <h3>{queue.currency}</h3>
+                    <span>{formatMinorUnits(queue.items.length)} open item(s)</span>
+                  </header>
+                  <div className="table-scroll">
+                    <table>
+                      <caption>
+                        Open work ranked by absolute declared settlement net in {queue.currency}.
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">Rank</th>
+                          <th scope="col">Settlement line</th>
+                          <th scope="col" className="num">
+                            Declared net
+                          </th>
+                          <th scope="col">Finding</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {queue.items.map((item) => (
+                          <tr key={item.decision_id}>
+                            <td className="num">{item.rank_in_currency}</td>
+                            <td>
+                              <a
+                                className="row-button mono"
+                                href="#decision-certificate"
+                                onClick={() => {
+                                  onSelect(item.decision_id);
+                                }}
+                              >
+                                {item.subject_settlement_line_id}
+                                <span className="visually-hidden"> — open its certificate</span>
+                              </a>
+                            </td>
+                            <td className="num workboard__value">
+                              {formatMinorUnits(item.declared_settlement_value.net_minor)}{' '}
+                              {queue.currency}
+                              <span>minor units</span>
+                            </td>
+                            <td>
+                              {item.exception_codes.length > 0 ? (
+                                <div className="chips">
+                                  {item.exception_codes.map((code) => (
+                                    <span className="chip chip--exception" key={code}>
+                                      {code}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <StatusBadge status={item.status} />
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {board.unpriced_items.length > 0 ? (
+            <section className="workboard__unpriced" aria-labelledby="unpriced-work-title">
+              <h3 id="unpriced-work-title">Needs evidence before it can be prioritised</h3>
+              <p>
+                These lines remain open, but the cited settlement fact cannot be safely re-read, so
+                the workboard refuses to put a made-up amount beside them.
+              </p>
+              <ul>
+                {board.unpriced_items.map((item) => (
+                  <li key={item.decision_id}>
+                    <a
+                      className="row-button mono"
+                      href="#decision-certificate"
+                      onClick={() => {
+                        onSelect(item.decision_id);
+                      }}
+                    >
+                      {item.subject_settlement_line_id}
+                      <span className="visually-hidden"> — open its certificate</span>
+                    </a>{' '}
+                    <span className="panel__note">{item.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </>
+      ) : null}
+    </section>
   );
 }
 

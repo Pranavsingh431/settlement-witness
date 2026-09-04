@@ -661,6 +661,22 @@ code,
   background: #eaf5ef;
 }
 
+.closure-plan__download {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #dce6f0;
+  background: #fafcff;
+}
+
+.closure-plan__download span {
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 .batch-result__footer {
   display: grid;
   gap: 6px;
@@ -895,7 +911,8 @@ code,
 .receipt-stage,
 .operations-ledger,
 .audit-overview,
-.decision-navigator {
+.decision-navigator,
+.workboard {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1118,6 +1135,93 @@ code,
   margin-bottom: 24px;
 }
 
+.workboard__note {
+  margin: 18px 26px 0;
+  max-width: 82ch;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.workboard__queues {
+  display: grid;
+  gap: 14px;
+  margin: 18px 26px 24px;
+}
+
+.workboard__queue {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+}
+
+.workboard__queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: #f7faff;
+}
+
+.workboard__queue-head h3 {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+.workboard__queue-head span {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+
+.workboard__queue .table-scroll {
+  margin: 0;
+}
+
+.workboard__value {
+  white-space: nowrap;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.workboard__value span {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.workboard__unpriced {
+  margin: 0 26px 24px;
+  padding: 14px 16px;
+  border: 1px dashed #bdc9d8;
+  border-radius: 9px;
+  background: #fbfcfe;
+}
+
+.workboard__unpriced h3 {
+  font-size: 0.92rem;
+}
+
+.workboard__unpriced p {
+  max-width: 78ch;
+  margin-top: 5px;
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.workboard__unpriced ul {
+  display: grid;
+  gap: 5px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
 .audit-workspace {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
@@ -1239,6 +1343,9 @@ code,
   .operations-ledger > .toolbar,
   .audit-overview > .stats,
   .audit-overview > .facts,
+  .workboard__note,
+  .workboard__queues,
+  .workboard__unpriced,
   .decision-navigator > .loading,
   .decision-navigator > .empty,
   .decision-navigator > .table-scroll {

@@ -149,6 +149,51 @@ export interface RunDetail {
   readonly filtered: boolean;
 }
 
+/** A source-pinned value used to order open work, never an FX-converted total. */
+export interface DeclaredSettlementValue {
+  readonly source_record_id: string;
+  readonly payload_hash: string;
+  readonly net_minor: number;
+  readonly currency: string;
+}
+
+/** One unresolved line, ranked only against values in its own source currency. */
+export interface WorkboardItem {
+  readonly decision_id: string;
+  readonly subject_settlement_line_id: string;
+  readonly status: DecisionStatus;
+  readonly exception_codes: readonly string[];
+  readonly declared_settlement_value: DeclaredSettlementValue;
+  readonly rank_in_currency: number;
+}
+
+export interface CurrencyWorkQueue {
+  readonly currency: string;
+  readonly items: readonly WorkboardItem[];
+}
+
+/** Work the system keeps visible but declines to price without cited settlement evidence. */
+export interface UnpricedWorkItem {
+  readonly decision_id: string;
+  readonly subject_settlement_line_id: string;
+  readonly status: DecisionStatus;
+  readonly reason: string;
+}
+
+/** Read-only work ordering. Currencies intentionally remain separate. */
+export interface Workboard {
+  readonly triage_version: string;
+  readonly prioritisation_note: string;
+  readonly currency_queues: readonly CurrencyWorkQueue[];
+  readonly unpriced_items: readonly UnpricedWorkItem[];
+}
+
+export interface RunWorkboard {
+  readonly run_id: string;
+  readonly snapshot_fingerprint: string;
+  readonly workboard: Workboard;
+}
+
 export interface RowOutcomeView {
   readonly row_number: number;
   readonly outcome: RowOutcome;

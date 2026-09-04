@@ -23,6 +23,7 @@ import {
   INSUFFICIENT_DECISION,
   RESOLVED_DECISION,
   RUN,
+  WORKBOARD,
 } from '../test/fixtures';
 import { renderRoute } from '../test/render';
 import { RunAuditPage } from './RunAuditPage';
@@ -62,6 +63,11 @@ function noCertificateLine(pattern: RegExp): void {
 beforeEach(() => {
   vi.resetAllMocks();
   client.getRun.mockResolvedValue({ run: RUN, decisions: ALL_DECISIONS, filtered: false });
+  client.getWorkboard.mockResolvedValue(WORKBOARD);
+  client.evidenceRequestDownloadUrl.mockImplementation(
+    (runId, decisionId) =>
+      `/v1/reconciliation/runs/${runId}/decisions/${decisionId}/evidence-request`,
+  );
   client.listBankFinalityAudits.mockResolvedValue(NO_BANK_AUDITS);
   client.getBankFinalityAudit.mockResolvedValue(BANK_AUDIT_DETAIL);
   client.createBankFinalityAudit.mockResolvedValue({ audit: BANK_AUDIT, created: true });
@@ -183,6 +189,41 @@ describe('the decision list', () => {
   });
 });
 
+describe('currency-safe workboard', () => {
+  it('keeps source currencies separate and refuses a made-up total', async () => {
+    render();
+    const board = await screen.findByRole('region', { name: /what to work first/i });
+
+    expect(within(board).getByText('INR')).toBeInTheDocument();
+    expect(within(board).getByText(/currencies are never converted or summed/i)).toBeVisible();
+    expect(within(board).getByText(/not a cash-at-risk total/i)).toBeVisible();
+    expect(within(board).getByText('1,000,000 INR')).toBeInTheDocument();
+    expect(within(board).getAllByText('minor units')).toHaveLength(2);
+  });
+
+  it('opens the selected work item in the evidence certificate', async () => {
+    render();
+    const board = await screen.findByRole('region', { name: /what to work first/i });
+
+    await userEvent.click(
+      within(board).getByRole('link', { name: /line-0003.*open its certificate/i }),
+    );
+
+    expect(await screen.findByText(/this line could not be judged/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /line-0003.*show the certificate/i }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves the recorded run readable when prioritisation fails', async () => {
+    client.getWorkboard.mockRejectedValue(new NetworkError(new Error('offline')));
+    render();
+
+    expect(await screen.findByText(/could not load work priorities/i)).toBeInTheDocument();
+    expect(screen.getByText(RUN.snapshot_fingerprint)).toBeInTheDocument();
+  });
+});
+
 describe('selecting a decision', () => {
   it('shows the first one without being asked', async () => {
     render();
@@ -269,10 +310,11 @@ describe('the certificate', () => {
     await userEvent.click(screen.getByRole('button', { name: /line-0001/ }));
     await screen.findByText(/exceptions raised/i);
 
-    expect(screen.getByText('1,000,000')).toBeInTheDocument();
-    expect(screen.getByText('1,150,000')).toBeInTheDocument();
-    expect(screen.getByText('minor units')).toBeInTheDocument();
-    expect(screen.queryByText(/₹|\$|€|£|INR/)).not.toBeInTheDocument();
+    const certificate = screen.getByRole('region', { name: /certificate/i });
+    expect(within(certificate).getByText('1,000,000')).toBeInTheDocument();
+    expect(within(certificate).getByText('1,150,000')).toBeInTheDocument();
+    expect(within(certificate).getByText('minor units')).toBeInTheDocument();
+    expect(within(certificate).queryByText(/₹|\$|€|£|INR/)).not.toBeInTheDocument();
   });
 
   it('shows no amounts for a check that carries none', async () => {
@@ -282,7 +324,9 @@ describe('the certificate', () => {
     await userEvent.click(screen.getByRole('button', { name: /line-0003/ }));
     await screen.findByText(/could not be judged/i);
 
-    expect(screen.queryByText('minor units')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: /certificate/i })).queryByText('minor units'),
+    ).not.toBeInTheDocument();
   });
 
   it('says a citation resolved to a stored fact, and shows the hash in full', async () => {
@@ -361,6 +405,27 @@ describe('the certificate', () => {
     expect(plan).toHaveTextContent(/needs a new evidence rule/i);
     expect(plan).toHaveTextContent(/new decision is RESOLVED/i);
     expect(within(plan).queryByRole('button')).toBeNull();
+  });
+
+  it('offers a downloadable request for proof without offering an override', async () => {
+    render();
+    const plan = await screen.findByRole('region', { name: /what has to happen next/i });
+    const download = within(plan).getByRole('link', { name: /download evidence request/i });
+
+    expect(download).toHaveAttribute(
+      'href',
+      `/v1/reconciliation/runs/${RUN.run_id}/decisions/${EXCEPTION_DECISION.decision_id}/evidence-request`,
+    );
+    expect(download).toHaveAttribute('download');
+    expect(plan).toHaveTextContent(/this does not close the line/i);
+  });
+
+  it('does not offer an evidence request for a resolved certificate', async () => {
+    client.getRun.mockResolvedValue({ run: RUN, decisions: [RESOLVED_DECISION], filtered: false });
+    render();
+
+    const plan = await screen.findByRole('region', { name: /no finance-ops follow-up/i });
+    expect(within(plan).queryByRole('link', { name: /download evidence request/i })).toBeNull();
   });
 
   it('routes missing evidence to an action the current verifier can check', async () => {

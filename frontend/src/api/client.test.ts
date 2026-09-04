@@ -20,6 +20,7 @@ import {
   RESOLVED_DECISION,
   REVIEW_QUEUE,
   RUN,
+  WORKBOARD,
 } from '../test/fixtures';
 import {
   appendReviewEvent,
@@ -31,10 +32,12 @@ import {
   getBankFinalityAudit,
   getReviewQueue,
   getRun,
+  getWorkboard,
   importDocument,
   listBankFinalityAudits,
   listImports,
   listRuns,
+  evidenceRequestDownloadUrl,
 } from './client';
 import { ApiError, MalformedResponseError, NetworkError, describeError } from './errors';
 
@@ -141,6 +144,21 @@ describe('reading runs', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       `/v1/reconciliation/runs/${RUN.run_id}?status=EXCEPTION&exception_code=PARTIAL_REFUND`,
+    );
+  });
+
+  it('reads a currency-separated workboard from the run it belongs to', async () => {
+    fetchMock.mockResolvedValue(answer(WORKBOARD));
+
+    const response = await getWorkboard(RUN.run_id);
+
+    expect(response.workboard.currency_queues[0]?.currency).toBe('INR');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/v1/reconciliation/runs/${RUN.run_id}/workboard`);
+  });
+
+  it('builds an escaped same-origin URL for an evidence-request download', () => {
+    expect(evidenceRequestDownloadUrl('run/a', 'decision?b')).toBe(
+      '/v1/reconciliation/runs/run%2Fa/decisions/decision%3Fb/evidence-request',
     );
   });
 });

@@ -25,6 +25,7 @@ import {
   parseRunDetail,
   parseRunPage,
   parseRunSummary,
+  parseRunWorkboard,
 } from './parse';
 import type {
   BankFinalityAuditCreation,
@@ -40,6 +41,7 @@ import type {
   RunCreation,
   RunDetail,
   RunPage,
+  RunWorkboard,
 } from './types';
 
 const IMPORTS = '/v1/imports';
@@ -188,6 +190,25 @@ export interface DecisionFilters {
 export async function getRun(runId: string, filters: DecisionFilters = {}): Promise<RunDetail> {
   const { body } = await send(`${RUNS}/${encodeURIComponent(runId)}${query({ ...filters })}`);
   return parseRunDetail(body);
+}
+
+/** Return currency-separated, source-pinned priorities for unresolved work in one run. */
+export async function getWorkboard(runId: string): Promise<RunWorkboard> {
+  const { body } = await send(`${RUNS}/${encodeURIComponent(runId)}/workboard`);
+  return parseRunWorkboard(body);
+}
+
+/**
+ * The direct, same-origin download for a read-only evidence-request package.
+ *
+ * It is intentionally an URL rather than a fetch wrapper: the browser handles
+ * the attachment response and the package remains a shareable JSON file. It
+ * carries no command and cannot change the decision it describes.
+ */
+export function evidenceRequestDownloadUrl(runId: string, decisionId: string): string {
+  return `${RUNS}/${encodeURIComponent(runId)}/decisions/${encodeURIComponent(
+    decisionId,
+  )}/evidence-request`;
 }
 
 export interface ReviewQueueFilters {

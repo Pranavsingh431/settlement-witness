@@ -179,6 +179,94 @@ class TestReadingOneRun:
         assert "RESOLVED" in plan["resolution_gate"]
         assert "status" not in plan
 
+    def test_workboard_keeps_currencies_separate_and_names_its_source_value(
+        self, client: TestClient
+    ) -> None:
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+
+        payload = client.get(f"/v1/reconciliation/runs/{run_id}/workboard").json()
+
+        assert payload["run_id"] == run_id
+        assert "never converted or summed" in payload["workboard"]["prioritisation_note"]
+        assert [queue["currency"] for queue in payload["workboard"]["currency_queues"]] == ["INR"]
+        first = payload["workboard"]["currency_queues"][0]["items"][0]
+        assert first["declared_settlement_value"]["currency"] == "INR"
+        assert first["declared_settlement_value"]["source_record_id"] in {
+            reference["source_record_id"]
+            for decision in client.get(f"/v1/reconciliation/runs/{run_id}").json()["decisions"]
+            for reference in decision["evidence"]
+        }
+
+    def test_workboard_is_read_only_and_deterministic(self, client: TestClient) -> None:
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+
+        first = client.get(f"/v1/reconciliation/runs/{run_id}/workboard").content
+        second = client.get(f"/v1/reconciliation/runs/{run_id}/workboard").content
+
+        assert first == second
+        assert client.get("/v1/reconciliation/runs").json()["total"] == 1
+
+    def test_an_unresolved_decision_downloads_a_non_authoritative_evidence_request(
+        self, client: TestClient
+    ) -> None:
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+        before = client.get(f"/v1/reconciliation/runs/{run_id}").content
+        decisions = client.get(f"/v1/reconciliation/runs/{run_id}").json()["decisions"]
+        decision = next(item for item in decisions if item["status"] == "EXCEPTION")
+
+        response = client.get(
+            f"/v1/reconciliation/runs/{run_id}/decisions/{decision['decision_id']}/evidence-request"
+        )
+
+        assert response.status_code == 200
+        assert (
+            response.headers["content-disposition"]
+            == 'attachment; filename="evidence-request.json"'
+        )
+        assert response.headers["cache-control"] == "no-store"
+        payload = response.json()
+        assert payload["decision_id"] == decision["decision_id"]
+        assert payload["requested_actions"]
+        assert "new reconciliation run" in payload["acceptance_condition"]
+        assert "does not approve an adjustment" in payload["request_notice"]
+        assert "raw_payload" not in payload
+        assert client.get(f"/v1/reconciliation/runs/{run_id}").content == before
+        assert client.get("/v1/reconciliation/runs").json()["total"] == 1
+
+    def test_a_resolved_decision_cannot_be_misrepresented_as_an_evidence_request(
+        self, client: TestClient
+    ) -> None:
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+        decisions = client.get(f"/v1/reconciliation/runs/{run_id}").json()["decisions"]
+        resolved = next(item for item in decisions if item["status"] == "RESOLVED")
+
+        response = client.get(
+            f"/v1/reconciliation/runs/{run_id}/decisions/{resolved['decision_id']}/evidence-request"
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["error"] == "evidence_request_not_needed"
+
+    def test_workboard_and_evidence_request_name_the_missing_run_or_decision(
+        self, client: TestClient
+    ) -> None:
+        missing_run = client.get("/v1/reconciliation/runs/no-such-run/workboard")
+        assert missing_run.status_code == 404
+        assert missing_run.json()["detail"]["error"] == "not_found"
+
+        missing_package_run = client.get(
+            "/v1/reconciliation/runs/no-such-run/decisions/no-such-decision/evidence-request"
+        )
+        assert missing_package_run.status_code == 404
+        assert missing_package_run.json()["detail"]["error"] == "not_found"
+
+        run_id = client.post("/v1/reconciliation/runs").json()["run_id"]
+        missing_decision = client.get(
+            f"/v1/reconciliation/runs/{run_id}/decisions/no-such-decision/evidence-request"
+        )
+        assert missing_decision.status_code == 404
+        assert missing_decision.json()["detail"]["error"] == "not_found"
+
     def test_an_unknown_run_is_a_404(self, client: TestClient) -> None:
         """Named, without echoing anything else."""
         response = client.get("/v1/reconciliation/runs/no-such-run")

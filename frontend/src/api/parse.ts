@@ -43,6 +43,12 @@ import type {
   RunDetail,
   RunPage,
   RunSummary,
+  CurrencyWorkQueue,
+  DeclaredSettlementValue,
+  RunWorkboard,
+  UnpricedWorkItem,
+  Workboard,
+  WorkboardItem,
 } from './types';
 
 type Raw = Record<string, unknown>;
@@ -268,6 +274,65 @@ export function parseRunDetail(value: unknown): RunDetail {
     run: parseRunSummary(raw.run),
     decisions: list(raw, 'decisions', 'run detail', parseDecision),
     filtered: bool(raw, 'filtered', 'run detail'),
+  };
+}
+
+function parseDeclaredSettlementValue(value: unknown): DeclaredSettlementValue {
+  const raw = object(value, 'declared settlement value');
+  return {
+    source_record_id: str(raw, 'source_record_id', 'declared settlement value'),
+    payload_hash: str(raw, 'payload_hash', 'declared settlement value'),
+    net_minor: num(raw, 'net_minor', 'declared settlement value'),
+    currency: str(raw, 'currency', 'declared settlement value'),
+  };
+}
+
+function parseWorkboardItem(value: unknown): WorkboardItem {
+  const raw = object(value, 'workboard item');
+  return {
+    decision_id: str(raw, 'decision_id', 'workboard item'),
+    subject_settlement_line_id: str(raw, 'subject_settlement_line_id', 'workboard item'),
+    status: str(raw, 'status', 'workboard item') as WorkboardItem['status'],
+    exception_codes: strings(raw, 'exception_codes', 'workboard item'),
+    declared_settlement_value: parseDeclaredSettlementValue(raw.declared_settlement_value),
+    rank_in_currency: num(raw, 'rank_in_currency', 'workboard item'),
+  };
+}
+
+function parseCurrencyWorkQueue(value: unknown): CurrencyWorkQueue {
+  const raw = object(value, 'currency work queue');
+  return {
+    currency: str(raw, 'currency', 'currency work queue'),
+    items: list(raw, 'items', 'currency work queue', parseWorkboardItem),
+  };
+}
+
+function parseUnpricedWorkItem(value: unknown): UnpricedWorkItem {
+  const raw = object(value, 'unpriced work item');
+  return {
+    decision_id: str(raw, 'decision_id', 'unpriced work item'),
+    subject_settlement_line_id: str(raw, 'subject_settlement_line_id', 'unpriced work item'),
+    status: str(raw, 'status', 'unpriced work item') as UnpricedWorkItem['status'],
+    reason: str(raw, 'reason', 'unpriced work item'),
+  };
+}
+
+function parseWorkboard(value: unknown): Workboard {
+  const raw = object(value, 'workboard');
+  return {
+    triage_version: str(raw, 'triage_version', 'workboard'),
+    prioritisation_note: str(raw, 'prioritisation_note', 'workboard'),
+    currency_queues: list(raw, 'currency_queues', 'workboard', parseCurrencyWorkQueue),
+    unpriced_items: list(raw, 'unpriced_items', 'workboard', parseUnpricedWorkItem),
+  };
+}
+
+export function parseRunWorkboard(value: unknown): RunWorkboard {
+  const raw = object(value, 'run workboard');
+  return {
+    run_id: str(raw, 'run_id', 'run workboard'),
+    snapshot_fingerprint: str(raw, 'snapshot_fingerprint', 'run workboard'),
+    workboard: parseWorkboard(raw.workboard),
   };
 }
 

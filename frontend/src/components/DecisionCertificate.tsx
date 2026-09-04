@@ -103,7 +103,13 @@ function EvidenceRow({ reference }: { reference: EvidenceReference }) {
   );
 }
 
-function ClosurePlanCard({ decision }: { decision: DecisionView }) {
+function ClosurePlanCard({
+  decision,
+  evidenceRequestHref,
+}: {
+  decision: DecisionView;
+  evidenceRequestHref?: string | undefined;
+}) {
   const plan = decision.closure_plan;
   const resolved = plan.disposition === 'NO_ACTION';
 
@@ -157,11 +163,28 @@ function ClosurePlanCard({ decision }: { decision: DecisionView }) {
         <strong>{plan.requires_new_run ? 'Closure gate' : 'Evidence rule'}</strong>
         <span>{plan.resolution_gate}</span>
       </div>
+      {plan.requires_new_run && evidenceRequestHref ? (
+        <div className="closure-plan__download">
+          <a className="button button--quiet button--small" download href={evidenceRequestHref}>
+            Download evidence request
+          </a>
+          <span>
+            Share the requested proof and acceptance condition. This does not close the line.
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-export function DecisionCertificate({ decision }: { decision: DecisionView }) {
+export function DecisionCertificate({
+  decision,
+  evidenceRequestHref,
+}: {
+  decision: DecisionView;
+  /** Available where the enclosing page knows the run that owns this decision. */
+  evidenceRequestHref?: string | undefined;
+}) {
   const unmet = decision.invariant_results.filter(
     (check) => check.outcome === 'FAILED' || check.outcome === 'INSUFFICIENT_INPUT',
   );
@@ -195,7 +218,7 @@ export function DecisionCertificate({ decision }: { decision: DecisionView }) {
         </p>
       </div>
 
-      <ClosurePlanCard decision={decision} />
+      <ClosurePlanCard decision={decision} evidenceRequestHref={evidenceRequestHref} />
 
       <Facts
         items={[

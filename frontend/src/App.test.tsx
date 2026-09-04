@@ -30,6 +30,16 @@ beforeEach(() => {
     offset: 0,
     filtered: false,
   });
+  client.getWorkboard.mockResolvedValue({
+    run_id: 'r1',
+    snapshot_fingerprint: 'f',
+    workboard: {
+      triage_version: '1.0.0',
+      prioritisation_note: 'Currencies are never converted or summed.',
+      currency_queues: [],
+      unpriced_items: [],
+    },
+  });
 });
 
 afterEach(() => {

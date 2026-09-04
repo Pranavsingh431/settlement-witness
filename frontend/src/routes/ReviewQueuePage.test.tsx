@@ -41,6 +41,10 @@ function open(): RenderResult {
 beforeEach(() => {
   vi.resetAllMocks();
   client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);
+  client.evidenceRequestDownloadUrl.mockImplementation(
+    (runId, decisionId) =>
+      `/v1/reconciliation/runs/${runId}/decisions/${decisionId}/evidence-request`,
+  );
   client.appendReviewEvent.mockResolvedValue({
     event: {
       event_id: 'new-event',
@@ -235,6 +239,17 @@ describe('the workspace', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(row).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('offers the evidence-request package beside the human workflow', async () => {
+    open();
+    const download = await screen.findByRole('link', { name: /download evidence request/i });
+
+    expect(download).toHaveAttribute(
+      'href',
+      `/v1/reconciliation/runs/${RUN.run_id}/decisions/${OPEN_ITEM.decision.decision_id}/evidence-request`,
+    );
+    expect(download).toHaveAttribute('download');
   });
 });
 
