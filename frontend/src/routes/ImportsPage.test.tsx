@@ -84,7 +84,7 @@ describe('the upload form', () => {
     ).toBeInTheDocument();
   });
 
-  it('offers the complete synthetic provider and bank sample pack for download', async () => {
+  it('offers the complete synthetic provider and bank sample pack with explicit settings', async () => {
     renderScreen(<ImportsPage />);
 
     for (const file of [
@@ -103,6 +103,20 @@ describe('the upload form', () => {
     expect(guide).toHaveTextContent(/BANK_STATEMENT/);
     expect(guide).toHaveTextContent(/BANK_TRANSACTION/);
     expect(guide).toHaveTextContent(/56 rows/);
+
+    await userEvent.click(within(guide).getByRole('button', { name: 'Use PSP_API → PAYOUT' }));
+    expect(screen.getByLabelText(/declared source system/i)).toHaveValue('PSP_API');
+    expect(screen.getByLabelText(/declared record type/i)).toHaveValue('PAYOUT');
+    expect(guide).toHaveTextContent(/ready for payouts\.csv: PSP_API → PAYOUT/i);
+
+    await userEvent.click(
+      within(guide).getByRole('button', { name: 'Use BANK_STATEMENT → BANK_TRANSACTION' }),
+    );
+    expect(screen.getByLabelText(/declared source system/i)).toHaveValue('BANK_STATEMENT');
+    expect(screen.getByLabelText(/declared record type/i)).toHaveValue('BANK_TRANSACTION');
+    expect(guide).toHaveTextContent(
+      /ready for bank_transactions\.csv: BANK_STATEMENT → BANK_TRANSACTION/i,
+    );
   });
 
   it('sends what the person declared, not anything read from the file', async () => {
@@ -209,6 +223,23 @@ describe('the receipt that comes back', () => {
     expect(await screen.findByText(/rejected, unreadable/i)).toBeInTheDocument();
     expect(screen.getByText(/no facts were written.*receipt below is still stored/i)).toBeVisible();
     expect(screen.getByText('2 row(s) could not be read')).toBeInTheDocument();
+  });
+
+  it('turns a sample schema mismatch into a clear retry instruction without hiding its audit detail', async () => {
+    client.importDocument.mockResolvedValue({
+      ...INVALID_RECEIPT,
+      failure_detail:
+        "UNEXPECTED_COLUMNS: headers do not match the PAYMENT_EVENT schema exactly; got ['payout_id']",
+    });
+    renderScreen(<ImportsPage />);
+    await screen.findByRole('button', { name: /import document/i });
+
+    await uploadFile(csvFile('payouts.csv'));
+
+    expect(await screen.findByText(/how to retry this sample/i)).toBeInTheDocument();
+    expect(screen.getByText(/this CSV does not match the type selected/i)).toBeInTheDocument();
+    expect(screen.getByText(/UNEXPECTED_COLUMNS: headers do not match/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Audit detail$/i)).toBeInTheDocument();
   });
 
   it('reports a conflicting document distinctly from an unreadable one', async () => {

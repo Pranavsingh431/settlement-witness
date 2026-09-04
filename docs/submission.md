@@ -29,9 +29,10 @@ AI suggestions outside the decision path.**
 4. **Make the next action visible.** The exception ledger names the finance
    follow-up for each finding category. Open *Evidence*, download the four
    seeded CSVs and import them in the displayed order: 180 provider records
-   plus 56 matching bank credits. Declare `PSP_API` for the first three files
-   and `BANK_STATEMENT` for the last. Never upload real merchant data to the
-   public preview.
+   plus 56 matching bank credits. Before choosing each file, press its matching
+   **Use source → type** button: it explicitly declares `PSP_API` for the first
+   three files and `BANK_STATEMENT` for the last, without guessing from the
+   filename or contents. Never upload real merchant data to the public preview.
 5. **Inspect a run.** Open the decision audit workspace and select an
    exception. The certificate shows citations, payload hashes, exception codes
    and each invariant independently.

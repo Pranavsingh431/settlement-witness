@@ -37,6 +37,7 @@ const ROW_LABELS: Record<string, string> = {
 
 export function ReceiptView({ receipt }: { receipt: ImportReceipt }) {
   const explanation = OUTCOME_EXPLANATION[receipt.outcome] ?? '';
+  const isSchemaMismatch = receipt.failure_detail?.startsWith('UNEXPECTED_COLUMNS:') ?? false;
   const problems = receipt.row_outcomes.filter(
     (row) => row.outcome === 'REJECTED' || row.outcome === 'DUPLICATE_CONFLICT',
   );
@@ -84,9 +85,20 @@ export function ReceiptView({ receipt }: { receipt: ImportReceipt }) {
         </div>
       </div>
 
+      {isSchemaMismatch ? (
+        <div className="notice notice--info">
+          <p className="notice__title">How to retry this sample</p>
+          <p className="notice__body">
+            This CSV does not match the type selected for this attempt. Return to the upload form,
+            choose the matching <strong>Use source → type</strong> action, then select the file
+            again. The exact header difference remains below as the audit detail.
+          </p>
+        </div>
+      ) : null}
+
       {receipt.failure_detail ? (
         <div className="notice notice--warn">
-          <p className="notice__title">What went wrong</p>
+          <p className="notice__title">Audit detail</p>
           <p className="notice__body">{receipt.failure_detail}</p>
         </div>
       ) : null}

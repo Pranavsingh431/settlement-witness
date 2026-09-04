@@ -863,6 +863,39 @@ code,
   text-decoration: underline;
 }
 
+.sample-configure {
+  margin-top: 7px;
+  padding: 4px 8px;
+  border: 1px solid #b4c9e1;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.73rem;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.sample-configure:hover {
+  border-color: var(--accent);
+  background: #eaf2fb;
+}
+
+.sample-configure:focus-visible {
+  outline: 3px solid #8bb8e8;
+  outline-offset: 2px;
+}
+
+.sample-ready {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-left: 3px solid var(--accent);
+  background: #eaf2fb;
+  color: #234c7f;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
 .source-guide li > div > span {
   margin-top: 2px;
   color: var(--ink-faint);

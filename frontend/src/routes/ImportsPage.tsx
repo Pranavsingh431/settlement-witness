@@ -62,6 +62,7 @@ export function ImportsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceSystem, setSourceSystem] = useState<string>('PSP_API');
   const [recordType, setRecordType] = useState<string>('PAYMENT_EVENT');
+  const [sampleReady, setSampleReady] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [receipt, setReceipt] = useState<ImportReceipt | null>(null);
   const [uploadError, setUploadError] = useState<unknown>(null);
@@ -214,6 +215,7 @@ export function ImportsPage() {
                   value={sourceSystem}
                   onChange={(event) => {
                     setSourceSystem(event.target.value);
+                    setSampleReady(null);
                   }}
                 >
                   {SOURCE_SYSTEMS.map((value) => (
@@ -237,6 +239,7 @@ export function ImportsPage() {
                   value={recordType}
                   onChange={(event) => {
                     setRecordType(event.target.value);
+                    setSampleReady(null);
                   }}
                 >
                   {IMPORTABLE_RECORD_TYPES.map((value) => (
@@ -269,8 +272,10 @@ export function ImportsPage() {
             <p className="source-guide__eyebrow">Hands-on 59-case batch</p>
             <h3>Download, then import in this order</h3>
             <p className="source-guide__summary">
-              180 provider records produce 59 decisions. The optional statement adds 56 matching
-              bank credits for the separate cash-finality check.
+              180 provider records produce 59 decisions. First choose the matching{' '}
+              <strong>Use source → type</strong> action for a sample; it fills the declaration
+              without guessing from the file. The optional statement adds 56 matching bank credits
+              for the separate cash-finality check.
             </p>
             <ol>
               {SAMPLE_FILES.map((row) => (
@@ -295,10 +300,33 @@ export function ImportsPage() {
                       <span className="mono">{row.type}</span> · {row.rows} rows
                     </span>
                     <span>{row.what}</span>
+                    <button
+                      className="sample-configure"
+                      type="button"
+                      onClick={() => {
+                        setSourceSystem(row.source);
+                        setRecordType(row.type);
+                        setSampleReady(row.file);
+                        setUploadError(null);
+                      }}
+                    >
+                      Use {row.source} → {row.type}
+                    </button>
                   </div>
                 </li>
               ))}
             </ol>
+            <p className="sample-ready" role="status">
+              {sampleReady === null ? (
+                'Choose the matching “Use source → type” action, then select that CSV.'
+              ) : (
+                <>
+                  Ready for <span className="mono">{sampleReady}</span>:{' '}
+                  <span className="mono">{sourceSystem}</span> →{' '}
+                  <span className="mono">{recordType}</span>. Now select that CSV.
+                </>
+              )}
+            </p>
             <p className="source-guide__footnote">
               Re-importing an unchanged file correctly returns a duplicate no-op receipt.
             </p>

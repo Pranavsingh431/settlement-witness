@@ -163,11 +163,12 @@ policy.
 
 Then follow the evidence from a CSV file to a decision:
 
-1. **Import evidence.** Go to *Import evidence* and upload the three documents
-   in `data/fixtures/ingestion/`, declaring the record type for each:
-   `payment_events.csv` as `PAYMENT_EVENT`, `settlement_lines.csv` as
-   `SETTLEMENT_LINE`, `payouts.csv` as `PAYOUT`. The record type and the source
-   system are declared, never guessed from the file.
+1. **Import evidence.** On *Import evidence*, download the four public synthetic
+   samples and import them in the displayed order. Before choosing each CSV,
+   press its matching **Use source → type** button: it declares `PSP_API` →
+   `PAYMENT_EVENT`, `SETTLEMENT_LINE`, or `PAYOUT` for the provider files, and
+   `BANK_STATEMENT` → `BANK_TRANSACTION` for the statement. The declaration is
+   explicit rather than guessed from a filename or header row.
 2. **Read the receipts.** Each upload returns the receipt the server recorded,
    showing what happened to every row. Upload the same file twice to see a
    `DUPLICATE_NO_OP` that writes nothing, or upload
