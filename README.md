@@ -55,6 +55,12 @@ merchant-data or production deployment. It evaluates 59 generated payment,
 settlement and payout scenarios, reports its auto-match rate and keeps every
 exception visible; see [docs/deployment.md](docs/deployment.md).
 
+The Evidence screen also provides four download-ready synthetic CSVs for the
+hands-on path: 65 payment events, 59 settlement lines, 56 payouts and 56 bank
+credits. Import them in the displayed order, create an audit, inspect the
+exception certificates and run the separate bank-finality check. Do not upload
+real merchant data to the public preview.
+
 See [docs/domain-contract.md](docs/domain-contract.md) for what the contract
 says, and the [phase reports](docs/phase-reports/) for exactly what was built and
 verified in each phase.

@@ -1,11 +1,33 @@
 /** The public Track 04 demonstration: one batch, its measures and its exceptions. */
 
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Stat, Stats } from '../components/ui';
 import { runDemoBatch } from '../api/client';
 import { describeError } from '../api/errors';
 import type { DemoBatchResult, MeasuredRate } from '../api/types';
 import { formatMinorUnits, humanise } from '../format';
+
+const OPERATOR_ACTIONS: Readonly<Record<string, string>> = {
+  AMOUNT_MISMATCH: 'Compare the capture, settlement gross and payout total before release.',
+  CURRENCY_MISMATCH:
+    'Confirm the source currency and whether an explicit conversion record exists.',
+  DUPLICATE_CONFLICT: 'Quarantine the duplicate identity and compare the conflicting payloads.',
+  FEE_MISMATCH: 'Compare fee and tax components with the provider fee schedule.',
+  INSUFFICIENT_EVIDENCE: 'Request the missing source document before making a decision.',
+  MALFORMED_RECORD: 'Correct the source export and submit the whole document again.',
+  MISSING_PAYMENT: 'Request the payment event export referenced by the settlement line.',
+  MISSING_SETTLEMENT: 'Request the settlement export or confirm that the expected window is open.',
+  OUT_OF_ORDER_EVENT: 'Verify provider timestamps and the payment lifecycle sequence.',
+  PARTIAL_REFUND: 'Account for the remaining captured balance before closing the line.',
+  TIMING_PENDING: 'Keep the line open until the settlement window expires or evidence arrives.',
+  UNMAPPED_REFERENCE: 'Resolve the provider reference against an authoritative source record.',
+  UNSUPPORTED_STATE: 'Escalate the lifecycle state without overriding the evidence-backed result.',
+};
+
+function operatorAction(code: string): string {
+  return OPERATOR_ACTIONS[code] ?? 'Inspect the cited records and request authoritative evidence.';
+}
 
 function percentage(rate: MeasuredRate): string {
   return rate.value === null ? '—' : `${(rate.value * 100).toFixed(1)}%`;
@@ -63,6 +85,13 @@ function BatchHero({ loading, onRun }: { loading: boolean; onRun: () => void }) 
               <small>matches, exceptions and missing evidence</small>
             </div>
           </li>
+          <li>
+            <span>05</span>
+            <div>
+              <strong>Bank credit finality</strong>
+              <small>exact UTR, amount and currency confirmation</small>
+            </div>
+          </li>
         </ol>
       </div>
     </section>
@@ -91,6 +120,13 @@ function TrackCriteria() {
         <p>
           <strong>AI proposes; verifier decides</strong>
           <span>Candidate links cannot resolve, alter or hide an evidence-backed decision.</span>
+        </p>
+      </div>
+      <div>
+        <span className="track-criteria__number">Cash</span>
+        <p>
+          <strong>Bank finality stays separate</strong>
+          <span>Provider agreement never masquerades as proof that the bank received funds.</span>
         </p>
       </div>
     </section>
@@ -160,8 +196,11 @@ function BatchResult({ batch }: { batch: DemoBatchResult }) {
           <ul>
             {batch.exception_breakdown.map((exception) => (
               <li key={exception.code}>
-                <span>{humanise(exception.code)}</span>
-                <strong>{formatMinorUnits(exception.finding_count)}</strong>
+                <div>
+                  <span>{humanise(exception.code)}</span>
+                  <strong>{formatMinorUnits(exception.finding_count)}</strong>
+                </div>
+                <p>{operatorAction(exception.code)}</p>
               </li>
             ))}
           </ul>
@@ -179,6 +218,48 @@ function BatchResult({ batch }: { batch: DemoBatchResult }) {
         </p>
         <p>{batch.limitation}</p>
       </footer>
+
+      <section className="hands-on-flow" aria-labelledby="hands-on-title">
+        <div>
+          <p className="eyebrow">Hands-on proof</p>
+          <h3 id="hands-on-title">Run the same sources through the operational workspace.</h3>
+          <p>
+            Download the seeded CSVs, import all four sources, create an audit and verify the bank
+            credits. The imports are synthetic and safe to repeat.
+          </p>
+        </div>
+        <ol aria-label="Hands-on workflow">
+          <li>
+            <span>1</span>
+            <div>
+              <strong>Download and import</strong>
+              <small>236 rows across provider and bank sources</small>
+            </div>
+          </li>
+          <li>
+            <span>2</span>
+            <div>
+              <strong>Create the audit</strong>
+              <small>59 settlement decisions with immutable certificates</small>
+            </div>
+          </li>
+          <li>
+            <span>3</span>
+            <div>
+              <strong>Act on the exceptions</strong>
+              <small>Acknowledge, request evidence or escalate without override</small>
+            </div>
+          </li>
+        </ol>
+        <div className="hands-on-flow__actions">
+          <Link className="button" to="/imports">
+            Open evidence intake
+          </Link>
+          <Link className="button button--quiet" to="/runs">
+            Open audit workspace
+          </Link>
+        </div>
+      </section>
     </section>
   );
 }

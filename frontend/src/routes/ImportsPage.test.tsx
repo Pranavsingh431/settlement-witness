@@ -84,12 +84,25 @@ describe('the upload form', () => {
     ).toBeInTheDocument();
   });
 
-  it('names the three documents this demo expects', async () => {
+  it('offers the complete synthetic provider and bank sample pack for download', async () => {
     renderScreen(<ImportsPage />);
 
-    expect(await screen.findByText('payment_events.csv')).toBeInTheDocument();
-    expect(screen.getByText('settlement_lines.csv')).toBeInTheDocument();
-    expect(screen.getByText('payouts.csv')).toBeInTheDocument();
+    for (const file of [
+      'payment_events.csv',
+      'settlement_lines.csv',
+      'payouts.csv',
+      'bank_transactions.csv',
+    ]) {
+      const link = await screen.findByRole('link', { name: `Download ${file}` });
+      expect(link).toHaveAttribute('href', `/samples/${file}`);
+      expect(link).toHaveAttribute('download', file);
+    }
+    expect(screen.getByText(/180 provider records produce 59 decisions/i)).toBeInTheDocument();
+    expect(screen.getByText(/56 matching bank credits/i)).toBeInTheDocument();
+    const guide = screen.getByRole('complementary', { name: /downloadable sample files/i });
+    expect(guide).toHaveTextContent(/BANK_STATEMENT/);
+    expect(guide).toHaveTextContent(/BANK_TRANSACTION/);
+    expect(guide).toHaveTextContent(/56 rows/);
   });
 
   it('sends what the person declared, not anything read from the file', async () => {

@@ -26,17 +26,23 @@ AI suggestions outside the decision path.**
    agreement and the zero false-resolution count. State the limitation on the
    page: this is a generated regression corpus, not real-merchant or
    production performance.
-4. **Inspect a run.** Open the decision audit workspace and select an
+4. **Make the next action visible.** The exception ledger names the finance
+   follow-up for each finding category. Open *Evidence*, download the four
+   seeded CSVs and import them in the displayed order: 180 provider records
+   plus 56 matching bank credits. Declare `PSP_API` for the first three files
+   and `BANK_STATEMENT` for the last. Never upload real merchant data to the
+   public preview.
+5. **Inspect a run.** Open the decision audit workspace and select an
    exception. The certificate shows citations, payload hashes, exception codes
    and each invariant independently.
-5. **Separate operations from truth.** Open the review queue and record an
+6. **Separate operations from truth.** Open the review queue and record an
    acknowledgement or request for evidence. The baseline decision stays the
    same; a human workflow event cannot convert an exception into a resolution.
-6. **Show finality separately.** Explain that provider reconciliation and a
+7. **Show finality separately.** Explain that provider reconciliation and a
    bank showing a credit are different conclusions. A bank finality audit is
    append-only and exact-reference only; it does not guess from amounts or
    dates.
-7. **Explain the AI boundary.** The model can propose opaque record links only
+8. **Explain the AI boundary.** The model can propose opaque record links only
    on a generated shadow corpus. Deterministic validation decides whether a
    proposal is admissible; no model output can create or change evidence,
    decisions, runs, reviews or bank audits.

@@ -22,13 +22,34 @@ import { EmptyState, ErrorNotice, Loading, OutcomeBadge } from '../components/ui
 
 const PAGE_SIZE = 10;
 
-const EXPECTED_FILES = [
-  { type: 'PAYMENT_EVENT', file: 'payment_events.csv', what: 'captures, refunds and chargebacks' },
-  { type: 'SETTLEMENT_LINE', file: 'settlement_lines.csv', what: 'what the provider settled' },
+const SAMPLE_FILES = [
+  {
+    type: 'PAYMENT_EVENT',
+    source: 'PSP_API',
+    file: 'payment_events.csv',
+    rows: 65,
+    what: 'captures, refunds and chargebacks',
+  },
+  {
+    type: 'SETTLEMENT_LINE',
+    source: 'PSP_API',
+    file: 'settlement_lines.csv',
+    rows: 59,
+    what: 'what the provider settled',
+  },
   {
     type: 'PAYOUT',
+    source: 'PSP_API',
     file: 'payouts.csv',
+    rows: 56,
     what: 'what was paid out, and the UTR where there is one',
+  },
+  {
+    type: 'BANK_TRANSACTION',
+    source: 'BANK_STATEMENT',
+    file: 'bank_transactions.csv',
+    rows: 56,
+    what: 'bank credits that independently support payout finality',
   },
 ] as const;
 
@@ -133,8 +154,8 @@ export function ImportsPage() {
             <p className="eyebrow">Step 1 · source document</p>
             <h2 id="upload-title">Add one CSV document</h2>
             <p>
-              The three local sample files live in{' '}
-              <span className="mono">data/fixtures/ingestion</span>.
+              Download the seeded sample sources, then import them in order. Use only synthetic data
+              in this public workspace.
             </p>
           </div>
           <span className="section-heading__meta">Receipt recorded on every attempt</span>
@@ -244,24 +265,43 @@ export function ImportsPage() {
             </div>
           </form>
 
-          <aside className="source-guide" aria-label="Local sample files">
-            <p className="source-guide__eyebrow">Local sample set</p>
-            <h3>Start with these sources</h3>
+          <aside className="source-guide" aria-label="Downloadable sample files">
+            <p className="source-guide__eyebrow">Hands-on 59-case batch</p>
+            <h3>Download, then import in this order</h3>
+            <p className="source-guide__summary">
+              180 provider records produce 59 decisions. The optional statement adds 56 matching
+              bank credits for the separate cash-finality check.
+            </p>
             <ol>
-              {EXPECTED_FILES.map((row) => (
+              {SAMPLE_FILES.map((row) => (
                 <li key={row.type}>
                   <span className="source-guide__number" aria-hidden="true">
-                    {EXPECTED_FILES.indexOf(row) + 1}
+                    {SAMPLE_FILES.indexOf(row) + 1}
                   </span>
                   <div>
-                    <strong className="mono">{row.file}</strong>
+                    <div className="source-guide__file">
+                      <strong className="mono">{row.file}</strong>
+                      <a
+                        className="sample-download"
+                        href={`/samples/${row.file}`}
+                        download={row.file}
+                        aria-label={`Download ${row.file}`}
+                      >
+                        Download
+                      </a>
+                    </div>
                     <span>
-                      <span className="mono">{row.type}</span> · {row.what}
+                      <span className="mono">{row.source}</span> →{' '}
+                      <span className="mono">{row.type}</span> · {row.rows} rows
                     </span>
+                    <span>{row.what}</span>
                   </div>
                 </li>
               ))}
             </ol>
+            <p className="source-guide__footnote">
+              Re-importing an unchanged file correctly returns a duplicate no-op receipt.
+            </p>
           </aside>
         </div>
       </section>
@@ -378,7 +418,7 @@ export function ImportsPage() {
           <EmptyState title={filtered ? 'No attempt matches these filters' : 'No imports yet'}>
             {filtered
               ? 'Widen the filters to see the rest of the history.'
-              : 'Upload one of the three demo documents above to get started.'}
+              : 'Upload one of the four synthetic sample sources above to get started.'}
           </EmptyState>
         ) : null}
 
