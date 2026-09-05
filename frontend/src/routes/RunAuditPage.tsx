@@ -133,17 +133,20 @@ export function RunAuditPage() {
             tone="unknown"
           />
         </Stats>
-        <Facts
-          items={[
-            ['Run ID', <span className="mono">{run.run_id}</span>],
-            ['Snapshot fingerprint', <span className="hash">{run.snapshot_fingerprint}</span>],
-            ['Baseline version', run.baseline_version],
-            ['Domain contract version', run.domain_schema_version],
-            ['Parser version', run.parser_version],
-            ['As of', formatTimestamp(run.as_of)],
-            ['Recorded at', formatTimestamp(run.created_at)],
-          ]}
-        />
+        <details className="technical-details">
+          <summary>Snapshot & verification details</summary>
+          <Facts
+            items={[
+              ['Run ID', <span className="mono">{run.run_id}</span>],
+              ['Snapshot fingerprint', <span className="hash">{run.snapshot_fingerprint}</span>],
+              ['Baseline version', run.baseline_version],
+              ['Domain contract version', run.domain_schema_version],
+              ['Parser version', run.parser_version],
+              ['As of', formatTimestamp(run.as_of)],
+              ['Recorded at', formatTimestamp(run.created_at)],
+            ]}
+          />
+        </details>
       </section>
 
       <WorkboardPanel

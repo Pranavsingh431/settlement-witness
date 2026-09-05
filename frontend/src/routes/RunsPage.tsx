@@ -52,7 +52,7 @@ export function RunsPage() {
       <section className="operations-hero operations-hero--audits" aria-labelledby="audits-title">
         <div>
           <p className="eyebrow">Reconciliation workspace</p>
-          <h1 id="audits-title">Turn evidence into an audit.</h1>
+          <h1 id="audits-title">Audit history</h1>
           <p>
             Reconcile the stored facts once, record the conclusion immutably, then inspect every
             line and the evidence behind it. New evidence creates a new audit; it never edits an old

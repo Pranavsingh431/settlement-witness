@@ -50,9 +50,9 @@ describe('the shell', () => {
   it('names the product and its claim', () => {
     renderScreen(<App />);
 
-    expect(screen.getByText('Settlement Witness')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Settlement Witness/ })).toBeInTheDocument();
     expect(
-      within(screen.getByRole('banner')).getByText(/batch reconciliation, made auditable/i),
+      within(screen.getByRole('banner', { name: 'Workspace' })).getByText(/finance operations/i),
     ).toBeInTheDocument();
   });
 
@@ -67,8 +67,11 @@ describe('the shell', () => {
   it('marks the section the reader is in', () => {
     renderScreen(<App />, '/imports');
 
-    expect(screen.getByRole('link', { name: 'Evidence' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Audits' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Data sources' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('link', { name: 'Audit history' })).not.toHaveAttribute('aria-current');
   });
 
   it('puts the navigation in a named landmark', () => {
@@ -79,26 +82,22 @@ describe('the shell', () => {
 });
 
 describe('routing', () => {
-  it('shows the Track 04 batch demo at the root', async () => {
+  it('shows the settlement desk at the root', async () => {
     renderScreen(<App />, '/');
 
-    expect(await screen.findByRole('heading', { name: /close the batch/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /settlement desk/i })).toBeInTheDocument();
   });
 
   it('shows the import screen', async () => {
     renderScreen(<App />, '/imports');
 
-    expect(
-      await screen.findByRole('heading', { name: /add evidence\. keep the receipt/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /data sources/i })).toBeInTheDocument();
   });
 
   it('shows the runs screen', async () => {
     renderScreen(<App />, '/runs');
 
-    expect(
-      await screen.findByRole('heading', { name: /turn evidence into an audit/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /audit history/i })).toBeInTheDocument();
   });
 
   it('shows the audit screen for one run', async () => {

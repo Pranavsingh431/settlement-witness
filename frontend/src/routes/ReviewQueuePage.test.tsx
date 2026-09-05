@@ -38,6 +38,41 @@ function open(): RenderResult {
   return renderRoute(PATTERN, <ReviewQueuePage />, AT);
 }
 
+describe('a case linked from the settlement desk', () => {
+  it('opens the named decision even when it is not on page one', async () => {
+    const offPage = {
+      ...UNKNOWN_ITEM,
+      decision: {
+        ...UNKNOWN_ITEM.decision,
+        decision_id: 'off-page',
+        subject_settlement_line_id: 'line-99',
+      },
+    };
+    client.getReviewItem.mockResolvedValue(offPage);
+    renderRoute(PATTERN, <ReviewQueuePage />, `${AT}?decision=off-page`);
+    await waitFor(() => {
+      expect(client.getReviewItem).toHaveBeenCalledWith(RUN.run_id, 'off-page');
+    });
+    expect(
+      await screen.findByText('line-99', { selector: '.review-header .mono' }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Record this action' }));
+    await waitFor(() => {
+      expect(client.appendReviewEvent).toHaveBeenCalledWith(
+        RUN.run_id,
+        'off-page',
+        expect.anything(),
+      );
+    });
+  });
+  it('never substitutes the first queue item for a missing linked case', async () => {
+    client.getReviewItem.mockRejectedValue(new ApiError(404, 'not_found', 'Case not found'));
+    renderRoute(PATTERN, <ReviewQueuePage />, `${AT}?decision=missing`);
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('button', { name: 'Record this action' })).not.toBeInTheDocument();
+  });
+});
+
 beforeEach(() => {
   vi.resetAllMocks();
   client.getReviewQueue.mockResolvedValue(REVIEW_QUEUE);

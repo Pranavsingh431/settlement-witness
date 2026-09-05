@@ -17,9 +17,14 @@
  */
 
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import { appendReviewEvent, evidenceRequestDownloadUrl, getReviewQueue } from '../api/client';
+import {
+  appendReviewEvent,
+  evidenceRequestDownloadUrl,
+  getReviewQueue,
+  getReviewItem,
+} from '../api/client';
 import { REVIEW_ACTIONS } from '../api/types';
 import type { ReviewAction, ReviewQueueItem, ReviewQueuePage } from '../api/types';
 import { describeError } from '../api/errors';
@@ -155,9 +160,8 @@ function ReviewForm({
       <fieldset className="field" disabled={busy}>
         <legend className="field__label">Record a workflow action</legend>
         <p className="field__hint">
-          None of these changes the decision above. There is no approve, resolve or override action,
-          because this system cannot settle a line from a button. A line is settled by a source
-          record that supports it, imported and reconciled into a new run.
+          Record progress on this case. These actions update the workflow only. To change the
+          financial result, add supporting evidence and reconcile a new batch.
         </p>
         {REVIEW_ACTIONS.map((option) => (
           <label key={option} className="radio">
@@ -228,6 +232,8 @@ function ReviewForm({
 
 export function ReviewQueuePage() {
   const { runId = '' } = useParams<{ runId: string }>();
+  const [params, setParams] = useSearchParams();
+  const focusedId = params.get('decision');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [reloads, setReloads] = useState(0);
@@ -235,6 +241,12 @@ export function ReviewQueuePage() {
   const queue = useLoad(
     () => getReviewQueue(runId, { limit: PAGE_SIZE, offset }),
     `${runId}|review|${String(offset)}|${String(reloads)}`,
+  );
+  // A desk link names one exact case. Fetch it directly, even when it lives
+  // beyond page one. A failed lookup must never silently open a different case.
+  const focused = useLoad(
+    () => (focusedId ? getReviewItem(runId, focusedId) : Promise.resolve(null)),
+    `${runId}|${focusedId ?? ''}|${String(reloads)}`,
   );
 
   // The last page that arrived, kept across a reload.
@@ -261,7 +273,9 @@ export function ReviewQueuePage() {
   ) {
     setSelectedId(null);
   }
-  const selected = items.find((one) => one.decision.decision_id === selectedId) ?? items[0] ?? null;
+  const selected = focusedId
+    ? focused.data
+    : (items.find((one) => one.decision.decision_id === selectedId) ?? items[0] ?? null);
 
   const total = shown?.total ?? 0;
   const onFirstPage = offset === 0;
@@ -272,6 +286,7 @@ export function ReviewQueuePage() {
     // it in one place means it also covers a page that comes back without the
     // selected item for some other reason, such as a reload after an action.
     setOffset(next);
+    setParams({}, { replace: true });
   }
 
   if (queue.loading && shown === null) {
@@ -302,8 +317,8 @@ export function ReviewQueuePage() {
         <div>
           <h1>Review queue</h1>
           <p className="page__lede">
-            The settlement lines this run did not resolve. A reviewer records what is being done
-            about each one. Nothing recorded here changes what the baseline concluded.
+            Keep track of who needs evidence and what happens next. Follow-ups record progress; they
+            do not change the settlement result.
           </p>
         </div>
         <Link className="button button--quiet button--small" to={`/runs/${runId}`}>
@@ -338,7 +353,7 @@ export function ReviewQueuePage() {
         <div className="grid grid--audit">
           <Panel
             title="Lines needing a person"
-            note="Ordered by settlement line ID. The order does not move when somebody acts on an item, so a page boundary lands in the same place on every call."
+            note="Ordered by settlement line. Recording an action keeps your place in the queue."
           >
             <div className="table-scroll">
               <table>
@@ -368,6 +383,7 @@ export function ReviewQueuePage() {
                             className="row-button mono"
                             aria-pressed={isSelected}
                             onClick={() => {
+                              setParams({}, { replace: true });
                               setSelectedId(item.decision.decision_id);
                             }}
                           >
@@ -419,6 +435,10 @@ export function ReviewQueuePage() {
             </nav>
           </Panel>
 
+          {focusedId && focused.loading ? <Loading what="the selected case" /> : null}
+          {focusedId && focused.error ? (
+            <ErrorNotice error={focused.error} onRetry={focused.reload} what="the selected case" />
+          ) : null}
           {selected === null ? null : (
             <div className="grid">
               <Panel title="Review workspace">

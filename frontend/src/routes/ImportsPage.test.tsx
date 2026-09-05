@@ -59,6 +59,19 @@ afterEach(() => {
 });
 
 describe('the upload form', () => {
+  it('offers an explicit sample preset without guessing source provenance from a filename', async () => {
+    renderScreen(<ImportsPage />);
+    const fileInput = await screen.findByLabelText('CSV document');
+    await userEvent.upload(fileInput, csvFile('bank_transactions.csv'));
+    expect(screen.getByLabelText(/declared record type/i)).toHaveValue('PAYMENT_EVENT');
+    expect(client.importDocument).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Use this sample’s settings' }));
+    expect(screen.getByLabelText(/declared source system/i)).toHaveValue('BANK_STATEMENT');
+    expect(screen.getByLabelText(/declared record type/i)).toHaveValue('BANK_TRANSACTION');
+    expect(
+      screen.queryByRole('button', { name: 'Use this sample’s settings' }),
+    ).not.toBeInTheDocument();
+  });
   it('will not submit until a file is chosen', async () => {
     renderScreen(<ImportsPage />);
 
@@ -72,7 +85,17 @@ describe('the upload form', () => {
     const options = within(select)
       .getAllByRole('option')
       .map((one) => one.textContent);
-    expect(options).toEqual(['PAYMENT_EVENT', 'SETTLEMENT_LINE', 'PAYOUT', 'BANK_TRANSACTION']);
+    expect(options).toEqual([
+      'Payments & refunds',
+      'Settlement lines',
+      'Payouts',
+      'Bank transactions',
+    ]);
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((one) => one.getAttribute('value')),
+    ).toEqual(['PAYMENT_EVENT', 'SETTLEMENT_LINE', 'PAYOUT', 'BANK_TRANSACTION']);
   });
 
   it('says plainly that neither declaration is inferred from the file', async () => {

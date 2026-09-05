@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useId, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { importDocument, listImports } from '../api/client';
 import { describeError } from '../api/errors';
@@ -21,6 +22,18 @@ import { ReceiptView } from '../components/ReceiptView';
 import { EmptyState, ErrorNotice, Loading, OutcomeBadge } from '../components/ui';
 
 const PAGE_SIZE = 10;
+const TYPE_LABELS: Record<string, string> = {
+  PAYMENT_EVENT: 'Payments & refunds',
+  SETTLEMENT_LINE: 'Settlement lines',
+  PAYOUT: 'Payouts',
+  BANK_TRANSACTION: 'Bank transactions',
+};
+const SOURCE_LABELS: Record<string, string> = {
+  PSP_API: 'Payment provider · API export',
+  PSP_WEBHOOK: 'Payment provider · webhook',
+  BANK_STATEMENT: 'Bank statement',
+  MERCHANT_LEDGER: 'Merchant ledger',
+};
 
 const SAMPLE_FILES = [
   {
@@ -116,6 +129,9 @@ export function ImportsPage() {
   const total = history.data?.total ?? 0;
   const filtered = history.data?.filtered ?? false;
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+  const namedSample = SAMPLE_FILES.find((sample) => sample.file === file?.name);
+  const suggestSample =
+    namedSample && (namedSample.type !== recordType || namedSample.source !== sourceSystem);
 
   return (
     <>
@@ -124,11 +140,11 @@ export function ImportsPage() {
         aria-labelledby="evidence-title"
       >
         <div>
-          <p className="eyebrow">Evidence intake</p>
-          <h1 id="evidence-title">Add evidence. Keep the receipt.</h1>
+          <p className="eyebrow">Your records</p>
+          <h1 id="evidence-title">Data sources</h1>
           <p>
-            Declare where a CSV came from and what it represents. The importer checks that claim,
-            writes immutable facts only when it can, and records the outcome either way.
+            Add payment, settlement, payout and bank-statement files. Every import has a receipt, so
+            you can see exactly what was added and what needs fixing.
           </p>
         </div>
         <ol className="operations-path" aria-label="Evidence intake steps">
@@ -148,6 +164,16 @@ export function ImportsPage() {
           </li>
         </ol>
       </section>
+
+      <div className="source-next-step">
+        <p>
+          <strong>Want to explore first?</strong> Load all four sample files together from the
+          settlement desk.
+        </p>
+        <Link className="button button--quiet button--small" to="/">
+          Open settlement desk →
+        </Link>
+      </div>
 
       <section className="evidence-intake" aria-labelledby="upload-title">
         <header className="section-heading">
@@ -205,6 +231,27 @@ export function ImportsPage() {
               </div>
             </div>
 
+            {suggestSample ? (
+              <div className="sample-suggestion" role="note">
+                <p>
+                  <strong>Using our {TYPE_LABELS[namedSample.type]?.toLowerCase()} sample?</strong>{' '}
+                  This filename matches it, but your selected settings differ. Use the preset only
+                  if this is the downloaded sample.
+                </p>
+                <button
+                  type="button"
+                  className="button button--quiet button--small"
+                  onClick={() => {
+                    setSourceSystem(namedSample.source);
+                    setRecordType(namedSample.type);
+                    setSampleReady(namedSample.file);
+                  }}
+                >
+                  Use this sample’s settings
+                </button>
+              </div>
+            ) : null}
+
             <div className="form-row evidence-intake__fields">
               <div className="field">
                 <label className="field__label" htmlFor={systemId}>
@@ -220,7 +267,7 @@ export function ImportsPage() {
                 >
                   {SOURCE_SYSTEMS.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {SOURCE_LABELS[value]}
                     </option>
                   ))}
                 </select>
@@ -244,7 +291,7 @@ export function ImportsPage() {
                 >
                   {IMPORTABLE_RECORD_TYPES.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {TYPE_LABELS[value]}
                     </option>
                   ))}
                 </select>

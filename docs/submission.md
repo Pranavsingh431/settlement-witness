@@ -16,19 +16,21 @@ required evidence and a verifier-enforced closure gate.**
 1. **Start with the problem.** Payment, settlement and payout records can
    appear internally consistent while still needing an auditable explanation.
    A green match without its evidence is not enough for a finance operator.
-2. **Run the Track 04 batch.** On the landing page, choose *Run the 59-case
-   batch*. It generates 59 synthetic payment, settlement and payout scenarios,
-   imports them through the real strict parser into a fresh temporary database,
-   and reconciles them through the real baseline. No reviewer file is uploaded
-   and the shared application database is not changed.
-3. **Read the measures.** Show the throughput, the 32/59 auto-match rate, the
-   full list of 27 lines that did not auto-resolve, the strict contract
-   agreement and the zero false-resolution count. State the limitation on the
-   page: this is a generated regression corpus, not real-merchant or
-   production performance.
-4. **Make the next action testable.** Expand an exception in the ledger. Its
+2. **Start a working batch.** On Overview, choose *Explore a sample business*.
+   This imports four fixed sample documents (236 records) into the shared
+   application workspace, reconciles 59 settlement lines, and records a separate
+   bank-credit check. Previously accepted sample records are reused safely.
+   If a batch already exists, the desk opens its real recorded results immediately.
+3. **Read the results.** Show the 32/59 auto-match rate and the full list of
+   27 unresolved lines. The desk's rates describe this recorded batch, not
+   accuracy against an independent oracle. For throughput and measured contract
+   agreement, open *Benchmark* and run its isolated 59-scenario evaluation.
+   That benchmark uses a fresh temporary database and does not change the shared
+   workspace. Both use generated data, not a representative production dataset.
+4. **Make the next action testable.** Open an issue in the attention inbox. Its
    close plan names the owning finance lane, the next action, the exact proof
-   required and whether the current verifier can check it. Open *Evidence*,
+   required and whether the current verifier can check it. Download its plain-text
+   evidence request, or open *Record a follow-up* on that exact case. Open *Data sources*,
    download the four seeded CSVs and import them in the displayed order: 180
    provider records plus 56 matching bank credits. Before choosing each file,
    press its matching **Use source → type** button: it explicitly declares
