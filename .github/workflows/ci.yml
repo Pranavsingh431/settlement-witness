@@ -185,6 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --detach --name backend-check \
+            --env SW_APP_ENV=ci \
             --publish 8000:8000 \
             settlement-witness-backend:ci
           docker run --detach --name frontend-check \
